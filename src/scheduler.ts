@@ -23,7 +23,7 @@ export function startScheduler(): void {
   const jobs = [
     { cron: config.schedule.boss,    channel: 'boss' as Channel,    label: 'BOSS直聘' },
     { cron: config.schedule.maimai,  channel: 'maimai' as Channel,  label: '脉脉'     },
-    { cron: config.schedule.followup, channel: 'boss' as Channel,   label: '跟进未回复（BOSS）' },
+    { cron: config.schedule.followup, channel: 'followup' as Channel, label: '跟进未回复' },
   ];
 
   for (const job of jobs) {

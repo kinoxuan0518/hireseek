@@ -5,7 +5,7 @@ description: Boss直聘自动招聘技能（带缓存）：智能存储职位配
 
 # Boss直聘自动招聘技能（v7.3）
 
-版本：7.3.3-feishu-sync-desensitized | 更新日期：2026-03-04
+版本：7.3.3 | 更新日期：2026-03-01
 
 ## 设计原则
 
@@ -56,7 +56,7 @@ description: Boss直聘自动招聘技能（带缓存）：智能存储职位配
 ### 执行优先级补充（筛选前置）
 - 优先把可映射规则下推到页面 `筛选` 面板（经验/学历/院校/关键词/活跃度等），再做脚本精筛。
 - 页面可筛条件视为"第一层过滤"，脚本硬筛与评分视为"第二层过滤"（兜底与精排）。
-- 无法在页面精确表达的条件（如 `QS100`、目标公司名单、复杂 AI 技能组合）必须保留脚本判断。
+- 无法在页面精确表达的条件（如特定院校名单、目标公司名单、复杂技能组合）必须保留脚本判断。
 
 ### 执行稳定性补充（v7.3.2）
 - 页签识别仅使用 `li.tab-item`（或等价稳定选择器），禁止用通用 `li` 文本匹配，避免把候选人卡片误判为页签。
@@ -118,7 +118,7 @@ description: Boss直聘自动招聘技能（带缓存）：智能存储职位配
       "enabled": true,
       "clear_last_filter_first": true,
       "experience_primary": ["1-3年", "3-5年"],
-      "experience_campus_fallback": ["在校/应届", "25年毕业", "26年毕业"],
+      "experience_campus_fallback": ["在校/应届"],
       "school_tags": ["985", "国内外名校"],
       "education_tags": ["本科", "硕士", "博士"],
       "keyword_bridge": true,
@@ -129,14 +129,14 @@ description: Boss直聘自动招聘技能（带缓存）：智能存储职位配
   "jobs": [
     {
       "job_id": "job_001",
-      "job_name": "AI算法工程师",
+      "job_name": "示例岗位名称",
       "priority": "high",
       "rule_overrides": {
         "ai_skill_policy": {
-          "keywords": ["LLM", "RAG", "Agent"]
+          "keywords": ["关键词A", "关键词B", "关键词C"]
         },
         "ui_prefilter_policy": {
-          "keyword_tags": ["大模型", "机器学习", "自然语言处理"]
+          "keyword_tags": ["平台关键词1", "平台关键词2", "平台关键词3"]
         }
       },
       "stats": { "total_contacted": 0, "total_skipped": 0, "last_processed": null }
@@ -144,6 +144,8 @@ description: Boss直聘自动招聘技能（带缓存）：智能存储职位配
   ]
 }
 ```
+
+> **配置说明**：`jobs[].rule_overrides` 只填与全局默认不同的项。职位名称、关键词、筛选标签根据你的实际 JD 填写。
 
 ### 有效规则计算
 运行时统一使用深度合并：
@@ -187,15 +189,15 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 3. **仅对新增/变更职位**进入详情页，解析：
    - 岗位职责与任职要求
    - 必备技能与加分技能
-   - 技术关键词（PyTorch、LangChain、RAG 等）
-   - 业务关键词（推荐系统、NLP、CV 等）
+   - 技术关键词
+   - 业务关键词
 4. 将解析结果与用户确认的偏好写入 `jobs[].rule_overrides`（只存差异项）
 5. 展示职位配置总览，区分"缓存职位"和"新增职位"
 
 **必问项（每个新增职位）**：
 - 学校硬性要求？（985/QS100/211/不限）
 - 公司背景要求？（硬性/优先/不限，具体公司列表）
-- 专业领域经验？（Agent/RAG/LLM微调等）
+- 专业领域经验？（与岗位相关的细分方向）
 - 筛选阈值？（60/70/80 分）
 - 是否开启应届补充轮？（默认开启，仅在学校+技能+公司背景同时满足时放行）
 - 处理优先级？（高/中/低）
@@ -222,16 +224,16 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 | 规则来源 | 页面筛选项 | 执行说明 |
 |----------|------------|----------|
 | `experience_policy.required_range=[1,5]` | `经验要求` 选 `1-3年` + `3-5年` | 已验证可多选 |
-| `school_policy.required_tiers` 含 `985`/`QS100` | `院校` 选 `985` + `国内外名校` | `QS100` 用平台近似项代理，脚本再兜底 |
-| `school_policy.bachelor_only=true` | `学历要求` 至少选 `本科` | 若职位更高可覆写为 `硕士/博士` |
-| `ai_skill_policy.ai_skill_required=true` | `牛人关键词` 选 3-4 个高相关词 | 从关键词桥接词典映射（如 LLM->大模型） |
+| `school_policy.required_tiers` 含 `985`/`QS100` | `院校` 选 `985` + `国内外名校` | 脚本再兜底精确判断 |
+| `school_policy.bachelor_only=true` | `学历要求` 至少选 `本科` | 若职位更高可覆写 |
+| `ai_skill_policy.ai_skill_required=true` | `牛人关键词` 选 3-4 个高相关词 | 从关键词桥接词典映射 |
 | `ui_prefilter_policy.recent_unviewed` | `近期没有看过` 选 `近14天没有` | 减少重复触达 |
 
 4. 校验关键标签处于激活状态；未生效则重试 1 次并记录异常。
 
 经验双通道策略（默认）：
 - **主通道**：先跑 `1-3年` + `3-5年`，满足"优先有经验"。
-- **补充通道**：仅当 `campus_exception_enabled=true` 且主通道候选人不足时，再切换到应届选项（`在校/应届`/毕业年份）；此通道必须同时满足"学校+AI技能+目标公司背景"才允许打招呼。
+- **补充通道**：仅当 `campus_exception_enabled=true` 且主通道候选人不足时，再切换到应届选项；此通道必须同时满足"学校+技能+公司背景"才允许打招呼。
 
 #### 2.3 批量收集与精筛（第二层过滤，每批 10-15 人）
 
@@ -240,16 +242,16 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 - 仅处理"可见区域候选人卡片 + 存在可操作按钮（打招呼/联系Ta）"的元素。
 - 出现 `暂无符合牛人，为你推荐` 时，记录 `strict_pool_empty`，继续处理同页签推荐流。
 
-**硬性筛选**（按优先级依次淘汰，页面筛选结果仍需脚本兜底）：
+**硬性筛选**（按优先级依次淘汰）：
 
 | 优先级 | 筛选项 | 规则 |
 |--------|--------|------|
 | 1 | 已联系检查 | 按钮显示"继续沟通" → 直接跳过 |
-| 2 | AI 技能要求 | `ai_skill_required=true` 时必须命中 AI 关键词 |
-| 3 | 学校/学历要求 | 来自 effective_rules.school_policy（含 QS100 兜底判断） |
+| 2 | 技能要求 | `ai_skill_required=true` 时必须命中技能关键词 |
+| 3 | 学校/学历要求 | 来自 effective_rules.school_policy |
 | 4 | 经验要求 | 优先 1-5 年；应届仅在例外规则满足时放行 |
-| 5 | 专业要求 | 非计算机相关专业 → 跳过 |
-| 6 | 地点一致性 | 候选人期望城市与职位城市不一致时默认跳过（可由职位覆盖放宽） |
+| 5 | 专业要求 | 非相关专业 → 跳过 |
+| 6 | 地点一致性 | 候选人期望城市与职位城市不一致时默认跳过 |
 | 7 | 公司背景 | 来自 effective_rules 或职位覆盖的公司要求 |
 
 **评分排序**（通过硬性筛选的候选人，总分 100 分）：
@@ -258,12 +260,14 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 
 | 维度 | 满分 | 说明 |
 |------|------|------|
-| **学校层级**（共享） | 25分 | QS Top50=25, C9=22, QS51-100=20, 985=17, QS101-200=13 |
-| **公司匹配**（共享） | 30分 | 目标公司在职=30, 目标公司历史=26, 相关大厂=19, 其他优质=11 |
+| **学校层级**（共享） | 25分 | 按院校分级评分，详见 `global_rule_defaults.school_policy` |
+| **公司匹配**（共享） | 30分 | 按目标公司匹配度评分，详见职位 `rule_overrides` |
 | 活跃度（触达专用） | 25分 | 在线=25, 1小时内=21, 今日=17, 本周=12, 其他=7 |
 | 求职意愿（触达专用） | 20分 | 离职随时=20, 在职考虑=16, 月内到岗=12, 暂不考虑=6 |
 
 按总分排序，联系 Top 3-5 候选人。
+
+> 具体分段映射由各公司根据自身偏好在缓存 `rule_overrides` 中配置。
 
 #### 2.4 执行打招呼
 - 点击"打招呼"按钮 → 等待弹窗 → 发送预设消息 → 确认按钮变为"继续沟通"
@@ -277,13 +281,13 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 
 #### 2.6 切换页签与职位
 - `main_only` 模式：默认处理 `推荐 + 最新`；仅在用户明确要求时处理 `精选`
-- 当 `推荐` 与 `最新` 均满足终止信号（没有更多/滚动稳定/noContactStreak）后，才切下一个职位
+- 当 `推荐` 与 `最新` 均满足终止信号后，才切下一个职位
 - `full` 模式：主页面完成后继续处理"新牛人"等扩展页签
 - 所有职位处理完毕后进入阶段3
 
 #### 2.7 实时记录
 - 每个职位处理完后更新缓存中的 stats 字段
-- 静默记录遍历/筛选/操作/评分指标用于复盘（含前置筛选命中与回退次数）
+- 静默记录遍历/筛选/操作/评分指标用于复盘
 
 ---
 
@@ -296,7 +300,6 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 - 终止原因与风控事件（上限触发、频率告警、人工中断）
 - 解析质量异常批次需附"可信度下降"提示
 - 与上次执行的历史对比
-- 外部同步状态（如飞书多维表格同步成功/失败/重试次数）
 
 ### 4.2 自动复盘（任务完成后主动输出）
 
@@ -307,9 +310,7 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 - **操作效率**：批次大小、失败次数、重试次数、退避次数、幂等跳过次数
 - **评分分布**：90+/80-89/70-79/60-69 各档人数与平均分
 - **风控事件**：每日上限触发、频率告警、人工中断
-- **页签耗尽指标**：`tab_exhausted_map`、`no_contact_streak_max`、`strict_pool_empty_hits`
 - **解析质量**：姓名/关键字段解析失败率、批次可信度状态
-- **联系留痕样本**：候选人指纹、规则标签、触发摘要
 
 #### 异常检测规则
 
@@ -321,28 +322,20 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 | 覆盖率不足 | 终止原因非"没有更多" | 检查终止逻辑 |
 | 按钮识别异常 | 失败>5次 | 增加等待时间 |
 | 联系失败率高 | >10% | 检查账号状态/沟通上限 |
-| 高分候选人少 | 90+占比<10%且联系>10人 | 扩展目标公司列表 |
-| 候选人质量低 | 联系候选人平均分<75 | 提高联系阈值 |
 | 频率退避过多 | rate_limit_hits 过高 | 增大批次间隔 |
-| 解析质量差 | 解析失败率>20% | 标记批次可信度下降 |
-| 幂等失效 | 同一候选人重复点击比例偏高 | 检查按钮状态校验逻辑 |
-| 前置筛选失效 | 面板应用成功率<90% | 校验筛选弹窗状态与标签激活检测 |
-| 页签识别异常 | 当前页签与实际处理数据不一致 | 强制改用 `li.tab-item` 选择器并校验 `curr` 状态 |
-| 严格池过早耗尽 | 高频出现 `暂无符合牛人，为你推荐` | 检查前置筛选是否过严，必要时放宽关键词或经验段 |
 
 #### 复盘报告输出
 - 每个职位的 4 维度评分（遍历/筛选/操作/候选人质量，各 5 分制）
-- 检测到的异常与优化建议（含预期效果和实施难度）
+- 检测到的异常与优化建议
 - 与历史执行的对比分析
-- 下次执行行动计划（立即/短期/长期）
+- 下次执行行动计划
 
-报告模板和数据结构见 `references/`（生成报告时 view）：
+报告模板和数据结构见 `references/`：
 - `references/execution_metrics_template.json` — 执行指标完整结构
-- `references/auto_reflection_report_template.md` — 复盘报告模板
 - `references/evolution_history_template.json` — 进化历史结构
 
 ### 4.3 更新进化历史
-将本次复盘结果追加到 `${BOSSZHIBIN_CACHE_DIR:-~/.hireclaw/bosszhibin_cache}/evolution_history.json`，下次执行时自动加载用于对比分析。
+将本次复盘结果追加到 `${BOSSZHIBIN_CACHE_DIR:-~/.hireclaw/bosszhibin_cache}/evolution_history.json`。
 
 ---
 
@@ -355,33 +348,23 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 - `interaction_log`：每次打招呼/沟通动作留痕
 - `job_funnel_daily`：职位级日汇总指标
 
-### 5.2 写入时机
-- 每处理完一个职位后：写入职位漏斗汇总 + 当轮候选人触达记录
-- 任务结束后：写入全局执行摘要（可追加到 `job_funnel_daily` 或独立统计表）
-
-### 5.3 幂等与一致性
+### 5.2 幂等与一致性
 - 主档去重键：`candidate_fingerprint`（建议 `name|school|company|job_id`）
 - 交互去重键：`interaction_fingerprint`（建议 `candidate_fingerprint|action_time|action_type`）
-- 写入前先查重，命中则更新，不命中则新建
 
-### 5.4 失败策略
-- `fail_open=true`：飞书写入失败不阻塞招聘主流程，只记录异常并在总结中提示
-- 对 429/5xx 做指数退避重试（建议 1s/2s/4s，最多 3 次）
-- 连续失败超过阈值后停止同步，避免拖慢主任务
+### 5.3 失败策略
+- `fail_open=true`：飞书写入失败不阻塞招聘主流程
+- 对 429/5xx 做指数退避重试（1s/2s/4s，最多 3 次）
 
-### 5.5 鉴权与安全
-- `tenant_access_token` 仅从环境变量或密钥管理读取，禁止写入仓库
-- 建议环境变量：
-  - `FEISHU_APP_ID`
-  - `FEISHU_APP_SECRET`
-  - `FEISHU_BITABLE_APP_TOKEN`
-  - `FEISHU_TABLE_CANDIDATE_MASTER`
-  - `FEISHU_TABLE_INTERACTION_LOG`
-  - `FEISHU_TABLE_JOB_FUNNEL_DAILY`
-
-### 5.6 LLM 工具配置文档
-- 详细配置与数据通信示例见：`references/feishu_bitable_llm_setup.md`
-- 通用同步脚本：`scripts/feishu_candidate_sync.py`
+### 5.4 鉴权（环境变量）
+```
+FEISHU_APP_ID=
+FEISHU_APP_SECRET=
+FEISHU_BITABLE_APP_TOKEN=
+FEISHU_TABLE_CANDIDATE_MASTER=
+FEISHU_TABLE_INTERACTION_LOG=
+FEISHU_TABLE_JOB_FUNNEL_DAILY=
+```
 
 ---
 
@@ -407,12 +390,11 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 | 编辑缓存 | 优先修改全局默认，必要时设置职位覆盖 |
 | 清除缓存 | 删除所有缓存（需用户确认） |
 | 导出缓存 | 支持 JSON/Excel/Markdown |
-| 导入缓存 | 从备份恢复 |
 
 ---
 
 ## 八、重要提醒
 
-**限制**：无法绕过平台每日沟通上限；无法自动回复候选人消息；平台无直接 `QS100` 与目标公司名单筛选；筛选基于列表信息可能遗漏部分优质候选人；需人工最终决策。
+**限制**：无法绕过平台每日沟通上限；无法自动回复候选人消息；平台无直接目标公司名单筛选；筛选基于列表信息可能遗漏部分优质候选人；需人工最终决策。
 
 **价值**：简历筛选效率提升 10 倍以上；标准化筛选减少人为偏差；及时触达新候选人；数据化招聘过程便于分析优化；自动复盘持续进化。

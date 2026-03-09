@@ -17,15 +17,17 @@ const TASK_PROMPT = (channelLabel: string) => `
 `.trim();
 
 const CHANNEL_LABEL: Record<Channel, string> = {
-  boss: 'BOSS直聘',
-  maimai: '脉脉',
+  boss:     'BOSS直聘',
+  maimai:   '脉脉',
   linkedin: 'LinkedIn',
+  followup: '跟进未回复',
 };
 
 const CHANNEL_URL: Record<Channel, string> = {
-  boss: 'https://www.zhipin.com/web/employer/talent/recommend',
-  maimai: 'https://maimai.cn/web/search_center',
+  boss:     'https://www.zhipin.com/web/employer/talent/recommend',
+  maimai:   'https://maimai.cn/ent/v41/recruit/talents?tab=1',
   linkedin: 'https://www.linkedin.com/talent/hire',
+  followup: 'https://www.zhipin.com/web/im/',
 };
 
 export async function runChannel(

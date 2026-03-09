@@ -1,4 +1,4 @@
-export type Channel = 'boss' | 'maimai' | 'linkedin';
+export type Channel = 'boss' | 'maimai' | 'linkedin' | 'followup';
 
 export interface Job {
   id: string;

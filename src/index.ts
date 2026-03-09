@@ -5,17 +5,18 @@ import { runChannel } from './orchestrator';
 import { db } from './db';
 import type { Channel } from './types';
 
-const CHANNELS: Channel[] = ['boss', 'maimai', 'linkedin'];
+const CHANNELS: Channel[] = ['boss', 'maimai', 'linkedin', 'followup'];
 
 const USAGE = `
 用法:
-  npm run dev run <渠道>   立即触发一次 sourcing
+  npm run dev run <渠道>   立即触发一次任务
   npm run dev start        启动守护进程（按计划自动运行）
 
-渠道: boss | maimai | linkedin
+渠道: boss | maimai | linkedin | followup
 
 示例:
   npm run dev run boss
+  npm run dev run followup
   npm run dev start
 `.trim();
 
