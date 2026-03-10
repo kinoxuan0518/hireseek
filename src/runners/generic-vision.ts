@@ -6,12 +6,21 @@
  * 模型通过函数调用输出动作，Runner 用 Playwright 执行，再截图回传。
  */
 
+import fs from 'fs';
 import OpenAI from 'openai';
 import { Page } from 'playwright';
 import { takeScreenshot, executeAction } from '../browser-runner';
 import { parseSkillSummary } from './interface';
 import type { LLMRunner } from './interface';
 import type { SkillResult } from '../types';
+
+const SCREENSHOT_PATH = '/tmp/hireclaw-latest.jpg';
+
+function saveScreenshot(base64: string): void {
+  try {
+    fs.writeFileSync(SCREENSHOT_PATH, Buffer.from(base64, 'base64'));
+  } catch {}
+}
 
 // ── 通用 computer-use 工具定义（OpenAI function calling 格式）────────────
 const COMPUTER_TOOL: OpenAI.ChatCompletionTool = {
@@ -225,6 +234,11 @@ export class GenericVisionRunner implements LLMRunner {
         }
       }
 
+      // 打印 LLM 的推理文字（它在想什么）
+      if (msg.content) {
+        onProgress?.(`💭 ${msg.content}`);
+      }
+
       messages.push(msg);
 
       // 没有工具调用 → 任务完成，msg.content 是最终总结
@@ -275,6 +289,12 @@ export class GenericVisionRunner implements LLMRunner {
             }
           }
           imgData = await takeScreenshot(page);
+        }
+
+        // 保存最新截图供用户查看
+        saveScreenshot(imgData);
+        if (turn === 0) {
+          onProgress?.(`📸 实时截图：${SCREENSHOT_PATH}`);
         }
 
         // 把截图作为工具结果回传（text 形式嵌入 base64，兼容性最好）
