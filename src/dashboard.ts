@@ -5,7 +5,7 @@
 
 import http from 'http';
 import { exec } from 'child_process';
-import { bus } from './events';
+import { bus, pushIntervention } from './events';
 import { db } from './db';
 import { loadActiveJob } from './skills/loader';
 import { runChannel, runJob, scanInbox } from './orchestrator';
@@ -84,6 +84,9 @@ const HTML = `<!DOCTYPE html>
 
 <footer>
   <span style="color:#4b5563;font-size:11px;">localhost:${PORT}</span>
+  <input id="intervene-input" type="text" placeholder="介入指令，如：跳过这个人 / 停止任务 / 只联系985..."
+    style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:4px;color:#e0e0e0;padding:5px 10px;font-family:inherit;font-size:12px;outline:none;">
+  <button class="btn" onclick="sendIntervention()">发送介入</button>
 </footer>
 
 <script>
@@ -148,6 +151,18 @@ async function triggerScan() {
   addLog('→ 触发 scan', 'info');
   await fetch('/scan', { method:'POST' });
 }
+
+async function sendIntervention() {
+  const input = document.getElementById('intervene-input');
+  const text = input.value.trim();
+  if (!text) return;
+  await fetch('/intervene', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message: text }) });
+  addLog('📩 你：' + text, 'ok');
+  input.value = '';
+}
+document.getElementById('intervene-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendIntervention();
+});
 
 loadFunnel();
 </script>
@@ -230,6 +245,18 @@ function router(req: http.IncomingMessage, res: http.ServerResponse): void {
       } catch (e: any) {
         bus.emit('log', `✗ 错误: ${e.message}`);
       }
+    });
+    return;
+  }
+
+  // POST /intervene
+  if (req.method === 'POST' && url === '/intervene') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      const { message } = body ? JSON.parse(body) : {};
+      if (message) pushIntervention(message);
+      res.writeHead(200); res.end();
     });
     return;
   }

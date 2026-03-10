@@ -8,7 +8,7 @@
 
 import fs from 'fs';
 import OpenAI from 'openai';
-import { emitLog } from '../events';
+import { emitLog, popIntervention } from '../events';
 import { Page } from 'playwright';
 import { takeScreenshot, executeAction } from '../browser-runner';
 import { parseSkillSummary } from './interface';
@@ -216,6 +216,15 @@ export class GenericVisionRunner implements LLMRunner {
     const result: SkillResult = { contacted: 0, skipped: 0, candidates: [], summary: '' };
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
+      // 检查用户介入指令
+      const intervention = popIntervention();
+      if (intervention) {
+        const msg = `[用户介入] ${intervention}`;
+        onProgress?.(`📩 ${msg}`);
+        emitLog(`📩 ${msg}`);
+        messages.push({ role: 'user', content: msg });
+      }
+
       const response = await this.client.chat.completions.create({
         model:    this.model,
         messages: pruneImages(messages, 2),

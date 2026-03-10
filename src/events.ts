@@ -17,3 +17,15 @@ export function emitScreenshot(base64: string): void {
 export function emitStatus(status: 'idle' | 'running'): void {
   bus.emit('status', status);
 }
+
+// ── 介入队列 ──────────────────────────────────────────────
+const interventionQueue: string[] = [];
+
+export function pushIntervention(msg: string): void {
+  interventionQueue.push(msg);
+  bus.emit('log', `📩 收到介入指令：${msg}`);
+}
+
+export function popIntervention(): string | undefined {
+  return interventionQueue.shift();
+}
