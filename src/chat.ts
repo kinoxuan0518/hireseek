@@ -102,6 +102,24 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'write_file',
+      description: '更新 workspace 下的策略文件，如话术指南、评估标准、招聘知识库等。',
+      parameters: {
+        type: 'object',
+        required: ['filename', 'content'],
+        properties: {
+          filename: {
+            type: 'string',
+            description: '相对于 workspace/ 的文件路径，如 references/outreach-guide.md',
+          },
+          content: { type: 'string', description: '文件的完整新内容' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'search_candidate',
       description: '在数据库中查找候选人信息。',
       parameters: {
@@ -175,6 +193,16 @@ async function executeTool(name: string, args: any): Promise<string> {
       fs.writeFileSync(envPath, content.trim() + '\n');
       process.env[args.key] = args.value;
       return `已保存：${args.key}`;
+    }
+
+    case 'write_file': {
+      const target = path.join(process.cwd(), 'workspace', args.filename);
+      // 只允许写 workspace/ 下的文件，防止越权
+      const wsRoot = path.join(process.cwd(), 'workspace');
+      if (!target.startsWith(wsRoot)) return '不允许写 workspace 以外的文件';
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, args.content, 'utf-8');
+      return `已更新：workspace/${args.filename}`;
     }
 
     case 'search_candidate': {
@@ -292,6 +320,15 @@ export async function startChat(): Promise<void> {
 
   console.log(chalk.cyan('\n🦞 HireClaw 对话模式'));
   console.log(chalk.gray('直接说话，输入 exit 退出\n'));
+
+  // Ctrl+C 也触发记忆保存
+  process.once('SIGINT', async () => {
+    console.log(chalk.gray('\n\n正在保存本次对话记忆...'));
+    await saveConversationMemory(client, model, messages);
+    console.log(chalk.gray('再见！\n'));
+    rl.close();
+    process.exit(0);
+  });
 
   const ask = (): void => {
     rl.question(chalk.green('你: '), async (input) => {
