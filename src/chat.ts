@@ -6,6 +6,7 @@
 import readline from 'readline';
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 import OpenAI from 'openai';
 import chalk from 'chalk';
 import { config } from './config';
@@ -95,6 +96,44 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
         properties: {
           key:   { type: 'string', description: '配置项名称，如 SEARCH_PROVIDER、SEARCH_API_KEY' },
           value: { type: 'string', description: '配置值' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_code',
+      description: '读取 src/ 目录下的源代码文件。用于了解自己的实现，再决定如何修改。',
+      parameters: {
+        type: 'object',
+        required: ['filename'],
+        properties: {
+          filename: {
+            type: 'string',
+            description: '相对于 src/ 的文件路径，如 chat.ts 或 runners/generic-vision.ts',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_code',
+      description: '修改 src/ 目录下的源代码文件。写完自动做 TypeScript 校验，有错误会告诉你。修改前必须先用 read_code 读取当前内容。',
+      parameters: {
+        type: 'object',
+        required: ['filename', 'content'],
+        properties: {
+          filename: {
+            type: 'string',
+            description: '相对于 src/ 的文件路径，如 chat.ts',
+          },
+          content: {
+            type: 'string',
+            description: '文件的完整新内容',
+          },
         },
       },
     },
@@ -231,6 +270,38 @@ async function executeTool(name: string, args: any): Promise<string> {
       fs.writeFileSync(envPath, content.trim() + '\n');
       process.env[args.key] = args.value;
       return `已保存：${args.key}`;
+    }
+
+    case 'read_code': {
+      const target = path.join(process.cwd(), 'src', args.filename);
+      const srcRoot = path.join(process.cwd(), 'src');
+      if (!target.startsWith(srcRoot)) return '不允许读 src/ 以外的文件';
+      if (!fs.existsSync(target)) return `文件不存在：src/${args.filename}`;
+      return fs.readFileSync(target, 'utf-8');
+    }
+
+    case 'write_code': {
+      const target = path.join(process.cwd(), 'src', args.filename);
+      const srcRoot = path.join(process.cwd(), 'src');
+      if (!target.startsWith(srcRoot)) return '不允许写 src/ 以外的文件';
+
+      // 备份原文件
+      const backup = fs.existsSync(target) ? fs.readFileSync(target, 'utf-8') : null;
+
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, args.content, 'utf-8');
+
+      // TypeScript 校验
+      try {
+        execSync('npx tsc --noEmit', { cwd: process.cwd(), stdio: 'pipe' });
+        return `✓ 已写入 src/${args.filename}，TypeScript 校验通过。`;
+      } catch (e: any) {
+        // 校验失败，回滚
+        if (backup !== null) fs.writeFileSync(target, backup);
+        else fs.unlinkSync(target);
+        const errors = e.stdout?.toString() || e.stderr?.toString() || e.message;
+        return `✗ TypeScript 校验失败，已自动回滚。错误：\n${errors.slice(0, 800)}`;
+      }
     }
 
     case 'read_file': {
