@@ -102,6 +102,44 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'read_file',
+      description: '读取 workspace 下的文件内容，如话术指南、候选人评估标准、招聘知识库等。',
+      parameters: {
+        type: 'object',
+        required: ['filename'],
+        properties: {
+          filename: {
+            type: 'string',
+            description: '相对于 workspace/ 的文件路径，如 references/outreach-guide.md',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_candidates',
+      description: '按状态列出候选人，如查看所有未回复、已面试的候选人。',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: {
+            type: 'string',
+            enum: ['contacted', 'replied', 'interviewed', 'offered', 'joined', 'rejected', 'dropped'],
+            description: '候选人状态，不填则列出所有',
+          },
+          limit: {
+            type: 'number',
+            description: '最多返回几条，默认 20',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'write_file',
       description: '更新 workspace 下的策略文件，如话术指南、评估标准、招聘知识库等。',
       parameters: {
@@ -193,6 +231,25 @@ async function executeTool(name: string, args: any): Promise<string> {
       fs.writeFileSync(envPath, content.trim() + '\n');
       process.env[args.key] = args.value;
       return `已保存：${args.key}`;
+    }
+
+    case 'read_file': {
+      const target = path.join(process.cwd(), 'workspace', args.filename);
+      const wsRoot = path.join(process.cwd(), 'workspace');
+      if (!target.startsWith(wsRoot)) return '不允许读 workspace 以外的文件';
+      if (!fs.existsSync(target)) return `文件不存在：workspace/${args.filename}`;
+      return fs.readFileSync(target, 'utf-8');
+    }
+
+    case 'list_candidates': {
+      const { status, limit = 20 } = args;
+      const rows = status
+        ? (db.prepare(`SELECT name, company, channel, status, contacted_at FROM candidates WHERE status = ? ORDER BY contacted_at DESC LIMIT ?`).all(status, limit) as any[])
+        : (db.prepare(`SELECT name, company, channel, status, contacted_at FROM candidates ORDER BY contacted_at DESC LIMIT ?`).all(limit) as any[]);
+      if (rows.length === 0) return status ? `暂无「${status}」状态的候选人` : '暂无候选人数据';
+      return rows.map((c: any) =>
+        `${c.name}（${c.company || '未知公司'}，${c.channel}）- ${c.status}，${c.contacted_at?.slice(0, 10) ?? '未知'}`
+      ).join('\n');
     }
 
     case 'write_file': {
