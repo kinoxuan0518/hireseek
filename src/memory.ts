@@ -90,22 +90,37 @@ export function buildMemoryContext(channel: Channel, jobId: string): string {
   return `# 记忆上下文\n\n${sections.join('\n\n')}`;
 }
 
-/** 注入历史对话摘要，让 HireClaw 跨会话记住和用户的交流 */
+/** 注入历史对话记忆，让 HireClaw 跨会话记住和用户的交流 */
 export function buildConversationMemory(jobId: string): string {
   const rows = conversationOps.recent.all(jobId) as {
     summary: string;
     highlights: string;
+    excerpt: string;
     created_at: string;
   }[];
   if (rows.length === 0) return '';
 
-  const entries = rows.map(r => {
-    const date = r.created_at.slice(0, 10);
-    const highlights = r.highlights ? `\n关键点：${r.highlights}` : '';
-    return `【${date}】${r.summary}${highlights}`;
-  }).join('\n\n');
+  const sections: string[] = [];
 
-  return `## 和你的历史对话（跨会话记忆）\n\n${entries}`;
+  // 最近一次：给原文片段（保留细节）
+  const latest = rows[0];
+  const latestDate = latest.created_at.slice(0, 10);
+  let latestBlock = `### 上次对话（${latestDate}）\n${latest.summary}`;
+  if (latest.highlights) latestBlock += `\n${latest.highlights}`;
+  if (latest.excerpt)    latestBlock += `\n\n对话片段：\n${latest.excerpt}`;
+  sections.push(latestBlock);
+
+  // 更早的：只给摘要
+  if (rows.length > 1) {
+    const older = rows.slice(1).map(r => {
+      const date = r.created_at.slice(0, 10);
+      const hl = r.highlights ? `（${r.highlights}）` : '';
+      return `- 【${date}】${r.summary}${hl}`;
+    }).join('\n');
+    sections.push(`### 更早记录\n${older}`);
+  }
+
+  return `## 历史对话记忆\n\n${sections.join('\n\n')}`;
 }
 
 /** 生成反思 prompt，任务结束后调用 */

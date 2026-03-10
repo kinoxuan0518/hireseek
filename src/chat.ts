@@ -330,28 +330,46 @@ async function saveConversationMemory(
   const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
 
   try {
+    // 提取最后 6 轮对话原文（user + assistant 交替）
+    const turns = messages.filter(m => m.role === 'user' || m.role === 'assistant');
+    const lastTurns = turns.slice(-6).map(m => {
+      const role = m.role === 'user' ? '你' : 'HireClaw';
+      const text = typeof m.content === 'string' ? m.content : '[操作]';
+      return `${role}: ${text.slice(0, 300)}`;
+    }).join('\n');
+
     const res = await client.chat.completions.create({
       model,
       messages: [
         ...messages,
         {
           role: 'user',
-          content: `请用 2-3 句话总结我们刚才这次对话的核心内容（第三人称，如"用户问了..."）。
-然后另起一行，列出 1-3 个关键点（以"关键点："开头，逗号分隔），这些是下次对话应该记住的。
-格式：
-[总结]
-关键点：[点1]，[点2]`,
+          content: `请总结这次对话，下次对话时需要注入这份记忆。按以下格式输出：
+
+总结：[2-3句，说清楚聊了什么、做了什么决定]
+候选人：[提到的候选人姓名及关键结论，如"张三-决定下周面试，李四-已放弃"，没有则写"无"]
+待办：[未完成的事项，如"需要跟进王五"，没有则写"无"]
+策略变化：[对话中调整了哪些招聘策略，没有则写"无"]`,
         },
       ],
-      max_tokens: 300,
+      max_tokens: 400,
     });
 
     const text = res.choices[0]?.message?.content ?? '';
-    const [summaryPart, highlightsPart] = text.split(/关键点[：:]/);
+    const extract = (label: string) => {
+      const m = text.match(new RegExp(`${label}[：:]([^\\n]+)`));
+      return m?.[1]?.trim() ?? '';
+    };
+
     conversationOps.save.run({
       job_id:     jobId,
-      summary:    summaryPart?.trim() ?? text,
-      highlights: highlightsPart?.trim() ?? '',
+      summary:    extract('总结') || text.slice(0, 200),
+      highlights: [
+        extract('候选人') !== '无' ? `候选人：${extract('候选人')}` : '',
+        extract('待办') !== '无'   ? `待办：${extract('待办')}` : '',
+        extract('策略变化') !== '无' ? `策略：${extract('策略变化')}` : '',
+      ].filter(Boolean).join(' | '),
+      excerpt: lastTurns,
     });
   } catch {
     // 保存失败不影响退出

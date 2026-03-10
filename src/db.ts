@@ -65,6 +65,7 @@ db.exec(`
     job_id     TEXT NOT NULL,
     summary    TEXT NOT NULL,
     highlights TEXT,
+    excerpt    TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -153,13 +154,13 @@ export const taskRunOps = {
 };
 
 export const conversationOps = {
-  save: db.prepare<{ job_id: string; summary: string; highlights: string }>(`
-    INSERT INTO conversations (job_id, summary, highlights)
-    VALUES (@job_id, @summary, @highlights)
+  save: db.prepare<{ job_id: string; summary: string; highlights: string; excerpt: string }>(`
+    INSERT INTO conversations (job_id, summary, highlights, excerpt)
+    VALUES (@job_id, @summary, @highlights, @excerpt)
   `),
 
   recent: db.prepare<[string]>(`
-    SELECT summary, highlights, created_at FROM conversations
+    SELECT summary, highlights, excerpt, created_at FROM conversations
     WHERE job_id = ?
     ORDER BY created_at DESC LIMIT 5
   `),
