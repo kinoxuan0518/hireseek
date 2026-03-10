@@ -81,6 +81,97 @@ const COMPUTER_USE_GUIDE = `
 
 const MAX_TURNS = 150;
 
+/**
+ * 只保留最近 keepLast 张截图，其余替换为占位文字，控制 token 消耗。
+ */
+function pruneImages(
+  messages: OpenAI.ChatCompletionMessageParam[],
+  keepLast = 3
+): OpenAI.ChatCompletionMessageParam[] {
+  // 收集所有含图片的 content 块位置
+  const imgRefs: Array<{ msgIdx: number; partIdx: number }> = [];
+
+  messages.forEach((msg, mi) => {
+    if (!Array.isArray(msg.content)) return;
+    (msg.content as any[]).forEach((part, pi) => {
+      if (part?.type === 'image_url') imgRefs.push({ msgIdx: mi, partIdx: pi });
+    });
+  });
+
+  if (imgRefs.length <= keepLast) return messages;
+
+  // 深拷贝后替换旧截图
+  const pruned = messages.map(m => ({ ...m, content: Array.isArray(m.content) ? [...(m.content as any[])] : m.content }));
+  const toPrune = imgRefs.slice(0, imgRefs.length - keepLast);
+
+  for (const { msgIdx, partIdx } of toPrune) {
+    (pruned[msgIdx].content as any[])[partIdx] = { type: 'text', text: '[截图已省略]' };
+  }
+
+  return pruned as OpenAI.ChatCompletionMessageParam[];
+}
+
+/**
+ * 兼容层：解析模型在 content 里输出的非标准工具调用格式。
+ * 支持：
+ *   - Qwen: <ref>computer.screenshot()</ref>
+ *   - 纯文本: computer(action="screenshot")
+ *   - JSON block: ```json\n{"action":"screenshot"}```
+ */
+function parseContentToolCall(content: string): OpenAI.ChatCompletionMessageToolCall | null {
+  let args: Record<string, unknown> | null = null;
+
+  // 1. Qwen <ref>computer.METHOD()</ref> 格式
+  const refMatch = content.match(/<ref>computer\.(\w+)\((.*?)\)<\/ref>/s);
+  if (refMatch) {
+    const action = refMatch[1];
+    const rawArgs = refMatch[2].trim();
+    args = { action };
+    if (rawArgs) {
+      // 尝试解析 key=value 参数
+      for (const m of rawArgs.matchAll(/(\w+)=([^,)]+)/g)) {
+        const val = m[2].trim().replace(/^["']|["']$/g, '');
+        if (m[1] === 'coordinate') {
+          args[m[1]] = JSON.parse(val);
+        } else {
+          args[m[1]] = isNaN(Number(val)) ? val : Number(val);
+        }
+      }
+    }
+  }
+
+  // 2. computer(action="screenshot") 格式
+  if (!args) {
+    const plainMatch = content.match(/computer\s*\(\s*action\s*=\s*["'](\w+)["'](.*?)\)/s);
+    if (plainMatch) {
+      args = { action: plainMatch[1] };
+      for (const m of (plainMatch[2] || '').matchAll(/(\w+)\s*=\s*([^,)]+)/g)) {
+        const val = m[2].trim().replace(/^["']|["']$/g, '');
+        args[m[1]] = isNaN(Number(val)) ? val : Number(val);
+      }
+    }
+  }
+
+  // 3. ```json { "action": "..." } ``` 格式
+  if (!args) {
+    const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (jsonMatch) {
+      try { args = JSON.parse(jsonMatch[1]); } catch {}
+    }
+  }
+
+  if (!args || !args['action']) return null;
+
+  return {
+    id: `fallback_${Date.now()}`,
+    type: 'function',
+    function: {
+      name: 'computer',
+      arguments: JSON.stringify(args),
+    },
+  };
+}
+
 export class GenericVisionRunner implements LLMRunner {
   private client: OpenAI;
   private model: string;
@@ -117,13 +208,23 @@ export class GenericVisionRunner implements LLMRunner {
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const response = await this.client.chat.completions.create({
         model:    this.model,
-        messages,
+        messages: pruneImages(messages, 2),
         tools:    [COMPUTER_TOOL],
         tool_choice: 'auto',
         max_tokens:  2048,
       });
 
       const msg = response.choices[0].message;
+
+      // 兼容 Qwen 等模型：将 content 中的非标准工具调用转为标准格式
+      if ((!msg.tool_calls || msg.tool_calls.length === 0) && msg.content) {
+        const parsed = parseContentToolCall(msg.content);
+        if (parsed) {
+          (msg as any).tool_calls = [parsed];
+          msg.content = null;
+        }
+      }
+
       messages.push(msg);
 
       // 没有工具调用 → 任务完成，msg.content 是最终总结
@@ -162,7 +263,17 @@ export class GenericVisionRunner implements LLMRunner {
         if (input.action === 'screenshot') {
           imgData = await takeScreenshot(page);
         } else {
-          await executeAction(page, input);
+          try {
+            await executeAction(page, input);
+          } catch (err: any) {
+            // page 被关闭时重新获取
+            if (err.message?.includes('closed') || err.message?.includes('Target')) {
+              const { getPage } = await import('../browser-runner');
+              page = await getPage();
+            } else {
+              throw err;
+            }
+          }
           imgData = await takeScreenshot(page);
         }
 

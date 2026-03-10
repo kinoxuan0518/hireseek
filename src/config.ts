@@ -24,7 +24,8 @@ export const config = {
   },
   // provider 专属配置（各自 runner 里按需读取）
   anthropic: {
-    apiKey: process.env.ANTHROPIC_API_KEY || '',
+    apiKey:  process.env.ANTHROPIC_API_KEY || '',
+    baseUrl: process.env.ANTHROPIC_BASE_URL || '',
   },
   openai: {
     apiKey: process.env.OPENAI_API_KEY || '',
@@ -51,10 +52,14 @@ export const config = {
   browser: {
     headless: process.env.BROWSER_HEADLESS === 'true',
     slowMo:   parseInt(process.env.BROWSER_SLOW_MO || '100', 10),
-    viewport: { width: 1280, height: 800 },
+    viewport: { width: 900, height: 600 },
   },
   workspace: {
     dir: path.join(__dirname, '..', 'workspace'),
+  },
+  search: {
+    provider: process.env.SEARCH_PROVIDER || '',
+    apiKey:   process.env.SEARCH_API_KEY  || '',
   },
   schedule: {
     boss:     process.env.SCHEDULE_BOSS     || '0 9 * * 1-5',

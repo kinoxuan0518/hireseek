@@ -1,9 +1,10 @@
 import dayjs from 'dayjs';
 import { getPage } from './browser-runner';
 import { createRunner } from './runners';
-import { loadSkill, loadWorkspaceFile } from './skills/loader';
+import { loadSkill, loadWorkspaceFile, loadActiveJob, jobToPrompt } from './skills/loader';
 import { sendReport } from './channels/feishu';
-import { taskRunOps } from './db';
+import { taskRunOps, reflectionOps, candidateOps, db } from './db';
+import { buildMemoryContext, buildReflectionPrompt } from './memory';
 import type { Channel } from './types';
 
 const TASK_PROMPT = (channelLabel: string) => `
@@ -48,10 +49,30 @@ export async function runChannel(
     // 导航到对应招聘平台
     await page.goto(CHANNEL_URL[channel], { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    // 组装系统提示：SOUL + Skill
-    const soul = loadWorkspaceFile('SOUL.md');
-    const skill = loadSkill(channel);
-    const systemPrompt = [soul, '---', skill].filter(Boolean).join('\n\n');
+    // 登录检测：检查是否成功进入目标页（而非被重定向到其他页面）
+    const currentUrl = page.url();
+    const targetUrl = CHANNEL_URL[channel];
+    const isOnTargetPage = currentUrl.startsWith(targetUrl) || currentUrl.includes(new URL(targetUrl).pathname);
+    if (!isOnTargetPage) {
+      console.log(`\n[HireClaw] ⚠️  未能进入目标页（当前：${currentUrl}）`);
+      console.log('[HireClaw] 请在浏览器窗口中完成登录，登录完成后按 Enter 继续...');
+      await new Promise<void>(resolve => {
+        process.stdin.once('data', () => resolve());
+      });
+      // 登录后再跳转到目标页
+      await page.goto(CHANNEL_URL[channel], { waitUntil: 'domcontentloaded', timeout: 30000 });
+    }
+
+    // 组装系统提示：SOUL + 职位上下文 + 记忆 + Skill
+    const soul      = loadWorkspaceFile('SOUL.md');
+    const job       = loadActiveJob();
+    const jobCtx    = job ? jobToPrompt(job) : '';
+    const wisdom     = loadWorkspaceFile('references/founders-wisdom.md');
+    const evaluation = loadWorkspaceFile('references/candidate-evaluation.md');
+    const outreach   = loadWorkspaceFile('references/outreach-guide.md');
+    const memory    = buildMemoryContext(channel, jobId);
+    const skill     = loadSkill(channel);
+    const systemPrompt = [soul, jobCtx, wisdom, evaluation, outreach, memory, '---', skill].filter(Boolean).join('\n\n');
 
     const runner = createRunner();
     const result = await runner.runSkill(
@@ -73,6 +94,21 @@ export async function runChannel(
       skipped_count: result.skipped,
       error: null,
     });
+
+    // 生成反思并存储
+    try {
+      const reflectionPrompt = buildReflectionPrompt(label, result.contacted, result.skipped, result.summary);
+      const runner = createRunner();
+      const reflectionResult = await runner.runSkill(
+        await getPage(),
+        '你是一个正在学习成长的招聘助手，请认真反思自己的执行过程。',
+        reflectionPrompt,
+      );
+      reflectionOps.save.run({ job_id: jobId, channel, run_id: runId, content: reflectionResult.summary });
+      console.log(`[Orchestrator] 💭 反思已记录`);
+    } catch {
+      // 反思失败不影响主流程
+    }
 
     await sendReport({
       channel,
@@ -102,4 +138,111 @@ export async function runChannel(
       durationSec: Math.round((Date.now() - startMs) / 1000),
     });
   }
+}
+
+/**
+ * 扫描 BOSS 收件箱，检测回复并更新候选人状态。
+ */
+export async function scanInbox(jobId: string = 'default'): Promise<void> {
+  console.log('\n[Scanner] 🔍 开始扫描收件箱...');
+  const page = await getPage();
+  await page.goto('https://www.zhipin.com/web/im/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+  const currentUrl = page.url();
+  if (!currentUrl.includes('zhipin.com/web')) {
+    console.log('\n[HireClaw] ⚠️  请先登录 BOSS直聘，登录完成后按 Enter 继续...');
+    await new Promise<void>(resolve => { process.stdin.once('data', () => resolve()); });
+    await page.goto('https://www.zhipin.com/web/im/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  }
+
+  const soul  = loadWorkspaceFile('SOUL.md');
+  const skill = loadWorkspaceFile('skills/scan.md');
+  const systemPrompt = [soul, skill].filter(Boolean).join('\n\n');
+
+  const runner = createRunner();
+  const result = await runner.runSkill(
+    page,
+    systemPrompt,
+    '请扫描收件箱，找出所有已回复的候选人，按格式输出名单。',
+    (msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))
+  );
+
+  // 解析回复名单
+  const repliedNames: string[] = [];
+  const lines = result.summary.split('\n');
+  let inList = false;
+  for (const line of lines) {
+    if (line.includes('已回复候选人')) { inList = true; continue; }
+    if (inList && line.startsWith('- ')) {
+      const name = line.replace(/^-\s+/, '').trim();
+      if (name && name !== '（无）') repliedNames.push(name);
+    }
+    if (inList && line.trim() === '') inList = false;
+  }
+
+  // 批量更新状态
+  let updated = 0;
+  for (const name of repliedNames) {
+    const matches = candidateOps.findByName.all(`%${name}%`) as any[];
+    for (const c of matches) {
+      if (c.status === 'contacted') {
+        candidateOps.updateStatus.run({ status: 'replied', id: c.id });
+        updated++;
+        console.log(`\n[Scanner] ✓ ${c.name} → 已回复`);
+      }
+    }
+  }
+
+  console.log(`\n[Scanner] 完成：检测到 ${repliedNames.length} 人回复，更新 ${updated} 条记录`);
+}
+
+/**
+ * 自主模式：读取 active job，决定今天跑哪些渠道，按顺序执行。
+ * 判断逻辑：
+ * - 今天已跑过的渠道跳过
+ * - 日触达量已达目标的渠道跳过
+ * - 按 job.channels 顺序执行剩余渠道
+ */
+export async function runJob(): Promise<void> {
+  const job = loadActiveJob();
+  if (!job) {
+    console.error('[Orchestrator] 未找到 workspace/jobs/active.yaml，请先配置职位');
+    return;
+  }
+
+  const jobId = job.title.replace(/\s+/g, '_');
+  const channels = (job.channels ?? ['boss', 'maimai']) as Channel[];
+  const dailyGoal = job.daily_goal?.contact ?? 30;
+
+  console.log(`\n🦞 HireClaw 自主模式`);
+  console.log(`职位：${job.title}  |  今日目标：${dailyGoal} 人`);
+  console.log(`渠道计划：${channels.join(' → ')}\n`);
+
+  for (const channel of channels) {
+    // 今天是否已跑过
+    const alreadyRan = db.prepare(`
+      SELECT id FROM task_runs
+      WHERE channel = ? AND job_id = ? AND date(started_at) = date('now') AND status = 'completed'
+    `).get(channel, jobId);
+
+    if (alreadyRan) {
+      console.log(`[Orchestrator] ⏭  ${CHANNEL_LABEL[channel]} 今天已执行，跳过`);
+      continue;
+    }
+
+    // 今日触达量是否已达目标
+    const todayCount = (db.prepare(`
+      SELECT COUNT(*) as n FROM candidates
+      WHERE channel = ? AND job_id = ? AND date(contacted_at) = date('now')
+    `).get(channel, jobId) as { n: number }).n;
+
+    if (todayCount >= dailyGoal) {
+      console.log(`[Orchestrator] ✅ ${CHANNEL_LABEL[channel]} 今日已触达 ${todayCount} 人，目标达成，跳过`);
+      continue;
+    }
+
+    await runChannel(channel, jobId);
+  }
+
+  console.log('\n[Orchestrator] 今日所有渠道执行完毕');
 }

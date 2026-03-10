@@ -12,7 +12,10 @@ export class ClaudeRunner implements LLMRunner {
   private client: Anthropic;
 
   constructor() {
-    this.client = new Anthropic({ apiKey: config.anthropic.apiKey });
+    this.client = new Anthropic({
+      apiKey:  config.anthropic.apiKey,
+      ...(config.anthropic.baseUrl ? { baseURL: config.anthropic.baseUrl } : {}),
+    });
   }
 
   async runSkill(

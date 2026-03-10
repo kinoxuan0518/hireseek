@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "智能招聘 Agent - 面向 HR 的自主 Sourcing 系统",
   "main": "dist/index.js",
+  "bin": {
+    "hireclaw": "bin/hireclaw"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -13,11 +16,13 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@types/js-yaml": "^4.0.9",
     "axios": "^1.6.0",
     "better-sqlite3": "^11.0.0",
     "chalk": "^4.1.2",
     "dayjs": "^1.11.0",
     "dotenv": "^16.4.0",
+    "js-yaml": "^4.1.1",
     "node-cron": "^3.0.0",
     "openai": "^4.104.0",
     "playwright": "^1.50.0"

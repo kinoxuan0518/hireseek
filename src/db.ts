@@ -51,10 +51,28 @@ db.exec(`
     created_at           TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS reflections (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id     TEXT NOT NULL,
+    channel    TEXT NOT NULL,
+    run_id     INTEGER NOT NULL,
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS conversations (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id     TEXT NOT NULL,
+    summary    TEXT NOT NULL,
+    highlights TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_candidates_channel  ON candidates(channel);
   CREATE INDEX IF NOT EXISTS idx_candidates_job_id   ON candidates(job_id);
   CREATE INDEX IF NOT EXISTS idx_candidates_status   ON candidates(status);
   CREATE INDEX IF NOT EXISTS idx_task_runs_channel   ON task_runs(channel);
+  CREATE INDEX IF NOT EXISTS idx_reflections_channel ON reflections(channel);
 `);
 
 // ── 候选人操作 ────────────────────────────────────────────
@@ -72,6 +90,14 @@ export const candidateOps = {
     SELECT * FROM candidates WHERE fingerprint = ?
   `),
 
+  findByName: db.prepare<[string]>(`
+    SELECT * FROM candidates WHERE name LIKE ? ORDER BY contacted_at DESC LIMIT 10
+  `),
+
+  updateStatus: db.prepare<{ status: string; id: number }>(`
+    UPDATE candidates SET status = @status WHERE id = @id
+  `),
+
   listByStatus: db.prepare<[string]>(`
     SELECT * FROM candidates WHERE status = ? ORDER BY created_at DESC LIMIT 50
   `),
@@ -81,6 +107,16 @@ export const candidateOps = {
     FROM candidates
     WHERE date(contacted_at) = date('now')
     GROUP BY channel
+  `),
+
+  funnelStats: db.prepare<[string]>(`
+    SELECT
+      status,
+      COUNT(*) as count
+    FROM candidates
+    WHERE job_id = ?
+    GROUP BY status
+    ORDER BY count DESC
   `),
 };
 
@@ -113,5 +149,31 @@ export const taskRunOps = {
     WHERE channel = ?
     ORDER BY started_at DESC
     LIMIT 1
+  `),
+};
+
+export const conversationOps = {
+  save: db.prepare<{ job_id: string; summary: string; highlights: string }>(`
+    INSERT INTO conversations (job_id, summary, highlights)
+    VALUES (@job_id, @summary, @highlights)
+  `),
+
+  recent: db.prepare<[string]>(`
+    SELECT summary, highlights, created_at FROM conversations
+    WHERE job_id = ?
+    ORDER BY created_at DESC LIMIT 5
+  `),
+};
+
+export const reflectionOps = {
+  save: db.prepare<{ job_id: string; channel: string; run_id: number; content: string }>(`
+    INSERT INTO reflections (job_id, channel, run_id, content)
+    VALUES (@job_id, @channel, @run_id, @content)
+  `),
+
+  recent: db.prepare<[string, string]>(`
+    SELECT content, created_at FROM reflections
+    WHERE channel = ? AND job_id = ?
+    ORDER BY created_at DESC LIMIT 5
   `),
 };
