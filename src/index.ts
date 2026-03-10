@@ -4,6 +4,7 @@ import { startScheduler } from './scheduler';
 import { runChannel, runJob, scanInbox } from './orchestrator';
 import { startChat } from './chat';
 import { runSetup } from './setup';
+import { startDashboard } from './dashboard';
 import { db, candidateOps } from './db';
 import { loadActiveJob } from './skills/loader';
 import type { Channel } from './types';
@@ -25,6 +26,7 @@ const USAGE = `
 用法:
   hireclaw                     对话模式（默认）
   hireclaw setup               初始化向导：一步步配置好一切
+  hireclaw dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
   hireclaw run                 自主模式：自动决定今天跑哪些渠道
   hireclaw run <渠道>          指定渠道立即执行
   hireclaw scan                扫描收件箱，更新已回复候选人
@@ -85,6 +87,10 @@ async function main(): Promise<void> {
 
   } else if (command === 'setup') {
     await runSetup();
+
+  } else if (command === 'dashboard' || command === 'ui') {
+    startDashboard();
+    process.on('SIGINT', () => { db.close(); process.exit(0); });
 
   } else if (command === 'run') {
     if (!channel) {

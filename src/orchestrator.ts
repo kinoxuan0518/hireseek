@@ -5,6 +5,7 @@ import { loadSkill, loadWorkspaceFile, loadActiveJob, jobToPrompt } from './skil
 import { sendReport } from './channels/feishu';
 import { taskRunOps, reflectionOps, candidateOps, db } from './db';
 import { buildMemoryContext, buildReflectionPrompt } from './memory';
+import { emitLog, emitStatus } from './events';
 import type { Channel } from './types';
 
 const TASK_PROMPT = (channelLabel: string) => `
@@ -37,6 +38,8 @@ export async function runChannel(
 ): Promise<void> {
   const label = CHANNEL_LABEL[channel];
   console.log(`\n[Orchestrator] ▶ 开始 ${label} sourcing`);
+  emitLog(`▶ 开始 ${label} sourcing`);
+  emitStatus('running');
 
   const startedAt = dayjs().toISOString();
   const runResult = taskRunOps.start.run({ job_id: jobId, channel, started_at: startedAt });
@@ -85,6 +88,8 @@ export async function runChannel(
     const durationSec = Math.round((Date.now() - startMs) / 1000);
 
     console.log(`\n[Orchestrator] ✓ ${label} 完成 (${durationSec}s)`);
+    emitLog(`✓ ${label} 完成 (${durationSec}s)`);
+    emitStatus('idle');
 
     taskRunOps.complete.run({
       id: runId,
@@ -120,6 +125,8 @@ export async function runChannel(
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     console.error(`\n[Orchestrator] ✗ ${label} 失败: ${error}`);
+    emitLog(`✗ ${label} 失败: ${error}`);
+    emitStatus('idle');
 
     taskRunOps.complete.run({
       id: runId,

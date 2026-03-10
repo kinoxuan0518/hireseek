@@ -8,6 +8,7 @@
 
 import fs from 'fs';
 import OpenAI from 'openai';
+import { emitLog } from '../events';
 import { Page } from 'playwright';
 import { takeScreenshot, executeAction } from '../browser-runner';
 import { parseSkillSummary } from './interface';
@@ -236,7 +237,9 @@ export class GenericVisionRunner implements LLMRunner {
 
       // 打印 LLM 的推理文字（它在想什么）
       if (msg.content) {
-        onProgress?.(`💭 ${msg.content}`);
+        const thought = `💭 ${msg.content}`;
+        onProgress?.(thought);
+        emitLog(thought);
       }
 
       messages.push(msg);
@@ -266,11 +269,11 @@ export class GenericVisionRunner implements LLMRunner {
           amount?: number;
         };
 
-        onProgress?.(
-          `[${turn + 1}] ${input.action}${
-            input.coordinate ? ` (${input.coordinate[0]}, ${input.coordinate[1]})` : ''
-          }`
-        );
+        const actionLog = `[${turn + 1}] ${input.action}${
+          input.coordinate ? ` (${input.coordinate[0]}, ${input.coordinate[1]})` : ''
+        }`;
+        onProgress?.(actionLog);
+        emitLog(actionLog);
 
         let imgData: string;
 
