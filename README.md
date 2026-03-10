@@ -1,187 +1,152 @@
 # 🦞 HireClaw
 
-**Autonomous recruiting agent for BOSS直聘, 脉脉, and LinkedIn.**
+**给招聘人用的自主 AI Agent——会 sourcing、会对话、会学习。**
 
-HireClaw is an AI-powered recruiting automation tool. It controls a browser like a human recruiter — searching candidates, applying filters, scoring profiles, and sending personalized outreach messages. All driven by an LLM of your choice.
-
----
-
-## Features
-
-- **Multi-channel**: BOSS直聘 / 脉脉 / LinkedIn / 跟进未回复
-- **Multi-LLM**: Claude, OpenAI, MiniMax, or any OpenAI-compatible API
-- **Smart filtering**: Two-layer screening (platform filters + script-level scoring)
-- **Cache-based config**: Job preferences cached locally, no repeated setup
-- **Auto follow-up**: Tracks unreplied candidates and re-engages with fresh messages
-- **Feishu reporting**: Daily sourcing reports pushed to your Feishu group (optional)
-- **Scheduled daemon**: Runs automatically on weekdays via cron
+HireClaw 不是一个脚本，是一个有招聘经验的伙伴。它能自主操作 BOSS直聘、脉脉等平台，和你对话讨论候选人，并在每次对话后记住发生了什么。
 
 ---
 
-## Quick Start
-
-### 1. Install dependencies
+## 快速开始
 
 ```bash
+# 1. 安装依赖
 npm install
 npx playwright install chromium
-```
 
-### 2. Configure environment
+# 2. 初始化（一步步引导配置 API key、职位、渠道）
+npm link
+hireclaw setup
 
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and fill in your LLM API key:
-
-```env
-# Choose your LLM provider
-LLM_PROVIDER=claude   # claude | openai | minimax | custom
-
-# Fill in the key for your chosen provider
-ANTHROPIC_API_KEY=sk-ant-...
-# OPENAI_API_KEY=sk-...
-# MINIMAX_API_KEY=...
-```
-
-### 3. Run
-
-```bash
-# Trigger BOSS直聘 sourcing once
-npm run dev run boss
-
-# Trigger 脉脉 sourcing once
-npm run dev run maimai
-
-# Follow up unreplied candidates
-npm run dev run followup
-
-# Start the daemon (runs on schedule)
-npm run dev start
+# 3. 开始用
+hireclaw
 ```
 
 ---
 
-## Supported LLM Providers
+## 全部命令
 
-| Provider | Model | Computer-Use |
-|----------|-------|-------------|
-| Claude (Anthropic) | claude-opus-4-6 | ✅ Native |
-| OpenAI | computer-use-preview | ✅ Native |
-| MiniMax | abab6.5s-chat / MiniMax-Text-01 | ⚡ via function calling |
-| Custom (any OpenAI-compatible) | your model | ⚡ via function calling |
-
-> Native computer-use (Claude/OpenAI) gives the best results. Generic providers use function calling to simulate browser control.
-
----
-
-## Configuration
-
-### Job Configuration
-
-On first run, HireClaw will prompt you to configure your job requirements interactively. Configuration is cached at `~/.hireclaw/bosszhibin_cache/bosszhibin_jobs_cache.json`.
-
-Key settings per job:
-- School tier requirements (985 / QS100 / 211 / any)
-- Company background requirements
-- Required skills / keywords
-- Experience range
-- Score threshold for outreach
-
-### Schedule (daemon mode)
-
-Default schedule in `.env`:
-
-```env
-SCHEDULE_BOSS=0 9 * * 1-5      # Weekdays 9:00 AM
-SCHEDULE_MAIMAI=0 10 * * 1-5   # Weekdays 10:00 AM
-SCHEDULE_FOLLOWUP=0 14 * * 1-5 # Weekdays 2:00 PM
-```
-
-### Feishu Notifications (optional)
-
-```env
-FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
-```
+| 命令 | 做什么 |
+|------|--------|
+| `hireclaw` | 对话模式（默认）——聊候选人、改策略、触发任务 |
+| `hireclaw setup` | 初始化向导，3 分钟配好一切 |
+| `hireclaw run` | 自主 sourcing，按职位配置决定渠道 |
+| `hireclaw run boss` | 只跑 BOSS直聘 |
+| `hireclaw scan` | 扫描收件箱，更新已回复候选人 |
+| `hireclaw update 张三 replied` | 手动更新候选人状态 |
+| `hireclaw funnel` | 查看招聘漏斗数据 |
+| `hireclaw start` | 启动定时守护进程 |
 
 ---
 
-## Project Structure
+## 支持的 LLM
+
+| Provider | 配置方式 |
+|----------|---------|
+| Anthropic Claude | `LLM_PROVIDER=claude` + `ANTHROPIC_API_KEY` |
+| DeepSeek | `LLM_PROVIDER=custom` + `CUSTOM_BASE_URL=https://api.deepseek.com/v1` |
+| OpenRouter | `LLM_PROVIDER=custom` + `CUSTOM_BASE_URL=https://openrouter.ai/api/v1` |
+| 任意 OpenAI 兼容 API | `LLM_PROVIDER=custom` + `CUSTOM_BASE_URL` |
+
+推荐 Claude Sonnet 或 DeepSeek-V3，两者招聘判断质量最好。
+
+---
+
+## 核心能力
+
+- **自主 Sourcing**：用 Playwright 控制浏览器，截图 → LLM 决策 → 执行动作，循环直到完成
+- **对话模式**：直接和 HireClaw 聊，它能触发任务、查候选人、搜背景、改策略
+- **跨会话记忆**：每次对话结束后自动摘要存库，下次启动重新注入——它认识你
+- **招聘知识内置**：候选人评估框架、触达策略、话术指南，基于真实招聘经验
+- **网络搜索**：搜公司动态、候选人背景、行业新闻（支持 Tavily / Brave / DuckDuckGo）
+- **结果追踪**：候选人状态管理、回复率统计、漏斗视图
+
+---
+
+## 项目结构
 
 ```
 hireclaw/
+├── bin/
+│   └── hireclaw          # 全局命令入口
 ├── src/
-│   ├── index.ts          # CLI entry point
-│   ├── orchestrator.ts   # Channel coordinator
-│   ├── scheduler.ts      # Cron daemon
-│   ├── browser-runner.ts # Playwright browser control
-│   ├── config.ts         # Environment config
-│   ├── db.ts             # SQLite database
-│   ├── types.ts          # TypeScript types
-│   ├── runners/          # LLM provider implementations
-│   │   ├── claude.ts
-│   │   ├── openai.ts
-│   │   ├── generic-vision.ts
-│   │   └── index.ts
-│   ├── skills/
-│   │   └── loader.ts     # Skill file loader
-│   └── channels/
-│       └── feishu.ts     # Feishu webhook
+│   ├── index.ts          # CLI 路由
+│   ├── chat.ts           # 对话模式 + 工具调用
+│   ├── orchestrator.ts   # 渠道协调器
+│   ├── memory.ts         # 记忆注入（历史对话 + DB 数据）
+│   ├── search.ts         # 网络搜索模块
+│   ├── setup.ts          # 初始化向导
+│   ├── db.ts             # SQLite 数据库
+│   ├── config.ts         # 环境配置
+│   ├── scheduler.ts      # 定时守护进程
+│   ├── browser-runner.ts # Playwright 控制
+│   ├── runners/          # LLM provider 实现
+│   └── skills/
+│       └── loader.ts     # Skill 文件加载器
 └── workspace/
-    ├── SOUL.md           # Agent personality & philosophy
-    ├── HEARTBEAT.md      # Schedule definition
-    ├── skills/           # Per-channel skill prompts
+    ├── SOUL.md           # Agent 灵魂与招聘哲学
+    ├── PLAYBOOK.md       # 每日工作流手册
+    ├── jobs/
+    │   └── active.yaml   # 当前招聘职位配置
+    ├── skills/           # 各渠道执行脚本
     │   ├── boss.md
     │   ├── maimai.md
     │   ├── linkedin.md
     │   └── followup.md
-    └── references/       # Supporting documentation
-        ├── cache-schema.md
-        ├── search-playbook.md
-        ├── outreach-playbook.md
-        └── platform-ui-reference.md
+    └── references/       # 招聘知识库
+        ├── candidate-evaluation.md
+        ├── outreach-guide.md
+        └── founders-wisdom.md
 ```
 
 ---
 
-## How It Works
+## 候选人状态
 
-1. **Browser opens** — Playwright launches Chromium and navigates to the recruiting platform
-2. **Screenshot taken** — Current page state captured as image
-3. **LLM decides** — The model sees the screenshot and decides the next action (click, type, scroll)
-4. **Action executed** — Playwright performs the action
-5. **Loop** — Steps 2-4 repeat until the task is complete
-6. **Report generated** — Summary sent to terminal and optionally to Feishu
-
----
-
-## Workspace Conventions
-
-HireClaw uses workspace files inspired by agent OS conventions:
-
-- `SOUL.md` — Core identity and recruiting philosophy
-- `HEARTBEAT.md` — Scheduled tasks definition
-- `skills/*.md` — Executable skill prompts per channel
-- `references/*.md` — Reference documentation for skills
+| 状态 | 含义 |
+|------|------|
+| `contacted` | 已触达 |
+| `replied` | 已回复 |
+| `interviewed` | 已面试 |
+| `offered` | 已发 Offer |
+| `joined` | 已入职 |
+| `rejected` | 已淘汰 |
+| `dropped` | 放弃跟进 |
 
 ---
 
-## Requirements
+## 环境变量
+
+```env
+# LLM 配置
+LLM_PROVIDER=claude          # claude | custom
+LLM_MODEL=claude-sonnet-4-6
+ANTHROPIC_API_KEY=sk-ant-...
+
+# 自定义 OpenAI 兼容 provider
+CUSTOM_API_KEY=
+CUSTOM_BASE_URL=
+
+# 网络搜索（可选）
+SEARCH_PROVIDER=tavily       # tavily | brave | duckduckgo
+SEARCH_API_KEY=
+
+# 浏览器
+BROWSER_HEADLESS=false
+
+# 定时任务（cron 表达式）
+SCHEDULE_BOSS=0 9 * * 1-5
+SCHEDULE_MAIMAI=0 10 * * 1-5
+SCHEDULE_FOLLOWUP=0 14 * * 1-5
+```
+
+---
+
+## 要求
 
 - Node.js 22+
 - macOS / Linux
-- An API key for at least one supported LLM provider
-- Accounts logged into your target recruiting platforms
-
----
-
-## Limitations
-
-- Cannot bypass daily outreach limits imposed by platforms
-- Cannot auto-reply to incoming candidate messages
-- Requires human final decision on offers and interviews
-- LLM vision quality affects automation reliability
+- 至少一个 LLM API Key
+- 目标招聘平台已登录账号
 
 ---
 
