@@ -68,8 +68,6 @@ export const config = {
   },
 };
 
-// 启动时校验当前 provider 所需的 key
-if (provider === 'claude'   && !config.anthropic.apiKey) throw new Error('使用 Claude 需要配置 ANTHROPIC_API_KEY');
-if (provider === 'openai'   && !config.openai.apiKey)    throw new Error('使用 OpenAI 需要配置 OPENAI_API_KEY');
-if (provider === 'minimax'  && !config.minimax.apiKey)   throw new Error('使用 MiniMax 需要配置 MINIMAX_API_KEY');
-if (provider === 'custom'   && !config.custom.apiKey)    throw new Error('使用 custom provider 需要配置 CUSTOM_API_KEY 和 CUSTOM_BASE_URL');
+// 注意：不在模块加载时校验 API key，而是在实际使用时检查
+// 这样可以让首次启动引导流程正常运行
+// API Key 检查在 src/index.ts 的 checkSetup() 中进行
