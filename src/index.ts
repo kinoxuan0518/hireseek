@@ -109,10 +109,16 @@ async function main(): Promise<void> {
   if (!command || command === 'chat') {
     const ranSetup = await checkSetup();
 
-    // 如果刚运行了 setup，重新加载环境变量
+    // 如果刚运行了 setup，重新加载环境变量和 config 模块
     if (ranSetup) {
       const dotenv = await import('dotenv');
       dotenv.config({ override: true });
+
+      // 清除 config 模块缓存，强制重新加载
+      const configPath = require.resolve('./config');
+      delete require.cache[configPath];
+
+      console.log(chalk.gray('环境变量已更新，配置已重新加载\n'));
     }
 
     await startChat();
