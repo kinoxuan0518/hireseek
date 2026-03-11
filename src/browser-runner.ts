@@ -1,8 +1,12 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import { config } from './config';
+import { getAccountStoragePath, hasStorageState } from './accounts';
 
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
+
+// 存储每个账号的独立 context
+const accountContexts = new Map<string, BrowserContext>();
 
 export async function getBrowser(): Promise<Browser> {
   if (!browser || !browser.isConnected()) {
@@ -51,6 +55,54 @@ export async function createNewPage(): Promise<Page> {
   }
 
   return await context.newPage();
+}
+
+/**
+ * 为指定账号创建独立的 BrowserContext 和 Page
+ * 如果账号已有保存的登录状态，会自动加载
+ */
+export async function createPageForAccount(accountId: string): Promise<Page> {
+  const b = await getBrowser();
+
+  // 如果该账号已有 context，直接在其中创建新页面
+  if (accountContexts.has(accountId)) {
+    const ctx = accountContexts.get(accountId)!;
+    return await ctx.newPage();
+  }
+
+  // 创建独立的 context，并尝试加载保存的登录状态
+  const contextOptions: any = {
+    viewport: config.browser.viewport,
+    userAgent:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
+      'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+      'Chrome/122.0.0.0 Safari/537.36',
+  };
+
+  // 如果有保存的 storage state，加载它
+  if (hasStorageState(accountId)) {
+    contextOptions.storageState = getAccountStoragePath(accountId);
+    console.log(`[Browser] 🔑 为 ${accountId} 加载已保存的登录状态`);
+  }
+
+  const ctx = await b.newContext(contextOptions);
+  accountContexts.set(accountId, ctx);
+
+  return await ctx.newPage();
+}
+
+/**
+ * 保存指定账号的登录状态（Cookie、LocalStorage 等）
+ */
+export async function saveAccountState(accountId: string): Promise<void> {
+  const ctx = accountContexts.get(accountId);
+  if (!ctx) {
+    throw new Error(`账号 ${accountId} 的 context 不存在`);
+  }
+
+  const state = await ctx.storageState();
+  const { saveStorageState } = await import('./accounts');
+  await saveStorageState(accountId, state);
 }
 
 export async function takeScreenshot(page: Page): Promise<string> {

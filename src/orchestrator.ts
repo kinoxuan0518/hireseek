@@ -1,11 +1,12 @@
 import dayjs from 'dayjs';
-import { getPage, createNewPage } from './browser-runner';
+import { getPage, createNewPage, createPageForAccount, saveAccountState } from './browser-runner';
 import { createRunner } from './runners';
 import { loadSkill, loadWorkspaceFile, loadActiveJob, jobToPrompt, getEnabledChannels } from './skills/loader';
 import { sendReport } from './channels/feishu';
 import { taskRunOps, reflectionOps, candidateOps, db } from './db';
 import { buildMemoryContext, buildReflectionPrompt } from './memory';
 import { emitLog, emitStatus } from './events';
+import { getAccountId, hasStorageState } from './accounts';
 import type { Channel } from './types';
 
 const TASK_PROMPT = (channelLabel: string) => `
@@ -230,18 +231,22 @@ export async function runJob(): Promise<void> {
   console.log(`职位：${job.title}  |  今日目标：${dailyGoal} 人`);
 
   // 构建任务列表（每个账号一个任务）
-  const tasks: Array<{ channel: Channel; accountIndex: number; page: any }> = [];
+  const tasks: Array<{ channel: Channel; accountIndex: number; accountId: string; page: any }> = [];
   for (const { channel, accounts } of enabledChannels) {
     for (let i = 0; i < accounts; i++) {
-      tasks.push({ channel, accountIndex: i, page: null });
+      const accountId = getAccountId(channel, i);
+      tasks.push({ channel, accountIndex: i, accountId, page: null });
     }
   }
 
   console.log(`并行任务：${tasks.map(t => `${CHANNEL_LABEL[t.channel]}[${t.accountIndex + 1}]`).join(' | ')}\n`);
 
-  // 为每个任务创建独立的标签页
+  // 登录引导：检查并引导用户登录每个账号
+  await ensureAccountsLoggedIn(tasks);
+
+  // 为每个任务创建独立的标签页（带有对应账号的登录状态）
   for (const task of tasks) {
-    task.page = await createNewPage();
+    task.page = await createPageForAccount(task.accountId);
   }
 
   // 并行执行所有任务
@@ -373,4 +378,53 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any): P
       error,
     });
   }
+}
+
+/**
+ * 确保所有账号都已登录
+ * 对于没有保存登录状态的账号，依次引导用户登录
+ */
+async function ensureAccountsLoggedIn(
+  tasks: Array<{ channel: Channel; accountIndex: number; accountId: string; page: any }>
+): Promise<void> {
+  const needsLogin = tasks.filter(t => !hasStorageState(t.accountId));
+
+  if (needsLogin.length === 0) {
+    console.log('[Accounts] ✓ 所有账号均已登录\n');
+    return;
+  }
+
+  console.log(`\n[Accounts] 🔐 检测到 ${needsLogin.length} 个账号需要登录，开始引导...\n`);
+
+  for (const task of needsLogin) {
+    const label = `${CHANNEL_LABEL[task.channel]}[${task.accountIndex + 1}]`;
+    console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`正在配置账号：${label} (${task.accountId})`);
+    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+
+    // 创建该账号的专属页面
+    const page = await createPageForAccount(task.accountId);
+
+    // 导航到登录页
+    const loginUrl = CHANNEL_URL[task.channel];
+    console.log(`[Accounts] 📍 正在打开 ${loginUrl}...`);
+    await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // 等待用户登录
+    console.log(`\n⏳ 请在浏览器中完成 ${label} 的登录`);
+    console.log(`   登录完成后，按 Enter 继续...\n`);
+
+    await new Promise<void>(resolve => {
+      process.stdin.once('data', () => resolve());
+    });
+
+    // 保存登录状态
+    await saveAccountState(task.accountId);
+    console.log(`[Accounts] ✓ ${label} 登录成功\n`);
+
+    // 关闭临时页面
+    await page.close();
+  }
+
+  console.log(`[Accounts] 🎉 所有账号登录配置完成！\n`);
 }
