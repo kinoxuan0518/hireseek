@@ -25,30 +25,54 @@ const PERMISSIONS_FILE = path.join(config.workspace.dir, '.permissions.json');
 
 /**
  * 危险工具列表（需要用户确认）
+ *
+ * 策略：默认允许大部分操作，只在真正危险时确认
+ * - 删除/破坏性操作
+ * - 外部通信（Git 推送、PR）
+ * - Shell 命令执行
  */
 const DANGEROUS_TOOLS = [
-  'git_push',
-  'git_create_pr',
-  'execute_shell',
-  'modify_code',
-  'write_file',
-  'forget', // 删除记忆
-  'run_sourcing', // 执行 sourcing（会消耗资源）
+  'execute_shell',     // Shell 命令可能破坏系统
+  'forget',            // 删除记忆
+  'delete_candidate',  // 删除候选人数据
+  // 注意：以下工具默认允许，除非有危险参数
+  // - git_push（普通推送允许，强制推送需确认）
+  // - write_file（普通文件允许，敏感文件需确认）
+  // - run_sourcing（招聘操作，默认允许）
 ];
 
 /**
  * 危险参数模式
+ *
+ * 即使工具本身不在 DANGEROUS_TOOLS 中，
+ * 如果参数匹配危险模式，也需要确认
  */
 const DANGEROUS_PATTERNS: Record<string, (args: any) => boolean> = {
-  git_push: (args) => args.force === true, // 强制推送
+  // Git 强制推送需要确认
+  git_push: (args) => args.force === true,
+
+  // 破坏性 Shell 命令需要确认
   execute_shell: (args) => {
     const cmd = args.command?.toLowerCase() || '';
-    return cmd.includes('rm ') || cmd.includes('delete') || cmd.includes('drop');
+    return cmd.includes('rm -rf') ||
+           cmd.includes('delete') ||
+           cmd.includes('drop') ||
+           cmd.includes('truncate');
   },
+
+  // 写入敏感文件需要确认
   write_file: (args) => {
-    const path = args.filename || args.file_path || '';
-    // 写入敏感文件
-    return path.includes('.env') || path.includes('credentials') || path.includes('config');
+    const filepath = args.filename || args.file_path || '';
+    return filepath.includes('.env') ||
+           filepath.includes('credentials') ||
+           filepath.includes('secret') ||
+           filepath.includes('password');
+  },
+
+  // 创建 PR 到主分支需要确认
+  git_create_pr: (args) => {
+    const target = args.target_branch?.toLowerCase() || '';
+    return target === 'main' || target === 'master';
   },
 };
 
