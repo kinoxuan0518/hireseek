@@ -147,45 +147,164 @@ export async function runSetup(): Promise<void> {
     if (hasKey) {
       console.log(chalk.green('✓ 已检测到 API Key，跳过此步'));
     } else {
-      console.log('HireClaw 需要一个 LLM 来驱动思考。\n');
-      console.log(`  ${chalk.white('1')}  Anthropic（推荐）— console.anthropic.com`);
-      console.log(`  ${chalk.white('2')}  OpenRouter   — openrouter.ai（支持多模型）`);
-      console.log(`  ${chalk.white('3')}  其他 OpenAI 兼容 API\n`);
+      console.log('HireClaw 需要一个 AI 大模型来驱动智能对话。\n');
+      console.log(chalk.bold('🌟 推荐模型（按性价比排序）：\n'));
 
-      const choice = await askDefault(rl, '选择 provider', '1');
+      console.log(`  ${chalk.cyan('1')}  ${chalk.white('Anthropic Claude Sonnet 4.5')} ${chalk.gray('（推荐）')}`);
+      console.log(chalk.gray('      性能强、稳定、支持工具调用'));
+      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://console.anthropic.com'));
+      console.log('');
+
+      console.log(`  ${chalk.cyan('2')}  ${chalk.white('DeepSeek Chat')}`);
+      console.log(chalk.gray('      国产大模型、便宜、中文友好'));
+      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://platform.deepseek.com'));
+      console.log('');
+
+      console.log(`  ${chalk.cyan('3')}  ${chalk.white('OpenRouter')}`);
+      console.log(chalk.gray('      支持 100+ 模型、按需切换'));
+      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://openrouter.ai/settings/keys'));
+      console.log('');
+
+      console.log(`  ${chalk.cyan('4')}  ${chalk.white('OpenAI GPT-4o')}`);
+      console.log(chalk.gray('      经典选择、生态完善'));
+      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://platform.openai.com/api-keys'));
+      console.log('');
+
+      console.log(`  ${chalk.cyan('5')}  ${chalk.white('Moonshot AI (月之暗面)')}`);
+      console.log(chalk.gray('      国产、支持 200K 上下文'));
+      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://platform.moonshot.cn/console/api-keys'));
+      console.log('');
+
+      console.log(`  ${chalk.cyan('6')}  ${chalk.white('智谱 GLM-4-Plus')}`);
+      console.log(chalk.gray('      国产、支持工具调用'));
+      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://open.bigmodel.cn/usercenter/apikeys'));
+      console.log('');
+
+      console.log(`  ${chalk.cyan('7')}  ${chalk.white('阿里通义千问')}`);
+      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://dashscope.console.aliyun.com/apiKey'));
+      console.log('');
+
+      console.log(`  ${chalk.cyan('8')}  ${chalk.white('百度文心一言')}`);
+      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application'));
+      console.log('');
+
+      console.log(`  ${chalk.cyan('9')}  ${chalk.white('其他 OpenAI 兼容 API')}`);
+      console.log(chalk.gray('      自定义 Base URL 和模型\n'));
+
+      const choice = await askDefault(rl, '选择模型 (1-9)', '1');
+
+      let configured = false;
 
       if (choice === '1') {
-        const key = await ask(rl, chalk.white('Anthropic API Key (sk-ant-...): '));
+        // Anthropic Claude
+        console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://console.anthropic.com') + chalk.gray(' 创建 API Key'));
+        const key = await ask(rl, chalk.white('\nAnthropic API Key (sk-ant-...): '));
         if (key) {
           env.LLM_PROVIDER = 'claude';
-          env.LLM_MODEL    = env.LLM_MODEL || 'claude-sonnet-4-6';
+          env.LLM_MODEL = 'claude-sonnet-4-5';
           env.ANTHROPIC_API_KEY = key;
-          console.log(chalk.green('✓ 已记录'));
+          configured = true;
         }
       } else if (choice === '2') {
-        const key = await ask(rl, chalk.white('OpenRouter API Key (sk-or-v1-...): '));
-        const model = await askDefault(rl, '模型 ID', 'anthropic/claude-sonnet-4-5');
+        // DeepSeek
+        console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://platform.deepseek.com') + chalk.gray(' 注册并创建 Key'));
+        const key = await ask(rl, chalk.white('\nDeepSeek API Key: '));
         if (key) {
-          env.LLM_PROVIDER    = 'custom';
-          env.LLM_MODEL       = model;
-          env.CUSTOM_API_KEY  = key;
+          env.LLM_PROVIDER = 'custom';
+          env.LLM_MODEL = 'deepseek-chat';
+          env.CUSTOM_API_KEY = key;
+          env.CUSTOM_BASE_URL = 'https://api.deepseek.com';
+          configured = true;
+        }
+      } else if (choice === '3') {
+        // OpenRouter
+        console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://openrouter.ai/settings/keys') + chalk.gray(' 创建免费 Key'));
+        const key = await ask(rl, chalk.white('\nOpenRouter API Key (sk-or-v1-...): '));
+        const model = await askDefault(rl, '选择模型', 'anthropic/claude-sonnet-4-5');
+        if (key) {
+          env.LLM_PROVIDER = 'custom';
+          env.LLM_MODEL = model;
+          env.CUSTOM_API_KEY = key;
           env.CUSTOM_BASE_URL = 'https://openrouter.ai/api/v1';
-          console.log(chalk.green('✓ 已记录'));
+          configured = true;
+        }
+      } else if (choice === '4') {
+        // OpenAI
+        console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://platform.openai.com/api-keys') + chalk.gray(' 创建 Key'));
+        const key = await ask(rl, chalk.white('\nOpenAI API Key (sk-...): '));
+        if (key) {
+          env.LLM_PROVIDER = 'openai';
+          env.LLM_MODEL = 'gpt-4o';
+          env.OPENAI_API_KEY = key;
+          configured = true;
+        }
+      } else if (choice === '5') {
+        // Moonshot
+        console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://platform.moonshot.cn/console/api-keys') + chalk.gray(' 创建 Key'));
+        const key = await ask(rl, chalk.white('\nMoonshot API Key: '));
+        if (key) {
+          env.LLM_PROVIDER = 'custom';
+          env.LLM_MODEL = 'moonshot-v1-8k';
+          env.CUSTOM_API_KEY = key;
+          env.CUSTOM_BASE_URL = 'https://api.moonshot.cn/v1';
+          configured = true;
+        }
+      } else if (choice === '6') {
+        // 智谱 GLM
+        console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://open.bigmodel.cn/usercenter/apikeys') + chalk.gray(' 创建 Key'));
+        const key = await ask(rl, chalk.white('\n智谱 API Key: '));
+        if (key) {
+          env.LLM_PROVIDER = 'custom';
+          env.LLM_MODEL = 'glm-4-plus';
+          env.CUSTOM_API_KEY = key;
+          env.CUSTOM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
+          configured = true;
+        }
+      } else if (choice === '7') {
+        // 通义千问
+        console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://dashscope.console.aliyun.com/apiKey') + chalk.gray(' 创建 Key'));
+        const key = await ask(rl, chalk.white('\n通义千问 API Key: '));
+        if (key) {
+          env.LLM_PROVIDER = 'custom';
+          env.LLM_MODEL = 'qwen-plus';
+          env.CUSTOM_API_KEY = key;
+          env.CUSTOM_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+          configured = true;
+        }
+      } else if (choice === '8') {
+        // 百度文心
+        console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application'));
+        console.log(chalk.yellow('      注意：文心一言需要 API Key 和 Secret Key 两个值'));
+        const apiKey = await ask(rl, chalk.white('\nAPI Key: '));
+        const secretKey = await ask(rl, chalk.white('Secret Key: '));
+        if (apiKey && secretKey) {
+          env.LLM_PROVIDER = 'custom';
+          env.LLM_MODEL = 'ernie-4.0-8k';
+          env.CUSTOM_API_KEY = apiKey;
+          env.CUSTOM_BASE_URL = `https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions_pro?access_token=${secretKey}`;
+          configured = true;
         }
       } else {
+        // 自定义
+        console.log(chalk.gray('\n请手动输入以下信息：'));
         const baseUrl = await ask(rl, chalk.white('API Base URL: '));
-        const key     = await ask(rl, chalk.white('API Key: '));
-        const model   = await ask(rl, chalk.white('模型 ID: '));
-        if (key && baseUrl) {
-          env.LLM_PROVIDER    = 'custom';
-          env.LLM_MODEL       = model;
-          env.CUSTOM_API_KEY  = key;
+        const key = await ask(rl, chalk.white('API Key: '));
+        const model = await ask(rl, chalk.white('模型 ID: '));
+        if (key && baseUrl && model) {
+          env.LLM_PROVIDER = 'custom';
+          env.LLM_MODEL = model;
+          env.CUSTOM_API_KEY = key;
           env.CUSTOM_BASE_URL = baseUrl;
-          console.log(chalk.green('✓ 已记录'));
+          configured = true;
         }
       }
 
-      writeEnv(env);
+      if (configured) {
+        writeEnv(env);
+        console.log(chalk.green('\n✓ API Key 已保存到 .env 文件'));
+      } else {
+        console.log(chalk.yellow('\n⚠️  未配置 API Key，稍后可运行 hireclaw setup 重新配置'));
+      }
     }
 
     // ── STEP 2: 测试连接 ─────────────────────────────────
