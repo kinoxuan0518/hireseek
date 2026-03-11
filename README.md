@@ -29,12 +29,13 @@ hireclaw
 |------|--------|
 | `hireclaw` | 对话模式（默认）——聊候选人、改策略、触发任务 |
 | `hireclaw setup` | 初始化向导，3 分钟配好一切 |
+| `hireclaw dashboard` | 启动本地控制台（实时截图 + 日志 + 任务控制 + 介入指令） |
 | `hireclaw run` | 自主 sourcing，按职位配置决定渠道 |
 | `hireclaw run boss` | 只跑 BOSS直聘 |
 | `hireclaw scan` | 扫描收件箱，更新已回复候选人 |
 | `hireclaw update 张三 replied` | 手动更新候选人状态 |
 | `hireclaw funnel` | 查看招聘漏斗数据 |
-| `hireclaw start` | 启动定时守护进程 |
+| `hireclaw start` | 启动定时守护进程（自动 sourcing + 主动提醒） |
 
 ---
 
@@ -54,10 +55,13 @@ hireclaw
 ## 核心能力
 
 - **自主 Sourcing**：用 Playwright 控制浏览器，截图 → LLM 决策 → 执行动作，循环直到完成
-- **对话模式**：直接和 HireClaw 聊，它能触发任务、查候选人、搜背景、改策略
-- **跨会话记忆**：每次对话结束后自动摘要存库，下次启动重新注入——它认识你
+- **实时控制台**：Web dashboard 看实时截图、LLM 推理日志，跑着跑着能发介入指令调整策略
+- **对话模式**：直接和 HireClaw 聊，12 种工具（触发任务、查候选人、搜背景、改策略、分析图片、执行 shell）
+- **跨会话记忆**：结构化摘要 + 最后几轮原文，下次启动重新注入——它认识你
+- **主动提醒**：候选人 7 天没回、今天没跑 sourcing、漏斗快空了 → macOS 系统通知
+- **自我进化**：能读写自己的源代码（`src/`），TypeScript 校验，写错自动回滚
 - **招聘知识内置**：候选人评估框架、触达策略、话术指南，基于真实招聘经验
-- **网络搜索**：搜公司动态、候选人背景、行业新闻（支持 Tavily / Brave / DuckDuckGo）
+- **网络搜索 + 图片分析**：搜公司动态、分析简历截图（需 vision 模型）
 - **结果追踪**：候选人状态管理、回复率统计、漏斗视图
 
 ---
@@ -70,14 +74,17 @@ hireclaw/
 │   └── hireclaw          # 全局命令入口
 ├── src/
 │   ├── index.ts          # CLI 路由
-│   ├── chat.ts           # 对话模式 + 工具调用
+│   ├── chat.ts           # 对话模式 + 12种工具（含图片分析、shell执行、代码修改）
+│   ├── dashboard.ts      # 本地控制台（实时截图 + 日志流 + 介入）
 │   ├── orchestrator.ts   # 渠道协调器
 │   ├── memory.ts         # 记忆注入（历史对话 + DB 数据）
 │   ├── search.ts         # 网络搜索模块
 │   ├── setup.ts          # 初始化向导
+│   ├── notifier.ts       # 主动通知（macOS 系统通知 + 飞书）
+│   ├── events.ts         # 全局事件总线（runner → dashboard 通信）
 │   ├── db.ts             # SQLite 数据库
 │   ├── config.ts         # 环境配置
-│   ├── scheduler.ts      # 定时守护进程
+│   ├── scheduler.ts      # 定时守护进程 + 主动检查
 │   ├── browser-runner.ts # Playwright 控制
 │   ├── runners/          # LLM provider 实现
 │   └── skills/
