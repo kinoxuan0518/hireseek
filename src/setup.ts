@@ -318,52 +318,52 @@ export async function runSetup(): Promise<void> {
       console.log(chalk.yellow('  Key 可能有误，或者网络不通。先继续配置，后续再修复。'));
     }
 
-    // ── STEP 3: 职位配置 ─────────────────────────────────
-    section('第三步：设置招聘职位');
+    // ── STEP 3: 职位配置（改为可选）─────────────────────
+    section('第三步：招聘职位配置（可选）');
 
     const existingJob = fs.existsSync(JOB_PATH) &&
       fs.readFileSync(JOB_PATH, 'utf-8').includes('title:') &&
       !fs.readFileSync(JOB_PATH, 'utf-8').includes('title: AI 算法工程师');
 
     if (existingJob) {
-      const skip = await askYN(rl, '检测到已有职位配置，是否跳过？', 'y');
-      if (skip) {
-        console.log(chalk.green('✓ 保留现有职位配置'));
-      } else {
-        await collectJobInfo(rl);
-      }
+      console.log(chalk.green('✓ 检测到已有职位配置，跳过此步'));
     } else {
-      console.log('告诉我你在招什么人，我来帮你设置。\n');
-      await collectJobInfo(rl);
+      console.log(chalk.gray('职位信息可以现在配置，也可以稍后在对话中配置。\n'));
+      console.log(chalk.white('💡 推荐方式：进入对话模式后，我会帮你智能配置职位\n'));
+      console.log(chalk.gray('   你可以：'));
+      console.log(chalk.gray('   • 直接口头描述职位需求'));
+      console.log(chalk.gray('   • 让我读取你的 JD 文档'));
+      console.log(chalk.gray('   • 提供线上 JD 链接让我抓取\n'));
+
+      const configNow = await askYN(rl, '是否现在快速配置？（不配置也可以正常使用）', 'n');
+
+      if (configNow) {
+        await collectJobInfo(rl);
+      } else {
+        console.log(chalk.green('\n✓ 跳过职位配置，稍后在对话中配置'));
+        console.log(chalk.gray('   进入对话后，我会主动询问并帮你配置\n'));
+      }
     }
 
-    // ── STEP 4: BOSS直聘 ─────────────────────────────────
-    section('第四步：登录 BOSS直聘');
-    console.log('HireClaw 需要在浏览器里操作 BOSS直聘。');
-    console.log('请确保你已经在 BOSS直聘企业端 登录好账号。\n');
-    console.log(chalk.gray('  如果还没登录，现在去浏览器登录一下，回来再继续。'));
-    await ask(rl, chalk.white('\n登录好了，按 Enter 继续...'));
-    console.log(chalk.green('✓ 记录在案'));
-
-    // ── STEP 5: 完成 ─────────────────────────────────────
+    // ── STEP 4: 完成 ─────────────────────────────────────
     section('🎉 初始化完成！');
 
-    console.log(chalk.green('恭喜！HireClaw 已经配置完成，随时可以开始工作。\n'));
+    console.log(chalk.green('太好了！AI 大模型已配置完成 🎉\n'));
 
-    console.log(chalk.bold('📖 常用命令：\n'));
-    console.log(`  ${chalk.cyan('hireclaw')}            → 对话模式，自然语言控制一切`);
-    console.log(`  ${chalk.cyan('hireclaw run')}        → 自动执行 sourcing`);
-    console.log(`  ${chalk.cyan('hireclaw scan')}       → 扫描收件箱，更新回复`);
-    console.log(`  ${chalk.cyan('hireclaw funnel')}     → 查看招聘漏斗数据`);
-    console.log(`  ${chalk.cyan('hireclaw dashboard')}  → 启动可视化控制台\n`);
+    console.log(chalk.bold('🚀 接下来：\n'));
+    console.log(chalk.white('  马上进入对话模式，我会：'));
+    console.log(chalk.gray('  • 主动了解你的招聘需求'));
+    console.log(chalk.gray('  • 帮你智能配置职位信息'));
+    console.log(chalk.gray('  • 可以读取 JD 文档或线上链接'));
+    console.log(chalk.gray('  • 自然对话，灵活调整\n'));
 
-    console.log(chalk.bold('💡 对话模式示例：\n'));
-    console.log(chalk.gray('  • "帮我在 BOSS直聘找 10 个前端工程师"'));
-    console.log(chalk.gray('  • "查看今天沟通的候选人"'));
-    console.log(chalk.gray('  • "把张三标记为已面试"'));
-    console.log(chalk.gray('  • "分析一下候选人回复率"\n'));
+    console.log(chalk.bold('💬 你可以对我说：\n'));
+    console.log(chalk.cyan('  "我想招一个前端工程师，要求..."'));
+    console.log(chalk.cyan('  "读取这个 JD 文档：/path/to/jd.pdf"'));
+    console.log(chalk.cyan('  "分析这个链接的职位：https://..."'));
+    console.log(chalk.cyan('  "帮我在 BOSS直聘找 10 个候选人"\n'));
 
-    console.log(chalk.gray(`完整手册：workspace/PLAYBOOK.md\n`));
+    console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
   } finally {
     rl.close();

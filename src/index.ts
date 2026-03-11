@@ -107,7 +107,14 @@ async function main(): Promise<void> {
   const channel = args[1] as Channel | undefined;
 
   if (!command || command === 'chat') {
-    await checkSetup();
+    const ranSetup = await checkSetup();
+
+    // 如果刚运行了 setup，重新加载环境变量
+    if (ranSetup) {
+      const dotenv = await import('dotenv');
+      dotenv.config({ override: true });
+    }
+
     await startChat();
 
   } else if (command === 'setup') {

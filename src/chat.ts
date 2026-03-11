@@ -1728,6 +1728,20 @@ export async function startChat(): Promise<void> {
   console.log(chalk.yellow('💭 提示：直接说出你的需求，我会自动调用合适的工具完成任务'));
   console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
+  // 检查是否首次使用（没有职位配置）
+  const job = loadActiveJob();
+  const isFirstTime = !job || job.title === 'AI 算法工程师';
+
+  if (isFirstTime) {
+    // AI 主动发起对话
+    console.log(chalk.cyan('🦞: ') + chalk.white('你好！我注意到你还没有配置招聘职位。'));
+    console.log(chalk.cyan('    ') + chalk.white('你想招什么职位呢？你可以：\n'));
+    console.log(chalk.gray('    • 直接口头描述：') + chalk.white('"我想招一个前端工程师，要求..."'));
+    console.log(chalk.gray('    • 提供 JD 文档：') + chalk.white('"读取这个 JD: /path/to/jd.pdf"'));
+    console.log(chalk.gray('    • 分享在线链接：') + chalk.white('"分析这个职位: https://..."'));
+    console.log('');
+  }
+
   // Ctrl+C 也触发记忆保存
   process.once('SIGINT', async () => {
     console.log(chalk.gray('\n\n正在保存本次对话记忆...'));
