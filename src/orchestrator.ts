@@ -8,6 +8,8 @@ import { buildMemoryContext, buildReflectionPrompt } from './memory';
 import { emitLog, emitStatus } from './events';
 import { getAccountId, hasStorageState } from './accounts';
 import { generatePlan, confirmPlan } from './planner';
+import { detectErrors } from './error-detector';
+import { retryWithBackoff, saveCheckpoint, loadCheckpoint, removeCheckpoint, waitForUserIntervention } from './retry-handler';
 import type { Channel } from './types';
 
 const TASK_PROMPT = (channelLabel: string) => `
@@ -335,7 +337,8 @@ async function executeTasks(
 
       // 执行任务（使用独立的 page）
       console.log(`[Orchestrator] 🚀 启动 ${label}`);
-      await runChannelWithPage(channel, jobId, page);
+      const accountId = getAccountId(channel, accountIndex);
+      await runChannelWithPage(channel, jobId, page, accountId);
     })
   );
 
@@ -346,13 +349,23 @@ async function executeTasks(
 }
 
 /** 使用指定 page 执行渠道任务（用于并行） */
-async function runChannelWithPage(channel: Channel, jobId: string, page: any): Promise<void> {
+async function runChannelWithPage(channel: Channel, jobId: string, page: any, accountId?: string): Promise<void> {
   // 这里复用 runChannel 的逻辑，但用指定的 page
   const label = CHANNEL_LABEL[channel];
   const startedAt = dayjs().toISOString();
   const runResult = taskRunOps.start.run({ job_id: jobId, channel, started_at: startedAt });
   const runId = runResult.lastInsertRowid as number;
   const startMs = Date.now();
+
+  // 生成账号 ID（用于检查点）
+  const checkpointAccountId = accountId || `${channel}_1`;
+
+  // 检查是否有未完成的检查点
+  const checkpoint = loadCheckpoint(jobId, channel, checkpointAccountId);
+  if (checkpoint && checkpoint.status === 'in_progress') {
+    console.log(`\n[Recovery] 📂 发现未完成的任务，继续执行...`);
+    console.log(`  已完成：${checkpoint.contactedCandidates.length} 人`);
+  }
 
   try {
     // 导航到对应招聘平台
@@ -391,10 +404,44 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any): P
       .join('\n\n---\n\n');
 
     const runner = createRunner();
-    const result = await runner.runSkill(page, systemPrompt, TASK_PROMPT(label), (msg) => {
-      console.log(`[${label}] ${msg}`);
-      emitLog(`[${label}] ${msg}`);
-    });
+
+    // 带错误恢复的执行
+    const result = await retryWithBackoff(
+      async () => {
+        // 执行前检测错误
+        const errorBefore = await detectErrors(page, channel);
+        if (errorBefore.detected) {
+          console.log(`\n[Recovery] 检测到问题：${errorBefore.message}`);
+
+          if (errorBefore.type === 'captcha' || errorBefore.type === 'login_expired') {
+            // 需要用户介入
+            await waitForUserIntervention(errorBefore.suggestedAction!);
+          } else if (errorBefore.type === 'rate_limit') {
+            // 触达限制，直接结束
+            throw new Error('触达限制：' + errorBefore.message);
+          } else if (errorBefore.type === 'network_error') {
+            // 网络错误，等待后重试
+            console.log('[Recovery] 网络错误，等待 5 秒后重试...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
+        }
+
+        // 执行任务
+        return await runner.runSkill(page, systemPrompt, TASK_PROMPT(label), (msg) => {
+          console.log(`[${label}] ${msg}`);
+          emitLog(`[${label}] ${msg}`);
+        });
+      },
+      {
+        maxRetries: 2,
+        initialDelayMs: 3000,
+        shouldRetry: (error: any) => {
+          // 网络错误可以重试，触达限制不重试
+          const message = error.message || '';
+          return !message.includes('触达限制');
+        },
+      }
+    );
 
     const durationSec = Math.round((Date.now() - startMs) / 1000);
     console.log(`\n[Orchestrator] ✓ ${label} 完成 (${durationSec}s)`);
@@ -408,6 +455,9 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any): P
       skipped_count: result.skipped,
       error: null,
     });
+
+    // 删除检查点（任务已完成）
+    removeCheckpoint(jobId, channel, checkpointAccountId);
 
     // 生成反思
     const reflectionPrompt = buildReflectionPrompt(channel, result.contacted, result.skipped, result.summary);
@@ -423,6 +473,21 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any): P
     const error = err instanceof Error ? err.message : String(err);
     console.error(`\n[Orchestrator] ✗ ${label} 失败: ${error}`);
     emitLog(`✗ ${label} 失败: ${error}`);
+
+    // 保存检查点（可选恢复）
+    if (!error.includes('触达限制')) {
+      saveCheckpoint({
+        jobId,
+        channel,
+        accountId: checkpointAccountId,
+        contactedCandidates: [],  // TODO: 从 result 中提取
+        currentPosition: 0,
+        timestamp: new Date().toISOString(),
+        status: 'error',
+        errorMessage: error,
+      });
+      console.log('[Recovery] 💾 已保存执行状态，可以稍后继续');
+    }
 
     taskRunOps.complete.run({
       id: runId,

@@ -6,3 +6,4 @@ dist/
 *.db-wal
 data/
 workspace/accounts/
+workspace/checkpoints/
