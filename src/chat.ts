@@ -246,6 +246,82 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'create_task',
+      description: '创建一个新任务。可用于拆解复杂招聘目标，如"本月招 5 个岗位"可拆成 5 个子任务。',
+      parameters: {
+        type: 'object',
+        required: ['title'],
+        properties: {
+          title: {
+            type: 'string',
+            description: '任务标题，如"招聘 AI 算法工程师"',
+          },
+          description: {
+            type: 'string',
+            description: '任务详细描述',
+          },
+          priority: {
+            type: 'number',
+            description: '优先级（0-10），数字越大优先级越高',
+          },
+          parentId: {
+            type: 'number',
+            description: '父任务 ID（如果是子任务）',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_task',
+      description: '更新任务状态或内容。',
+      parameters: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: {
+            type: 'number',
+            description: '任务 ID',
+          },
+          status: {
+            type: 'string',
+            enum: ['pending', 'in_progress', 'blocked', 'completed', 'cancelled'],
+            description: '新状态',
+          },
+          title: {
+            type: 'string',
+            description: '新标题',
+          },
+          priority: {
+            type: 'number',
+            description: '新优先级',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_tasks',
+      description: '查看任务列表或看板。',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: {
+            type: 'string',
+            enum: ['pending', 'in_progress', 'blocked', 'completed', 'cancelled'],
+            description: '按状态筛选',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'list_candidates',
       description: '按状态列出候选人，如查看所有未回复、已面试的候选人。',
       parameters: {
@@ -504,6 +580,56 @@ async function executeTool(name: string, args: any): Promise<string> {
       if (!target.startsWith(wsRoot)) return '不允许读 workspace 以外的文件';
       if (!fs.existsSync(target)) return `文件不存在：workspace/${args.filename}`;
       return fs.readFileSync(target, 'utf-8');
+    }
+
+    case 'create_task': {
+      const { createTask } = await import('./tasks');
+      const taskId = createTask({
+        title: args.title,
+        description: args.description,
+        priority: args.priority,
+        parentId: args.parentId,
+      });
+      return `✓ 已创建任务 #${taskId}：${args.title}`;
+    }
+
+    case 'update_task': {
+      const { updateTask, getTask } = await import('./tasks');
+      const task = getTask(args.id);
+      if (!task) return `任务 #${args.id} 不存在`;
+
+      updateTask(args.id, {
+        status: args.status,
+        title: args.title,
+        priority: args.priority,
+      });
+
+      return `✓ 已更新任务 #${args.id}`;
+    }
+
+    case 'list_tasks': {
+      const { listTasksByStatus, listAllTasks, displayTaskBoard } = await import('./tasks');
+
+      if (args.status) {
+        const tasks = listTasksByStatus(args.status);
+        if (tasks.length === 0) {
+          return `暂无 ${args.status} 状态的任务`;
+        }
+        return tasks.map(t => `#${t.id} ${t.title}`).join('\n');
+      } else {
+        const tasks = listAllTasks();
+        if (tasks.length === 0) {
+          return '暂无任务';
+        }
+
+        const summary = {
+          pending: tasks.filter(t => t.status === 'pending').length,
+          in_progress: tasks.filter(t => t.status === 'in_progress').length,
+          completed: tasks.filter(t => t.status === 'completed').length,
+        };
+
+        return `任务总览：\n- 待处理：${summary.pending} 个\n- 进行中：${summary.in_progress} 个\n- 已完成：${summary.completed} 个\n\n详细看板请运行：hireclaw tasks`;
+      }
     }
 
     case 'list_candidates': {

@@ -7,6 +7,7 @@ import { runSetup } from './setup';
 import { startDashboard } from './dashboard';
 import { db, candidateOps } from './db';
 import { loadActiveJob } from './skills/loader';
+import { createTask, updateTask, deleteTask, displayTaskBoard, displayTask, listAllTasks } from './tasks';
 import type { Channel } from './types';
 
 const VALID_STATUSES = ['contacted', 'replied', 'interviewed', 'offered', 'joined', 'rejected', 'dropped'];
@@ -33,6 +34,8 @@ const USAGE = `
   hireclaw scan                扫描收件箱，更新已回复候选人
   hireclaw update <姓名> <状态>  手动更新候选人状态
   hireclaw funnel              查看招聘漏斗
+  hireclaw tasks               查看任务看板
+  hireclaw tasks <ID>          查看任务详情
   hireclaw start               启动定时守护进程
 
 渠道: boss | maimai | linkedin | followup
@@ -156,6 +159,22 @@ async function main(): Promise<void> {
       }
     }
     console.log();
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'tasks') {
+    const taskId = args[1];
+
+    if (taskId) {
+      // 显示任务详情
+      displayTask(parseInt(taskId, 10));
+    } else {
+      // 显示任务看板
+      const job = loadActiveJob();
+      const jobId = job ? job.title.replace(/\s+/g, '_') : undefined;
+      displayTaskBoard(jobId);
+    }
+
     db.close();
     process.exit(0);
 

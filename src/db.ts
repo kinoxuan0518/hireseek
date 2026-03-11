@@ -69,11 +69,30 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS tasks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT NOT NULL,
+    description TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    priority    INTEGER NOT NULL DEFAULT 0,
+    parent_id   INTEGER,
+    job_id      TEXT,
+    assigned_to TEXT,
+    due_date    TEXT,
+    completed_at TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_candidates_channel  ON candidates(channel);
   CREATE INDEX IF NOT EXISTS idx_candidates_job_id   ON candidates(job_id);
   CREATE INDEX IF NOT EXISTS idx_candidates_status   ON candidates(status);
   CREATE INDEX IF NOT EXISTS idx_task_runs_channel   ON task_runs(channel);
   CREATE INDEX IF NOT EXISTS idx_reflections_channel ON reflections(channel);
+  CREATE INDEX IF NOT EXISTS idx_tasks_status        ON tasks(status);
+  CREATE INDEX IF NOT EXISTS idx_tasks_parent        ON tasks(parent_id);
+  CREATE INDEX IF NOT EXISTS idx_tasks_job_id        ON tasks(job_id);
 `);
 
 // ── 候选人操作 ────────────────────────────────────────────
@@ -176,5 +195,91 @@ export const reflectionOps = {
     SELECT content, created_at FROM reflections
     WHERE channel = ? AND job_id = ?
     ORDER BY created_at DESC LIMIT 5
+  `),
+};
+
+// ── 任务管理操作 ──────────────────────────────────────────
+export const taskOps = {
+  create: db.prepare<{
+    title: string;
+    description?: string;
+    priority?: number;
+    parent_id?: number;
+    job_id?: string;
+    assigned_to?: string;
+    due_date?: string;
+  }>(`
+    INSERT INTO tasks (title, description, priority, parent_id, job_id, assigned_to, due_date)
+    VALUES (@title, @description, @priority, @parent_id, @job_id, @assigned_to, @due_date)
+  `),
+
+  update: db.prepare<{
+    id: number;
+    status?: string;
+    title?: string;
+    description?: string;
+    priority?: number;
+    assigned_to?: string;
+    due_date?: string;
+    completed_at?: string;
+  }>(`
+    UPDATE tasks
+    SET status      = COALESCE(@status, status),
+        title       = COALESCE(@title, title),
+        description = COALESCE(@description, description),
+        priority    = COALESCE(@priority, priority),
+        assigned_to = COALESCE(@assigned_to, assigned_to),
+        due_date    = COALESCE(@due_date, due_date),
+        completed_at = @completed_at,
+        updated_at  = datetime('now')
+    WHERE id = @id
+  `),
+
+  delete: db.prepare<[number]>(`
+    DELETE FROM tasks WHERE id = ?
+  `),
+
+  get: db.prepare<[number]>(`
+    SELECT * FROM tasks WHERE id = ?
+  `),
+
+  listAll: db.prepare(`
+    SELECT * FROM tasks
+    ORDER BY
+      CASE status
+        WHEN 'in_progress' THEN 1
+        WHEN 'pending' THEN 2
+        WHEN 'blocked' THEN 3
+        WHEN 'completed' THEN 4
+        ELSE 5
+      END,
+      priority DESC,
+      created_at DESC
+  `),
+
+  listByStatus: db.prepare<[string]>(`
+    SELECT * FROM tasks
+    WHERE status = ?
+    ORDER BY priority DESC, created_at DESC
+  `),
+
+  listByJob: db.prepare<[string]>(`
+    SELECT * FROM tasks
+    WHERE job_id = ?
+    ORDER BY priority DESC, created_at DESC
+  `),
+
+  listSubtasks: db.prepare<[number]>(`
+    SELECT * FROM tasks
+    WHERE parent_id = ?
+    ORDER BY priority DESC, created_at DESC
+  `),
+
+  stats: db.prepare(`
+    SELECT
+      status,
+      COUNT(*) as count
+    FROM tasks
+    GROUP BY status
   `),
 };
