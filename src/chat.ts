@@ -1672,8 +1672,21 @@ export async function startChat(): Promise<void> {
     // 静默失败
   }
 
+  // 检查 API Key
+  const apiKey = config.custom.apiKey || config.anthropic.apiKey;
+  if (!apiKey) {
+    console.log(chalk.red('\n❌ 错误：未配置 API Key\n'));
+    console.log(chalk.yellow('请先配置 API Key：'));
+    console.log(chalk.gray('  1. 方法一：运行 hireclaw setup 进行配置'));
+    console.log(chalk.gray('  2. 方法二：设置环境变量'));
+    console.log(chalk.gray('     export OPENAI_API_KEY="your-key"'));
+    console.log(chalk.gray('  3. 方法三：编辑配置文件'));
+    console.log(chalk.gray(`     ${path.join(config.workspace.dir, 'config.yaml')}\n`));
+    process.exit(1);
+  }
+
   const client = new OpenAI({
-    apiKey:  config.custom.apiKey || config.anthropic.apiKey,
+    apiKey,
     baseURL: config.custom.baseUrl || config.anthropic.baseUrl || undefined,
   });
   const model = config.llm.model;
@@ -1687,9 +1700,33 @@ export async function startChat(): Promise<void> {
     output: process.stdout,
   });
 
-  console.log(chalk.cyan('\n🦞 HireClaw 对话模式'));
-  console.log(chalk.gray('直接说话，输入 exit 退出'));
-  console.log(chalk.gray('命令: /export [标题] - 导出会话, /sessions - 查看会话列表\n'));
+  console.log(chalk.cyan('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+  console.log(chalk.cyan('🦞 HireClaw 对话模式 - 你的智能招聘助手'));
+  console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+
+  console.log(chalk.bold('💡 快速开始：'));
+  console.log(chalk.gray('  • "帮我在 BOSS直聘找 10 个前端工程师"'));
+  console.log(chalk.gray('  • "查看今天的候选人"'));
+  console.log(chalk.gray('  • "分析一下候选人回复率"'));
+  console.log(chalk.gray('  • "把张三标记为已面试"\n'));
+
+  console.log(chalk.bold('⚡ 快捷命令：'));
+  console.log(chalk.gray('  /找候选人 <职位>    - 自动 sourcing'));
+  console.log(chalk.gray('  /候选人漏斗        - 查看招聘数据'));
+  console.log(chalk.gray('  /分析简历 <路径>   - PDF 简历分析'));
+  console.log(chalk.gray('  /export [标题]     - 导出会话'));
+  console.log(chalk.gray('  /sessions         - 查看所有会话'));
+  console.log(chalk.gray('  exit              - 退出对话\n'));
+
+  console.log(chalk.bold('🎯 核心功能：'));
+  console.log(chalk.gray('  ✓ 智能对话 - 自然语言控制所有功能'));
+  console.log(chalk.gray('  ✓ 自动记忆 - 记住你的偏好和工作习惯'));
+  console.log(chalk.gray('  ✓ 工具调用 - 44+ 工具随时待命'));
+  console.log(chalk.gray('  ✓ Git 集成 - 代码管理一句话搞定'));
+  console.log(chalk.gray('  ✓ 跨平台导出 - 会话可导出到 claude.ai\n'));
+
+  console.log(chalk.yellow('💭 提示：直接说出你的需求，我会自动调用合适的工具完成任务'));
+  console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
   // Ctrl+C 也触发记忆保存
   process.once('SIGINT', async () => {
