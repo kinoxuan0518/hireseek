@@ -9,6 +9,7 @@ import path from 'path';
 import { execSync } from 'child_process';
 import OpenAI from 'openai';
 import chalk from 'chalk';
+import yaml from 'js-yaml';
 import { config } from './config';
 import { loadWorkspaceFile, loadActiveJob, jobToPrompt } from './skills/loader';
 import { buildMemoryContext, buildConversationMemory } from './memory';
@@ -16,6 +17,31 @@ import { candidateOps, conversationOps, db } from './db';
 import { runChannel, runJob, scanInbox } from './orchestrator';
 import { webSearch } from './search';
 import type { Channel } from './types';
+
+/**
+ * 如果配置了 MCP 服务器，则初始化它们
+ */
+async function initializeMCPIfConfigured(): Promise<void> {
+  const mcpConfigPath = path.join(config.workspace.dir, 'mcp-servers.yaml');
+
+  if (!fs.existsSync(mcpConfigPath)) {
+    return; // 没有配置文件，跳过
+  }
+
+  try {
+    const content = fs.readFileSync(mcpConfigPath, 'utf-8');
+    const mcpConfig = yaml.load(content) as { servers?: any[] };
+
+    if (!mcpConfig?.servers || mcpConfig.servers.length === 0) {
+      return; // 没有配置服务器，跳过
+    }
+
+    const { initializeMCPServers } = await import('./mcp-client');
+    await initializeMCPServers(mcpConfig.servers);
+  } catch (err: any) {
+    console.error(chalk.yellow(`[MCP] 初始化失败: ${err.message}`));
+  }
+}
 
 // ── 可用工具定义 ─────────────────────────────────────────
 const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
@@ -322,6 +348,63 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'mcp_list_servers',
+      description: '列出所有已连接的 MCP 服务器及其提供的工具和资源。',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'mcp_call_tool',
+      description: '调用 MCP 服务器提供的工具。先用 mcp_list_servers 查看可用工具。',
+      parameters: {
+        type: 'object',
+        required: ['server', 'tool', 'args'],
+        properties: {
+          server: {
+            type: 'string',
+            description: 'MCP 服务器名称，如 "filesystem" 或 "github"',
+          },
+          tool: {
+            type: 'string',
+            description: '工具名称',
+          },
+          args: {
+            type: 'object',
+            description: '工具参数（JSON 对象）',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'mcp_read_resource',
+      description: '读取 MCP 资源（文件、文档等）。先用 mcp_list_servers 查看可用资源。',
+      parameters: {
+        type: 'object',
+        required: ['server', 'uri'],
+        properties: {
+          server: {
+            type: 'string',
+            description: 'MCP 服务器名称',
+          },
+          uri: {
+            type: 'string',
+            description: '资源 URI',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'list_candidates',
       description: '按状态列出候选人，如查看所有未回复、已面试的候选人。',
       parameters: {
@@ -372,10 +455,355 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'git_status',
+      description: '查看当前 git 仓库的状态：当前分支、已修改文件、未跟踪文件等。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_commit',
+      description: '提交代码更改到 git 仓库。',
+      parameters: {
+        type: 'object',
+        required: ['message'],
+        properties: {
+          message: { type: 'string', description: '提交信息' },
+          files: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '要提交的文件列表，不填则提交所有更改',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_create_branch',
+      description: '创建并切换到新分支。',
+      parameters: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', description: '新分支名称' },
+          baseBranch: { type: 'string', description: '基于哪个分支创建，默认当前分支' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_push',
+      description: '推送当前分支到远程仓库。',
+      parameters: {
+        type: 'object',
+        properties: {
+          force: {
+            type: 'boolean',
+            description: '是否强制推送（谨慎使用）',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_create_pr',
+      description: '创建 GitHub Pull Request（需要 gh CLI）。',
+      parameters: {
+        type: 'object',
+        required: ['title'],
+        properties: {
+          title: { type: 'string', description: 'PR 标题' },
+          body: { type: 'string', description: 'PR 描述' },
+          baseBranch: { type: 'string', description: '目标分支，默认 main/master' },
+          draft: { type: 'boolean', description: '是否创建为草稿 PR' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remember',
+      description: '记住重要的信息、模式或用户偏好到跨会话记忆中。用于保存稳定的、经过验证的知识。',
+      parameters: {
+        type: 'object',
+        required: ['content'],
+        properties: {
+          content: { type: 'string', description: '要记住的内容' },
+          topic: {
+            type: 'string',
+            description: '主题分类（recruiting-patterns, candidate-preferences, debugging, workflow）',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'forget',
+      description: '从记忆中删除特定内容。',
+      parameters: {
+        type: 'object',
+        required: ['pattern'],
+        properties: {
+          pattern: { type: 'string', description: '要删除的内容关键词' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recall_memory',
+      description: '查看当前的跨会话记忆内容。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_past_context',
+      description: '搜索过去的对话历史，查找特定信息或解决方案。',
+      parameters: {
+        type: 'object',
+        required: ['query'],
+        properties: {
+          query: { type: 'string', description: '搜索关键词' },
+          limit: { type: 'number', description: '最多返回几条结果，默认 10' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ask_user_question',
+      description: '向用户提出结构化的选择题，用于明确需求、偏好或决策。支持单选或多选。',
+      parameters: {
+        type: 'object',
+        required: ['questions'],
+        properties: {
+          questions: {
+            type: 'array',
+            description: '要询问的问题列表（1-4 个）',
+            items: {
+              type: 'object',
+              required: ['question', 'header', 'options', 'multiSelect'],
+              properties: {
+                question: { type: 'string', description: '完整问题' },
+                header: { type: 'string', description: '简短标签（如 "优先级", "技术栈"）' },
+                multiSelect: { type: 'boolean', description: '是否允许多选' },
+                options: {
+                  type: 'array',
+                  description: '选项列表（2-4 个）',
+                  items: {
+                    type: 'object',
+                    required: ['label', 'description'],
+                    properties: {
+                      label: { type: 'string', description: '选项名称' },
+                      description: { type: 'string', description: '选项说明' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_pdf',
+      description: '读取 PDF 文件内容（如候选人简历）。大于 10 页的 PDF 必须指定页码范围，最多 20 页。',
+      parameters: {
+        type: 'object',
+        required: ['file_path'],
+        properties: {
+          file_path: { type: 'string', description: 'PDF 文件的绝对路径' },
+          pages: {
+            type: 'string',
+            description: '页码范围（如 "1-5", "3", "10-20"），大于 10 页必须指定',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_permissions',
+      description: '查看已保存的权限规则。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clear_permissions',
+      description: '清除所有已保存的权限规则。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'enter_plan_mode',
+      description: '进入计划模式，探索代码库并设计实现方案。用于复杂任务，需要先探索、分析、设计后再执行。',
+      parameters: {
+        type: 'object',
+        required: ['task_description'],
+        properties: {
+          task_description: { type: 'string', description: '任务描述' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'exit_plan_mode',
+      description: '退出计划模式，生成计划文档并请求用户批准。',
+      parameters: {
+        type: 'object',
+        required: ['task_description', 'approach', 'steps', 'risks'],
+        properties: {
+          task_description: { type: 'string', description: '任务描述' },
+          approach: { type: 'string', description: '实现方案概述' },
+          steps: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '执行步骤列表',
+          },
+          risks: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '风险和注意事项',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_hooks',
+      description: '查看已配置的 hooks（事件触发器）。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_hook',
+      description: '添加 hook，在特定事件发生时自动执行 shell 命令。',
+      parameters: {
+        type: 'object',
+        required: ['hook_name', 'command'],
+        properties: {
+          hook_name: {
+            type: 'string',
+            description: 'Hook 名称（如 post-sourcing, post-commit）',
+          },
+          command: {
+            type: 'string',
+            description: '要执行的 shell 命令',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remove_hook',
+      description: '删除指定的 hook。',
+      parameters: {
+        type: 'object',
+        required: ['hook_name'],
+        properties: {
+          hook_name: { type: 'string', description: 'Hook 名称' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'export_session',
+      description: '导出当前对话会话到本地文件（Markdown + JSON），可在其他地方查看或导入。',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: '会话标题，默认使用日期' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_sessions',
+      description: '列出所有已导出的会话。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'open_session',
+      description: '在浏览器中打开指定的会话文件。',
+      parameters: {
+        type: 'object',
+        required: ['session_id'],
+        properties: {
+          session_id: { type: 'string', description: '会话 ID' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'copy_session',
+      description: '复制会话内容到剪贴板（macOS）。',
+      parameters: {
+        type: 'object',
+        required: ['session_id'],
+        properties: {
+          session_id: { type: 'string', description: '会话 ID' },
+        },
+      },
+    },
+  },
 ];
 
 // ── 工具执行 ─────────────────────────────────────────────
 async function executeTool(name: string, args: any): Promise<string> {
+  // 权限检查
+  const { checkPermission } = await import('./permissions');
+  const approved = await checkPermission({
+    toolName: name,
+    args,
+    description: CHAT_TOOLS.find(t => t.function.name === name)?.function.description,
+  });
+
+  if (!approved) {
+    return `工具调用被拒绝: ${name}`;
+  }
+
   switch (name) {
     case 'analyze_image': {
       const imagePath = args.image_path;
@@ -632,6 +1060,70 @@ async function executeTool(name: string, args: any): Promise<string> {
       }
     }
 
+    case 'mcp_list_servers': {
+      const { mcpClient } = await import('./mcp-client');
+      const servers = mcpClient.listConnections();
+
+      if (servers.length === 0) {
+        return 'MCP 服务器未配置。请在 workspace/mcp-servers.yaml 中配置并重启。';
+      }
+
+      const lines = ['已连接的 MCP 服务器：\n'];
+      for (const serverName of servers) {
+        const tools = mcpClient.getTools(serverName);
+        const resources = mcpClient.getResources(serverName);
+
+        lines.push(`\n【${serverName}】`);
+        lines.push(`  工具 (${tools.length}):`);
+        if (tools.length > 0) {
+          tools.slice(0, 5).forEach(t => {
+            lines.push(`    - ${t.name}: ${t.description || '无描述'}`);
+          });
+          if (tools.length > 5) {
+            lines.push(`    ... 还有 ${tools.length - 5} 个工具`);
+          }
+        } else {
+          lines.push('    （无）');
+        }
+
+        lines.push(`  资源 (${resources.length}):`);
+        if (resources.length > 0) {
+          resources.slice(0, 5).forEach(r => {
+            lines.push(`    - ${r.uri}: ${r.name || '无名称'}`);
+          });
+          if (resources.length > 5) {
+            lines.push(`    ... 还有 ${resources.length - 5} 个资源`);
+          }
+        } else {
+          lines.push('    （无）');
+        }
+      }
+
+      return lines.join('\n');
+    }
+
+    case 'mcp_call_tool': {
+      const { mcpClient } = await import('./mcp-client');
+
+      try {
+        const result = await mcpClient.callTool(args.server, args.tool, args.args);
+        return JSON.stringify(result, null, 2);
+      } catch (err: any) {
+        return `调用失败: ${err.message}`;
+      }
+    }
+
+    case 'mcp_read_resource': {
+      const { mcpClient } = await import('./mcp-client');
+
+      try {
+        const result = await mcpClient.readResource(args.server, args.uri);
+        return JSON.stringify(result, null, 2);
+      } catch (err: any) {
+        return `读取失败: ${err.message}`;
+      }
+    }
+
     case 'list_candidates': {
       const { status, limit = 20 } = args;
       const rows = status
@@ -661,6 +1153,365 @@ async function executeTool(name: string, args: any): Promise<string> {
       ).join('\n');
     }
 
+    case 'git_status': {
+      const { getGitStatus, isGitRepo } = await import('./git-helper');
+
+      if (!isGitRepo()) {
+        return '当前目录不是 git 仓库';
+      }
+
+      try {
+        const status = getGitStatus();
+        let result = `当前分支：${status.branch}\n`;
+
+        if (status.clean) {
+          result += '\n工作区干净，没有更改';
+        } else {
+          if (status.staged.length > 0) {
+            result += `\n已暂存 (${status.staged.length}):\n`;
+            result += status.staged.map(f => `  + ${f}`).join('\n');
+          }
+          if (status.modified.length > 0) {
+            result += `\n已修改 (${status.modified.length}):\n`;
+            result += status.modified.map(f => `  M ${f}`).join('\n');
+          }
+          if (status.untracked.length > 0) {
+            result += `\n未跟踪 (${status.untracked.length}):\n`;
+            result += status.untracked.map(f => `  ? ${f}`).join('\n');
+          }
+        }
+
+        return result;
+      } catch (err: any) {
+        return `获取 git 状态失败: ${err.message}`;
+      }
+    }
+
+    case 'git_commit': {
+      const { gitCommit, getGitStatus, isGitRepo } = await import('./git-helper');
+      const { runHook } = await import('./hooks');
+
+      if (!isGitRepo()) {
+        return '当前目录不是 git 仓库';
+      }
+
+      try {
+        // Pre-commit hook
+        await runHook('pre-commit', { message: args.message });
+
+        const sha = gitCommit({
+          message: args.message,
+          files: args.files,
+        });
+
+        if (sha === 'nothing') {
+          return '没有需要提交的更改';
+        }
+
+        // Post-commit hook
+        await runHook('post-commit', { message: args.message, sha });
+
+        const status = getGitStatus();
+        return `提交成功！\nSHA: ${sha.substring(0, 8)}\n分支: ${status.branch}\n提交信息: ${args.message}`;
+      } catch (err: any) {
+        return `提交失败: ${err.message}`;
+      }
+    }
+
+    case 'git_create_branch': {
+      const { createBranch, getGitStatus, isGitRepo } = await import('./git-helper');
+
+      if (!isGitRepo()) {
+        return '当前目录不是 git 仓库';
+      }
+
+      try {
+        createBranch({
+          name: args.name,
+          baseBranch: args.baseBranch,
+        });
+
+        const status = getGitStatus();
+        return `已创建并切换到新分支：${status.branch}`;
+      } catch (err: any) {
+        return `创建分支失败: ${err.message}`;
+      }
+    }
+
+    case 'git_push': {
+      const { gitPush, getGitStatus, isGitRepo } = await import('./git-helper');
+      const { runHook } = await import('./hooks');
+
+      if (!isGitRepo()) {
+        return '当前目录不是 git 仓库';
+      }
+
+      try {
+        const status = getGitStatus();
+
+        // Pre-push hook
+        await runHook('pre-git-push', { branch: status.branch, force: args.force });
+
+        gitPush(status.branch, args.force || false);
+
+        // Post-push hook
+        await runHook('post-git-push', { branch: status.branch });
+
+        return `已推送分支 ${status.branch} 到远程仓库`;
+      } catch (err: any) {
+        return `推送失败: ${err.message}`;
+      }
+    }
+
+    case 'git_create_pr': {
+      const { createPR, getGitStatus, isGitRepo, hasGitHubCLI, isGitHubRepo, getDefaultBranch } = await import('./git-helper');
+
+      if (!isGitRepo()) {
+        return '当前目录不是 git 仓库';
+      }
+
+      if (!isGitHubRepo()) {
+        return '当前仓库不是 GitHub 仓库';
+      }
+
+      if (!hasGitHubCLI()) {
+        return '未安装 gh CLI，请运行: brew install gh';
+      }
+
+      try {
+        const status = getGitStatus();
+        const baseBranch = args.baseBranch || getDefaultBranch();
+
+        const prUrl = createPR({
+          title: args.title,
+          body: args.body,
+          baseBranch,
+          draft: args.draft,
+        });
+
+        return `PR 创建成功！\n分支: ${status.branch} -> ${baseBranch}\nURL: ${prUrl}`;
+      } catch (err: any) {
+        return `创建 PR 失败: ${err.message}`;
+      }
+    }
+
+    case 'remember': {
+      const { appendMemory, saveTopicFile, loadTopicFile } = await import('./auto-memory');
+
+      try {
+        if (args.topic) {
+          // 保存到主题文件
+          const existingContent = loadTopicFile(args.topic);
+          const newContent = existingContent
+            ? `${existingContent}\n- ${args.content}\n`
+            : `# ${args.topic}\n\n- ${args.content}\n`;
+          saveTopicFile(args.topic, newContent);
+          return `已记住（主题: ${args.topic}）：${args.content}`;
+        } else {
+          // 保存到 MEMORY.md 的 "记忆索引" section
+          appendMemory('记忆索引', args.content);
+          return `已记住：${args.content}`;
+        }
+      } catch (err: any) {
+        return `保存记忆失败: ${err.message}`;
+      }
+    }
+
+    case 'forget': {
+      const { forgetMemory } = await import('./auto-memory');
+
+      try {
+        const modified = forgetMemory(args.pattern);
+        if (modified) {
+          return `已删除包含「${args.pattern}」的记忆`;
+        } else {
+          return `未找到包含「${args.pattern}」的记忆`;
+        }
+      } catch (err: any) {
+        return `删除记忆失败: ${err.message}`;
+      }
+    }
+
+    case 'recall_memory': {
+      const { loadMemory, listTopicFiles, loadTopicFile } = await import('./auto-memory');
+
+      try {
+        let result = '# 当前记忆\n\n';
+        result += '## MEMORY.md\n\n' + loadMemory() + '\n\n';
+
+        const topics = listTopicFiles();
+        if (topics.length > 0) {
+          result += '## 主题文件\n\n';
+          for (const topic of topics) {
+            result += `### ${topic}\n\n`;
+            const content = loadTopicFile(topic);
+            result += content + '\n\n';
+          }
+        }
+
+        return result;
+      } catch (err: any) {
+        return `读取记忆失败: ${err.message}`;
+      }
+    }
+
+    case 'search_past_context': {
+      const { searchPastContext } = await import('./auto-memory');
+
+      try {
+        const results = searchPastContext(args.query, args.limit || 10);
+        if (results.length === 0) {
+          return `未找到包含「${args.query}」的历史对话`;
+        }
+
+        return `找到 ${results.length} 条相关历史记录：\n\n${results.slice(0, 5).join('\n\n---\n\n')}`;
+      } catch (err: any) {
+        return `搜索失败: ${err.message}`;
+      }
+    }
+
+    case 'ask_user_question': {
+      const { askUserQuestions, formatAnswers } = await import('./ask-user');
+
+      try {
+        const answers = await askUserQuestions({ questions: args.questions });
+        return formatAnswers(args.questions, answers);
+      } catch (err: any) {
+        return `询问失败: ${err.message}`;
+      }
+    }
+
+    case 'read_pdf': {
+      const { readPDF, formatPDFContent } = await import('./pdf-reader');
+
+      try {
+        const content = await readPDF({
+          filePath: args.file_path,
+          pages: args.pages,
+        });
+        return formatPDFContent(content, args.file_path);
+      } catch (err: any) {
+        return `读取 PDF 失败: ${err.message}`;
+      }
+    }
+
+    case 'list_permissions': {
+      const { formatPermissions } = await import('./permissions');
+      return formatPermissions();
+    }
+
+    case 'clear_permissions': {
+      const { clearPermissions } = await import('./permissions');
+      clearPermissions();
+      return '已清除所有权限规则';
+    }
+
+    case 'enter_plan_mode': {
+      const { enterPlanMode } = await import('./plan-mode');
+      const { runHook } = await import('./hooks');
+
+      await runHook('plan-mode-enter', { task: args.task_description });
+
+      return enterPlanMode(args.task_description);
+    }
+
+    case 'exit_plan_mode': {
+      const {
+        generatePlanDocument,
+        requestPlanApproval,
+        exitPlanMode,
+      } = await import('./plan-mode');
+      const { runHook } = await import('./hooks');
+
+      // 生成计划文档
+      const planContent = generatePlanDocument(
+        args.task_description,
+        args.approach,
+        args.steps,
+        args.risks
+      );
+
+      // 请求用户批准
+      const approved = await requestPlanApproval();
+
+      await runHook('plan-mode-exit', { approved });
+
+      // 退出计划模式
+      return exitPlanMode(approved);
+    }
+
+    case 'list_hooks': {
+      const { formatHooks } = await import('./hooks');
+      return formatHooks();
+    }
+
+    case 'add_hook': {
+      const { addHook } = await import('./hooks');
+
+      try {
+        addHook(args.hook_name, args.command);
+        return `已添加 hook: ${args.hook_name}\n命令: ${args.command}`;
+      } catch (err: any) {
+        return `添加 hook 失败: ${err.message}`;
+      }
+    }
+
+    case 'remove_hook': {
+      const { removeHook } = await import('./hooks');
+
+      try {
+        removeHook(args.hook_name);
+        return `已删除 hook: ${args.hook_name}`;
+      } catch (err: any) {
+        return `删除 hook 失败: ${err.message}`;
+      }
+    }
+
+    case 'export_session': {
+      const { exportSession } = await import('./remote-session');
+
+      try {
+        // 注意：这里需要访问当前的 messages，所以需要从外部传入
+        // 这是一个特殊情况，我们需要在 executeTool 外部处理
+        return '导出会话需要在对话结束时调用 /export 命令';
+      } catch (err: any) {
+        return `导出失败: ${err.message}`;
+      }
+    }
+
+    case 'list_sessions': {
+      const { listSessions, formatSessionList } = await import('./remote-session');
+
+      try {
+        const sessions = listSessions();
+        return formatSessionList(sessions);
+      } catch (err: any) {
+        return `列出会话失败: ${err.message}`;
+      }
+    }
+
+    case 'open_session': {
+      const { openSessionInBrowser } = await import('./remote-session');
+
+      try {
+        openSessionInBrowser(args.session_id);
+        return `已在浏览器中打开会话: ${args.session_id}`;
+      } catch (err: any) {
+        return `打开失败: ${err.message}`;
+      }
+    }
+
+    case 'copy_session': {
+      const { copySessionToClipboard } = await import('./remote-session');
+
+      try {
+        copySessionToClipboard(args.session_id);
+        return `已复制会话 ${args.session_id} 到剪贴板`;
+      } catch (err: any) {
+        return `复制失败: ${err.message}`;
+      }
+    }
+
     default:
       return `未知工具：${name}`;
   }
@@ -674,6 +1525,15 @@ function buildSystemPrompt(): string {
   const jobCtx   = job ? jobToPrompt(job) : '';
   const memory   = job ? buildMemoryContext('boss', job.title.replace(/\s+/g, '_')) : '';
   const convMem  = job ? buildConversationMemory(job.title.replace(/\s+/g, '_')) : '';
+
+  // Auto Memory - 跨会话记忆
+  let autoMemory = '';
+  try {
+    const { getMemoryContext } = require('./auto-memory');
+    autoMemory = getMemoryContext();
+  } catch {
+    // 如果 auto-memory 模块未加载，跳过
+  }
 
   const chatGuide = `
 ## 对话模式与主动性原则
@@ -704,7 +1564,7 @@ function buildSystemPrompt(): string {
 直接、专业、有温度。像一个真正懂招聘、又在乎结果的伙伴在聊天，不是客服，不是助手，是伙伴。
 `.trim();
 
-  return [soul, wisdom, jobCtx, memory, convMem, chatGuide].filter(Boolean).join('\n\n---\n\n');
+  return [soul, wisdom, jobCtx, memory, convMem, autoMemory, chatGuide].filter(Boolean).join('\n\n---\n\n');
 }
 
 // ── 对话记忆保存 ─────────────────────────────────────────
@@ -793,6 +1653,25 @@ function pruneMessages(
 
 // ── 主对话循环 ───────────────────────────────────────────
 export async function startChat(): Promise<void> {
+  // 初始化 MCP 服务器
+  await initializeMCPIfConfigured();
+
+  // 初始化自动记忆系统
+  try {
+    const { initializeDefaultTopics } = await import('./auto-memory');
+    initializeDefaultTopics();
+  } catch (err) {
+    // 静默失败
+  }
+
+  // 初始化技能系统
+  try {
+    const { initializeDefaultSkills } = await import('./skill-system');
+    initializeDefaultSkills();
+  } catch (err) {
+    // 静默失败
+  }
+
   const client = new OpenAI({
     apiKey:  config.custom.apiKey || config.anthropic.apiKey,
     baseURL: config.custom.baseUrl || config.anthropic.baseUrl || undefined,
@@ -809,7 +1688,8 @@ export async function startChat(): Promise<void> {
   });
 
   console.log(chalk.cyan('\n🦞 HireClaw 对话模式'));
-  console.log(chalk.gray('直接说话，输入 exit 退出\n'));
+  console.log(chalk.gray('直接说话，输入 exit 退出'));
+  console.log(chalk.gray('命令: /export [标题] - 导出会话, /sessions - 查看会话列表\n'));
 
   // Ctrl+C 也触发记忆保存
   process.once('SIGINT', async () => {
@@ -824,6 +1704,8 @@ export async function startChat(): Promise<void> {
     rl.question(chalk.green('你: '), async (input) => {
       const text = input.trim();
       if (!text) { ask(); return; }
+
+      // 退出命令
       if (text === 'exit' || text === '退出') {
         console.log(chalk.gray('\n正在保存本次对话记忆...'));
         await saveConversationMemory(client, model, messages);
@@ -832,13 +1714,67 @@ export async function startChat(): Promise<void> {
         return;
       }
 
-      messages.push({ role: 'user', content: text });
+      // 导出会话命令
+      if (text === '/export' || text.startsWith('/export ')) {
+        const { exportSession } = await import('./remote-session');
+        const titleMatch = text.match(/\/export\s+(.+)/);
+        const title = titleMatch ? titleMatch[1] : undefined;
 
-      // 超过 30 条时原地压缩（避免内存无限增长）
-      if (messages.length > 30) {
-        const pruned = pruneMessages(messages, 20);
+        const session = exportSession({
+          title,
+          messages,
+        });
+
+        console.log(chalk.green('\n✓ 会话已导出'));
+        console.log(chalk.gray(`   ID: ${session.id}`));
+        console.log(chalk.gray(`   标题: ${session.title}`));
+        console.log(chalk.gray(`   消息: ${session.messageCount} 条`));
+        console.log(chalk.gray(`   Markdown: ${session.url}`));
+        console.log(chalk.gray(`   JSON: ${session.url.replace('.md', '.json')}`));
+        console.log(chalk.yellow('\n提示: 你可以将 Markdown 文件复制到 claude.ai 继续对话\n'));
+
+        ask();
+        return;
+      }
+
+      // 列出会话命令
+      if (text === '/sessions') {
+        const { listSessions, formatSessionList } = await import('./remote-session');
+        const sessions = listSessions();
+
+        console.log(chalk.cyan('\n' + formatSessionList(sessions) + '\n'));
+
+        ask();
+        return;
+      }
+
+      // 检查是否是技能调用
+      const { parseSkillInvocation, executeSkill } = await import('./skill-system');
+      const skillInvocation = parseSkillInvocation(text);
+
+      let userMessage = text;
+
+      if (skillInvocation.isSkill) {
+        // 执行技能，将技能提示词作为用户消息
+        const skillPrompt = executeSkill(skillInvocation.skillName, skillInvocation.args);
+        userMessage = skillPrompt;
+        console.log(chalk.gray(`\n[执行技能: /${skillInvocation.skillName}]\n`));
+      }
+
+      messages.push({ role: 'user', content: userMessage });
+
+      // 智能自动压缩（当接近上下文限制时）
+      const { autoCompress } = await import('./context-compression');
+      const result = autoCompress(messages, {
+        maxTokens: 180000,  // 90% of 200K context window
+        targetTokens: 100000,
+        preserveRecent: 10,
+      });
+
+      if (result.compressed) {
+        console.log(chalk.gray('\n[自动压缩] 对话历史已智能压缩，保留了重要信息\n'));
         messages.length = 0;
-        messages.push(...pruned);
+        messages.push(...result.messages);
       }
 
       try {
