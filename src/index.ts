@@ -42,7 +42,7 @@ const USAGE = `
 状态: replied | interviewed | offered | joined | rejected | dropped
 `.trim();
 
-function checkSetup(): void {
+async function checkSetup(): Promise<boolean> {
   const issues: string[] = [];
   const hints:  string[] = [];
 
@@ -50,31 +50,52 @@ function checkSetup(): void {
   const hasKey = process.env.ANTHROPIC_API_KEY || process.env.CUSTOM_API_KEY;
   if (!hasKey) {
     issues.push('未配置 API Key');
-    hints.push('  → 前往 console.anthropic.com 获取 Key，填入 .env 的 ANTHROPIC_API_KEY');
   }
 
   // 检查职位文件
   const job = loadActiveJob();
   if (!job) {
     issues.push('未配置招聘职位');
-    hints.push('  → 编辑 workspace/jobs/active.yaml，填写你要招的职位信息');
   } else if (job.title === 'AI 算法工程师') {
     hints.push(`  ℹ️  当前职位：${job.title}（示例职位，记得改成你真实要招的）`);
   }
 
+  // 如果有配置缺失，显示欢迎信息并引导 setup
   if (issues.length > 0) {
-    console.log(chalk.yellow('⚠️  首次使用，需要完成以下配置：\n'));
+    console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+    console.log(chalk.cyan('👋 欢迎使用 HireClaw！'));
+    console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+
+    console.log(chalk.white('看起来这是你第一次使用 HireClaw 🦞\n'));
+    console.log(chalk.gray('HireClaw 是一个智能招聘助手，可以帮你：'));
+    console.log(chalk.gray('  • 自动在 BOSS直聘、脉脉等平台寻找候选人'));
+    console.log(chalk.gray('  • 智能筛选和评估候选人'));
+    console.log(chalk.gray('  • 追踪招聘进展和数据分析'));
+    console.log(chalk.gray('  • 自然对话控制所有功能\n'));
+
+    console.log(chalk.yellow('🔧 开始前需要完成初始化：\n'));
     issues.forEach(i => console.log(chalk.red(`  ✗ ${i}`)));
     console.log('');
-    hints.forEach(h => console.log(chalk.gray(h)));
-    console.log(chalk.gray('\n  完整使用手册：workspace/PLAYBOOK.md\n'));
-    process.exit(0);
+
+    console.log(chalk.white('现在让我引导你完成设置（约 3 分钟）...\n'));
+    console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+
+    // 自动运行 setup
+    await runSetup();
+
+    console.log(chalk.green('\n✨ 配置完成！HireClaw 已准备就绪\n'));
+    console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+
+    return true; // 表示运行了 setup
   }
 
+  // 显示提示信息
   if (hints.length > 0) {
     hints.forEach(h => console.log(chalk.gray(h)));
     console.log('');
   }
+
+  return false; // 表示没有运行 setup
 }
 
 async function main(): Promise<void> {
@@ -86,7 +107,7 @@ async function main(): Promise<void> {
   const channel = args[1] as Channel | undefined;
 
   if (!command || command === 'chat') {
-    checkSetup();
+    await checkSetup();
     await startChat();
 
   } else if (command === 'setup') {

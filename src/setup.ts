@@ -227,14 +227,24 @@ export async function runSetup(): Promise<void> {
     console.log(chalk.green('✓ 记录在案'));
 
     // ── STEP 5: 完成 ─────────────────────────────────────
-    section('配置完成 🎉');
+    section('🎉 初始化完成！');
 
-    console.log('你已经准备好了！下面是今天的起手式：\n');
-    console.log(`  ${chalk.cyan('hireclaw')}            → 和我对话，讨论候选人、改策略、看进展`);
-    console.log(`  ${chalk.cyan('hireclaw run')}        → 早上跑一次，自动 sourcing`);
-    console.log(`  ${chalk.cyan('hireclaw scan')}       → 下午扫一次，看谁回复了`);
-    console.log(`  ${chalk.cyan('hireclaw funnel')}     → 随时看招聘漏斗数据`);
-    console.log(`\n  完整手册：${chalk.gray('workspace/PLAYBOOK.md')}\n`);
+    console.log(chalk.green('恭喜！HireClaw 已经配置完成，随时可以开始工作。\n'));
+
+    console.log(chalk.bold('📖 常用命令：\n'));
+    console.log(`  ${chalk.cyan('hireclaw')}            → 对话模式，自然语言控制一切`);
+    console.log(`  ${chalk.cyan('hireclaw run')}        → 自动执行 sourcing`);
+    console.log(`  ${chalk.cyan('hireclaw scan')}       → 扫描收件箱，更新回复`);
+    console.log(`  ${chalk.cyan('hireclaw funnel')}     → 查看招聘漏斗数据`);
+    console.log(`  ${chalk.cyan('hireclaw dashboard')}  → 启动可视化控制台\n`);
+
+    console.log(chalk.bold('💡 对话模式示例：\n'));
+    console.log(chalk.gray('  • "帮我在 BOSS直聘找 10 个前端工程师"'));
+    console.log(chalk.gray('  • "查看今天沟通的候选人"'));
+    console.log(chalk.gray('  • "把张三标记为已面试"'));
+    console.log(chalk.gray('  • "分析一下候选人回复率"\n'));
+
+    console.log(chalk.gray(`完整手册：workspace/PLAYBOOK.md\n`));
 
   } finally {
     rl.close();
