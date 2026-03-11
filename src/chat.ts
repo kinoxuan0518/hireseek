@@ -1672,8 +1672,13 @@ export async function startChat(): Promise<void> {
     // 静默失败
   }
 
-  // 检查 API Key
-  const apiKey = config.custom.apiKey || config.anthropic.apiKey;
+  // 检查 API Key - 直接从环境变量读取，不依赖 config 缓存
+  const apiKey = process.env.CUSTOM_API_KEY ||
+                 process.env.ANTHROPIC_API_KEY ||
+                 process.env.OPENAI_API_KEY ||
+                 config.custom.apiKey ||
+                 config.anthropic.apiKey;
+
   if (!apiKey) {
     console.log(chalk.red('\n❌ 错误：未配置 API Key\n'));
     console.log(chalk.yellow('请先配置 API Key：'));
@@ -1685,11 +1690,19 @@ export async function startChat(): Promise<void> {
     process.exit(1);
   }
 
+  // Base URL 也从环境变量优先读取
+  const baseURL = process.env.CUSTOM_BASE_URL ||
+                  process.env.ANTHROPIC_BASE_URL ||
+                  config.custom.baseUrl ||
+                  config.anthropic.baseUrl ||
+                  undefined;
+
+  const model = process.env.LLM_MODEL || config.llm.model;
+
   const client = new OpenAI({
     apiKey,
-    baseURL: config.custom.baseUrl || config.anthropic.baseUrl || undefined,
+    baseURL,
   });
-  const model = config.llm.model;
 
   const messages: OpenAI.ChatCompletionMessageParam[] = [
     { role: 'system', content: buildSystemPrompt() },
