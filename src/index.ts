@@ -28,6 +28,7 @@ const USAGE = `
   hireclaw setup               初始化向导：一步步配置好一切
   hireclaw dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
   hireclaw run                 自主模式：自动决定今天跑哪些渠道
+  hireclaw run --plan          计划模式：先分析生成计划，用户确认后执行
   hireclaw run <渠道>          指定渠道立即执行
   hireclaw scan                扫描收件箱，更新已回复候选人
   hireclaw update <姓名> <状态>  手动更新候选人状态
@@ -93,14 +94,22 @@ async function main(): Promise<void> {
     process.on('SIGINT', () => { db.close(); process.exit(0); });
 
   } else if (command === 'run') {
-    if (!channel) {
+    // 检查是否使用计划模式
+    const usePlan = args.includes('--plan') || args.includes('-p');
+    const channelArg = args.find(a => !a.startsWith('-'));
+
+    if (!channelArg) {
       // 自主模式：由 active.yaml 决定渠道
-      await runJob();
-    } else if (CHANNELS.includes(channel)) {
+      await runJob(usePlan);
+    } else if (CHANNELS.includes(channelArg as Channel)) {
       // 指定渠道模式
-      await runChannel(channel);
+      if (usePlan) {
+        console.log(chalk.yellow('⚠️  计划模式仅支持 "hireclaw run --plan"（全渠道），指定渠道时不支持'));
+        process.exit(1);
+      }
+      await runChannel(channelArg as Channel);
     } else {
-      console.error(chalk.red(`渠道无效: "${channel}"`));
+      console.error(chalk.red(`渠道无效: "${channelArg}"`));
       console.log(USAGE);
       process.exit(1);
     }

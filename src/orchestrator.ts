@@ -7,6 +7,7 @@ import { taskRunOps, reflectionOps, candidateOps, db } from './db';
 import { buildMemoryContext, buildReflectionPrompt } from './memory';
 import { emitLog, emitStatus } from './events';
 import { getAccountId, hasStorageState } from './accounts';
+import { generatePlan, confirmPlan } from './planner';
 import type { Channel } from './types';
 
 const TASK_PROMPT = (channelLabel: string) => `
@@ -210,8 +211,10 @@ export async function scanInbox(jobId: string = 'default'): Promise<void> {
  * - 今天已跑过的渠道跳过
  * - 日触达量已达目标的渠道跳过
  * - 按 job.channels 顺序执行剩余渠道
+ *
+ * @param usePlan 是否使用计划模式（先分析、用户确认、再执行）
  */
-export async function runJob(): Promise<void> {
+export async function runJob(usePlan: boolean = false): Promise<void> {
   const job = loadActiveJob();
   if (!job) {
     console.error('[Orchestrator] 未找到 workspace/jobs/active.yaml，请先配置职位');
@@ -224,6 +227,35 @@ export async function runJob(): Promise<void> {
 
   if (enabledChannels.length === 0) {
     console.error('[Orchestrator] 未配置任何启用的渠道，请在 active.yaml 中设置');
+    return;
+  }
+
+  // 计划模式：先分析、用户确认、再执行
+  if (usePlan) {
+    const plan = await generatePlan(jobId);
+    const confirmed = await confirmPlan(plan);
+
+    if (!confirmed) {
+      return;
+    }
+
+    // 根据计划筛选要执行的任务
+    const plannedTasks = plan.channels
+      .filter(c => !c.skipReason)
+      .map(c => ({
+        channel: c.channel,
+        accountIndex: c.accountIndex,
+        accountId: c.accountId,
+        page: null as any,
+      }));
+
+    if (plannedTasks.length === 0) {
+      console.log('[Orchestrator] 📭 今日无需执行任务');
+      return;
+    }
+
+    // 执行计划任务（复用下面的执行逻辑）
+    await executeTasks(plannedTasks, jobId);
     return;
   }
 
@@ -241,6 +273,17 @@ export async function runJob(): Promise<void> {
 
   console.log(`并行任务：${tasks.map(t => `${CHANNEL_LABEL[t.channel]}[${t.accountIndex + 1}]`).join(' | ')}\n`);
 
+  // 执行任务
+  await executeTasks(tasks, jobId);
+}
+
+/**
+ * 执行任务列表（计划模式和普通模式共用）
+ */
+async function executeTasks(
+  tasks: Array<{ channel: Channel; accountIndex: number; accountId: string; page: any }>,
+  jobId: string
+): Promise<void> {
   // 登录引导：检查并引导用户登录每个账号
   const loggedInAccounts = await ensureAccountsLoggedIn(tasks);
 
@@ -277,6 +320,8 @@ export async function runJob(): Promise<void> {
         }
 
         // 检查今日触达量
+        const job = loadActiveJob();
+        const dailyGoal = job?.daily_goal?.contact ?? 30;
         const todayCount = (db.prepare(`
           SELECT COUNT(*) as n FROM candidates
           WHERE channel = ? AND job_id = ? AND date(contacted_at) = date('now')
