@@ -103,6 +103,27 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'analyze_image',
+      description: '分析图片内容（简历截图、个人主页截图等）。需要模型支持 vision（Claude Sonnet/GPT-4V 支持）。',
+      parameters: {
+        type: 'object',
+        required: ['image_path'],
+        properties: {
+          image_path: {
+            type: 'string',
+            description: '图片的绝对路径，如 /Users/xxx/Downloads/resume.jpg',
+          },
+          question: {
+            type: 'string',
+            description: '对图片的提问，如"这份简历的候选人背景如何"，不填则做通用分析',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'run_shell',
       description: '执行安全的 shell 命令（只读操作），如查看进程、读取日志、Git 状态。禁止写操作和危险命令。',
       parameters: {
@@ -230,6 +251,56 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
 // ── 工具执行 ─────────────────────────────────────────────
 async function executeTool(name: string, args: any): Promise<string> {
   switch (name) {
+    case 'analyze_image': {
+      const imagePath = args.image_path;
+      const question = args.question || '请分析这张图片的内容';
+
+      // 检查文件是否存在
+      if (!fs.existsSync(imagePath)) {
+        return `图片文件不存在：${imagePath}`;
+      }
+
+      // 检查文件类型
+      const ext = path.extname(imagePath).toLowerCase();
+      if (!['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+        return `不支持的图片格式：${ext}（支持 jpg/png/gif/webp）`;
+      }
+
+      // 读取并编码
+      const imageBuffer = fs.readFileSync(imagePath);
+      const base64 = imageBuffer.toString('base64');
+      const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
+
+      // 调用 vision API
+      try {
+        const client = new OpenAI({
+          apiKey: config.custom.apiKey || config.anthropic.apiKey,
+          baseURL: config.custom.baseUrl || config.anthropic.baseUrl || undefined,
+        });
+
+        const response = await client.chat.completions.create({
+          model: config.llm.model,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: question },
+                { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+              ],
+            },
+          ],
+          max_tokens: 1000,
+        });
+
+        return response.choices[0]?.message?.content || '无法分析图片';
+      } catch (e: any) {
+        if (e.message?.includes('vision') || e.message?.includes('image')) {
+          return '当前模型不支持图片分析（需要 Claude Sonnet 4 或 GPT-4V）';
+        }
+        return `图片分析失败：${e.message}`;
+      }
+    }
+
     case 'run_sourcing': {
       const channel = args.channel as Channel | undefined;
       console.log(chalk.gray('\n[执行中] 启动 sourcing 任务...\n'));
