@@ -242,16 +242,26 @@ export async function runJob(): Promise<void> {
   console.log(`并行任务：${tasks.map(t => `${CHANNEL_LABEL[t.channel]}[${t.accountIndex + 1}]`).join(' | ')}\n`);
 
   // 登录引导：检查并引导用户登录每个账号
-  await ensureAccountsLoggedIn(tasks);
+  const loggedInAccounts = await ensureAccountsLoggedIn(tasks);
+
+  // 过滤出已登录的任务
+  const activeTasks = tasks.filter(t => loggedInAccounts.has(t.accountId));
+
+  if (activeTasks.length === 0) {
+    console.log('[Orchestrator] ⚠️  没有可用的已登录账号，退出');
+    return;
+  }
+
+  console.log(`\n[Orchestrator] 📋 实际并行任务：${activeTasks.map(t => `${CHANNEL_LABEL[t.channel]}[${t.accountIndex + 1}]`).join(' | ')}\n`);
 
   // 为每个任务创建独立的标签页（带有对应账号的登录状态）
-  for (const task of tasks) {
+  for (const task of activeTasks) {
     task.page = await createPageForAccount(task.accountId);
   }
 
   // 并行执行所有任务
   const results = await Promise.allSettled(
-    tasks.map(async ({ channel, accountIndex, page }) => {
+    activeTasks.map(async ({ channel, accountIndex, page }) => {
       const label = `${CHANNEL_LABEL[channel]}[${accountIndex + 1}]`;
 
       // 检查今天是否已跑过（同一渠道的所有账号共享此检查）
@@ -383,15 +393,25 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any): P
 /**
  * 确保所有账号都已登录
  * 对于没有保存登录状态的账号，依次引导用户登录
+ * @returns 已登录的账号 ID 集合
  */
 async function ensureAccountsLoggedIn(
   tasks: Array<{ channel: Channel; accountIndex: number; accountId: string; page: any }>
-): Promise<void> {
+): Promise<Set<string>> {
+  const loggedInAccounts = new Set<string>();
+
+  // 先添加所有已有登录状态的账号
+  for (const task of tasks) {
+    if (hasStorageState(task.accountId)) {
+      loggedInAccounts.add(task.accountId);
+    }
+  }
+
   const needsLogin = tasks.filter(t => !hasStorageState(t.accountId));
 
   if (needsLogin.length === 0) {
     console.log('[Accounts] ✓ 所有账号均已登录\n');
-    return;
+    return loggedInAccounts;
   }
 
   console.log(`\n[Accounts] 🔐 检测到 ${needsLogin.length} 个账号需要登录，开始引导...\n`);
@@ -401,6 +421,22 @@ async function ensureAccountsLoggedIn(
     console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`正在配置账号：${label} (${task.accountId})`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+
+    // 如果是同一渠道的第 2+ 个账号，提示用户可以跳过
+    if (task.accountIndex > 0) {
+      console.log(`💡 提示：这是 ${CHANNEL_LABEL[task.channel]} 的第 ${task.accountIndex + 1} 个账号`);
+      console.log(`   如果你只有 1 个账号，输入 'skip' 并按 Enter 跳过`);
+      console.log(`   如果有多个账号，直接按 Enter 继续配置\n`);
+
+      const skipCheck = await new Promise<string>(resolve => {
+        process.stdin.once('data', (data) => resolve(data.toString().trim().toLowerCase()));
+      });
+
+      if (skipCheck === 'skip' || skipCheck === 's') {
+        console.log(`[Accounts] ⏭️  已跳过 ${label}\n`);
+        continue;
+      }
+    }
 
     // 创建该账号的专属页面
     const page = await createPageForAccount(task.accountId);
@@ -412,6 +448,7 @@ async function ensureAccountsLoggedIn(
 
     // 等待用户登录
     console.log(`\n⏳ 请在浏览器中完成 ${label} 的登录`);
+    console.log(`   ⚠️  请使用不同的账号登录（如果是第 2+ 个账号）`);
     console.log(`   登录完成后，按 Enter 继续...\n`);
 
     await new Promise<void>(resolve => {
@@ -420,11 +457,13 @@ async function ensureAccountsLoggedIn(
 
     // 保存登录状态
     await saveAccountState(task.accountId);
+    loggedInAccounts.add(task.accountId);
     console.log(`[Accounts] ✓ ${label} 登录成功\n`);
 
     // 关闭临时页面
     await page.close();
   }
 
-  console.log(`[Accounts] 🎉 所有账号登录配置完成！\n`);
+  console.log(`[Accounts] 🎉 账号登录配置完成！实际可用账号：${loggedInAccounts.size} 个\n`);
+  return loggedInAccounts;
 }
