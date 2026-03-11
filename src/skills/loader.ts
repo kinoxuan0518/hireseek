@@ -13,7 +13,12 @@ export interface JobConfig {
     deal_breaker?: string[];
   };
   salary?: { min: number; max: number; unit: string };
-  channels?: Channel[];
+  channels?: {
+    [key in Channel]?: {
+      enabled: boolean;
+      accounts: number;
+    };
+  };
   daily_goal?: { contact: number; quality: number };
   urgency?: string;
   deadline?: string;
@@ -23,6 +28,15 @@ export function loadActiveJob(): JobConfig | null {
   const filePath = path.join(config.workspace.dir, 'jobs', 'active.yaml');
   if (!fs.existsSync(filePath)) return null;
   return yaml.load(fs.readFileSync(filePath, 'utf-8')) as JobConfig;
+}
+
+/** 获取启用的渠道及其账号配置 */
+export function getEnabledChannels(job: JobConfig): Array<{ channel: Channel; accounts: number }> {
+  if (!job.channels) return [];
+  return (Object.keys(job.channels) as Channel[])
+    .filter(ch => job.channels![ch]?.enabled)
+    .map(ch => ({ channel: ch, accounts: job.channels![ch]!.accounts }))
+    .filter(({ accounts }) => accounts > 0);
 }
 
 export function jobToPrompt(job: JobConfig): string {

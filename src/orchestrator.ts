@@ -1,7 +1,7 @@
 import dayjs from 'dayjs';
-import { getPage } from './browser-runner';
+import { getPage, createNewPage } from './browser-runner';
 import { createRunner } from './runners';
-import { loadSkill, loadWorkspaceFile, loadActiveJob, jobToPrompt } from './skills/loader';
+import { loadSkill, loadWorkspaceFile, loadActiveJob, jobToPrompt, getEnabledChannels } from './skills/loader';
 import { sendReport } from './channels/feishu';
 import { taskRunOps, reflectionOps, candidateOps, db } from './db';
 import { buildMemoryContext, buildReflectionPrompt } from './memory';
@@ -218,38 +218,159 @@ export async function runJob(): Promise<void> {
   }
 
   const jobId = job.title.replace(/\s+/g, '_');
-  const channels = (job.channels ?? ['boss', 'maimai']) as Channel[];
+  const enabledChannels = getEnabledChannels(job);
   const dailyGoal = job.daily_goal?.contact ?? 30;
 
-  console.log(`\n🦞 HireClaw 自主模式`);
-  console.log(`职位：${job.title}  |  今日目标：${dailyGoal} 人`);
-  console.log(`渠道计划：${channels.join(' → ')}\n`);
-
-  for (const channel of channels) {
-    // 今天是否已跑过
-    const alreadyRan = db.prepare(`
-      SELECT id FROM task_runs
-      WHERE channel = ? AND job_id = ? AND date(started_at) = date('now') AND status = 'completed'
-    `).get(channel, jobId);
-
-    if (alreadyRan) {
-      console.log(`[Orchestrator] ⏭  ${CHANNEL_LABEL[channel]} 今天已执行，跳过`);
-      continue;
-    }
-
-    // 今日触达量是否已达目标
-    const todayCount = (db.prepare(`
-      SELECT COUNT(*) as n FROM candidates
-      WHERE channel = ? AND job_id = ? AND date(contacted_at) = date('now')
-    `).get(channel, jobId) as { n: number }).n;
-
-    if (todayCount >= dailyGoal) {
-      console.log(`[Orchestrator] ✅ ${CHANNEL_LABEL[channel]} 今日已触达 ${todayCount} 人，目标达成，跳过`);
-      continue;
-    }
-
-    await runChannel(channel, jobId);
+  if (enabledChannels.length === 0) {
+    console.error('[Orchestrator] 未配置任何启用的渠道，请在 active.yaml 中设置');
+    return;
   }
 
-  console.log('\n[Orchestrator] 今日所有渠道执行完毕');
+  console.log(`\n🦞 HireClaw 并行模式`);
+  console.log(`职位：${job.title}  |  今日目标：${dailyGoal} 人`);
+
+  // 构建任务列表（每个账号一个任务）
+  const tasks: Array<{ channel: Channel; accountIndex: number; page: any }> = [];
+  for (const { channel, accounts } of enabledChannels) {
+    for (let i = 0; i < accounts; i++) {
+      tasks.push({ channel, accountIndex: i, page: null });
+    }
+  }
+
+  console.log(`并行任务：${tasks.map(t => `${CHANNEL_LABEL[t.channel]}[${t.accountIndex + 1}]`).join(' | ')}\n`);
+
+  // 为每个任务创建独立的标签页
+  for (const task of tasks) {
+    task.page = await createNewPage();
+  }
+
+  // 并行执行所有任务
+  const results = await Promise.allSettled(
+    tasks.map(async ({ channel, accountIndex, page }) => {
+      const label = `${CHANNEL_LABEL[channel]}[${accountIndex + 1}]`;
+
+      // 检查今天是否已跑过（同一渠道的所有账号共享此检查）
+      if (accountIndex === 0) {
+        const alreadyRan = db.prepare(`
+          SELECT id FROM task_runs
+          WHERE channel = ? AND job_id = ? AND date(started_at) = date('now') AND status = 'completed'
+        `).get(channel, jobId);
+
+        if (alreadyRan) {
+          console.log(`[Orchestrator] ⏭  ${label} 今天已执行，跳过`);
+          return;
+        }
+
+        // 检查今日触达量
+        const todayCount = (db.prepare(`
+          SELECT COUNT(*) as n FROM candidates
+          WHERE channel = ? AND job_id = ? AND date(contacted_at) = date('now')
+        `).get(channel, jobId) as { n: number }).n;
+
+        if (todayCount >= dailyGoal) {
+          console.log(`[Orchestrator] ✅ ${label} 今日已触达 ${todayCount} 人，目标达成，跳过`);
+          return;
+        }
+      }
+
+      // 执行任务（使用独立的 page）
+      console.log(`[Orchestrator] 🚀 启动 ${label}`);
+      await runChannelWithPage(channel, jobId, page);
+    })
+  );
+
+  // 汇总结果
+  const succeeded = results.filter(r => r.status === 'fulfilled').length;
+  const failed = results.filter(r => r.status === 'rejected').length;
+  console.log(`\n[Orchestrator] 并行执行完毕：成功 ${succeeded} / 失败 ${failed}`);
+}
+
+/** 使用指定 page 执行渠道任务（用于并行） */
+async function runChannelWithPage(channel: Channel, jobId: string, page: any): Promise<void> {
+  // 这里复用 runChannel 的逻辑，但用指定的 page
+  const label = CHANNEL_LABEL[channel];
+  const startedAt = dayjs().toISOString();
+  const runResult = taskRunOps.start.run({ job_id: jobId, channel, started_at: startedAt });
+  const runId = runResult.lastInsertRowid as number;
+  const startMs = Date.now();
+
+  try {
+    // 导航到对应招聘平台
+    await page.goto(CHANNEL_URL[channel], { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // 登录检测
+    const currentUrl = page.url();
+    const targetHost = new URL(CHANNEL_URL[channel]).host;
+    const isLoggedIn = currentUrl.includes(targetHost);
+
+    if (!isLoggedIn) {
+      console.error(`\n[Orchestrator] ✗ ${label} 未登录，请先在浏览器登录 ${CHANNEL_URL[channel]}`);
+      taskRunOps.complete.run({
+        id: runId,
+        finished_at: dayjs().toISOString(),
+        status: 'failed',
+        contacted_count: 0,
+        skipped_count: 0,
+        error: '未登录',
+      });
+      return;
+    }
+
+    // 构建 prompt
+    const job = loadActiveJob();
+    const soul = loadWorkspaceFile('SOUL.md');
+    const skillContent = loadSkill(channel);
+    const evaluationDoc = loadWorkspaceFile('references/candidate-evaluation.md');
+    const outreachDoc = loadWorkspaceFile('references/outreach-guide.md');
+    const wisdomDoc = loadWorkspaceFile('references/founders-wisdom.md');
+    const jobContext = job ? jobToPrompt(job) : '';
+    const memory = buildMemoryContext(channel, jobId);
+
+    const systemPrompt = [soul, jobContext, evaluationDoc, outreachDoc, wisdomDoc, memory, skillContent]
+      .filter(Boolean)
+      .join('\n\n---\n\n');
+
+    const runner = createRunner();
+    const result = await runner.runSkill(page, systemPrompt, TASK_PROMPT(label), (msg) => {
+      console.log(`[${label}] ${msg}`);
+      emitLog(`[${label}] ${msg}`);
+    });
+
+    const durationSec = Math.round((Date.now() - startMs) / 1000);
+    console.log(`\n[Orchestrator] ✓ ${label} 完成 (${durationSec}s)`);
+    emitLog(`✓ ${label} 完成 (${durationSec}s)`);
+
+    taskRunOps.complete.run({
+      id: runId,
+      finished_at: dayjs().toISOString(),
+      status: 'completed',
+      contacted_count: result.contacted,
+      skipped_count: result.skipped,
+      error: null,
+    });
+
+    // 生成反思
+    const reflectionPrompt = buildReflectionPrompt(channel, result.contacted, result.skipped, result.summary);
+    try {
+      const reflectionRunner = createRunner();
+      const reflection = await reflectionRunner.runSkill(page, '', reflectionPrompt, () => {});
+      reflectionOps.save.run({ job_id: jobId, channel, run_id: runId, content: reflection.summary });
+    } catch {
+      // 反思生成失败不影响主流程
+    }
+
+  } catch (err: any) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.error(`\n[Orchestrator] ✗ ${label} 失败: ${error}`);
+    emitLog(`✗ ${label} 失败: ${error}`);
+
+    taskRunOps.complete.run({
+      id: runId,
+      finished_at: dayjs().toISOString(),
+      status: 'failed',
+      contacted_count: 0,
+      skipped_count: 0,
+      error,
+    });
+  }
 }

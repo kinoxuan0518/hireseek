@@ -36,6 +36,23 @@ export async function getPage(): Promise<Page> {
   return pages.length > 0 ? pages[0] : await context.newPage();
 }
 
+/** 创建新的独立标签页（用于并行执行多个任务） */
+export async function createNewPage(): Promise<Page> {
+  const b = await getBrowser();
+
+  if (!context) {
+    context = await b.newContext({
+      viewport: config.browser.viewport,
+      userAgent:
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
+        'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+        'Chrome/122.0.0.0 Safari/537.36',
+    });
+  }
+
+  return await context.newPage();
+}
+
 export async function takeScreenshot(page: Page): Promise<string> {
   // scale=0.6 → 768×480，质量50，约15-25KB，大幅降低 token 消耗
   const buffer = await page.screenshot({
