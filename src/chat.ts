@@ -492,6 +492,30 @@ async function saveConversationMemory(
   }
 }
 
+// ── 对话窗口压缩 ─────────────────────────────────────────
+/**
+ * 压缩消息数组，防止超过上下文窗口。
+ * 保留系统提示 + 最近 N 条消息，中间的替换为摘要。
+ */
+function pruneMessages(
+  messages: OpenAI.ChatCompletionMessageParam[],
+  keepRecent = 20
+): OpenAI.ChatCompletionMessageParam[] {
+  if (messages.length <= keepRecent + 1) return messages; // +1 for system prompt
+
+  const systemPrompt = messages[0]; // 系统提示永远保留
+  const recentMessages = messages.slice(-keepRecent); // 最近 N 条
+  const prunedCount = messages.length - keepRecent - 1;
+
+  // 中间的消息用一条摘要替代
+  const summary: OpenAI.ChatCompletionMessageParam = {
+    role: 'user',
+    content: `[之前的 ${prunedCount} 条消息已压缩，继续当前对话]`,
+  };
+
+  return [systemPrompt, summary, ...recentMessages];
+}
+
 // ── 主对话循环 ───────────────────────────────────────────
 export async function startChat(): Promise<void> {
   const client = new OpenAI({
@@ -534,6 +558,13 @@ export async function startChat(): Promise<void> {
       }
 
       messages.push({ role: 'user', content: text });
+
+      // 超过 30 条时原地压缩（避免内存无限增长）
+      if (messages.length > 30) {
+        const pruned = pruneMessages(messages, 20);
+        messages.length = 0;
+        messages.push(...pruned);
+      }
 
       try {
         let response = await client.chat.completions.create({
