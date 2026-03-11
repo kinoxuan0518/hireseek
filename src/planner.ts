@@ -118,23 +118,58 @@ ${enabledChannels.map(({ channel, accounts }) =>
 
   console.log('[Planner] 🧠 正在生成执行计划...\n');
 
-  const runner = createRunner();
-  const response = await runner.runSkill(
-    null as any,  // 不需要 page
-    context,
-    planningPrompt
-  );
+  // 使用 OpenAI 兼容 API 直接调用（不需要 page 和截图）
+  const OpenAI = (await import('openai')).default;
+  const { config } = await import('./config');
+
+  let summary: string;
+
+  if (config.llm.provider === 'claude') {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
+
+    const response = await anthropic.messages.create({
+      model: config.llm.model,
+      max_tokens: 2000,
+      messages: [
+        { role: 'user', content: context + '\n\n' + planningPrompt }
+      ],
+    });
+
+    const content = response.content[0];
+    summary = content.type === 'text' ? content.text : '';
+  } else {
+    // OpenAI 兼容 API
+    const baseURL = config.llm.provider === 'custom' ? config.custom.baseUrl : undefined;
+    const apiKey = config.llm.provider === 'custom' ? config.custom.apiKey : process.env.OPENAI_API_KEY;
+    const model = config.llm.provider === 'custom' ? config.custom.model : 'gpt-4';
+
+    const client = new OpenAI({ baseURL, apiKey });
+
+    const response = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: context },
+        { role: 'user', content: planningPrompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 2000,
+    });
+
+    summary = response.choices[0]?.message?.content || '';
+  }
 
   // 解析 LLM 返回的 JSON
   let planData: any;
   try {
-    const jsonMatch = response.summary.match(/\{[\s\S]*\}/);
+    const jsonMatch = summary.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       throw new Error('LLM 返回格式不正确');
     }
     planData = JSON.parse(jsonMatch[0]);
   } catch (err) {
     console.error('[Planner] ✗ 解析计划失败:', err);
+    console.error('LLM 返回内容:', summary);
     throw new Error('计划生成失败，请重试');
   }
 

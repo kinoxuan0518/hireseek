@@ -141,6 +141,56 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'glob',
+      description: '按文件名模式搜索文件。支持 glob 模式：*.ts, **/*.yaml, src/**/*.ts。快速定位文件位置。',
+      parameters: {
+        type: 'object',
+        required: ['pattern'],
+        properties: {
+          pattern: {
+            type: 'string',
+            description: 'Glob 模式，如 "*.ts" (所有 ts 文件), "workspace/**/*.md" (workspace 下所有 md 文件)',
+          },
+          limit: {
+            type: 'number',
+            description: '最多返回多少个文件，默认 100',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'grep',
+      description: '在文件内容中搜索匹配的文本。支持正则表达式。用于快速定位代码位置或配置项。',
+      parameters: {
+        type: 'object',
+        required: ['pattern'],
+        properties: {
+          pattern: {
+            type: 'string',
+            description: '搜索模式（支持正则），如 "function runJob" 或 "LLM_PROVIDER"',
+          },
+          filePattern: {
+            type: 'string',
+            description: '文件类型过滤，如 "*.ts" 或 "*.yaml"',
+          },
+          ignoreCase: {
+            type: 'boolean',
+            description: '是否忽略大小写，默认 false',
+          },
+          limit: {
+            type: 'number',
+            description: '最多返回多少处匹配，默认 50',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'read_code',
       description: '读取 src/ 目录下的源代码文件。用于了解自己的实现，再决定如何修改。',
       parameters: {
@@ -358,6 +408,34 @@ async function executeTool(name: string, args: any): Promise<string> {
       fs.writeFileSync(envPath, content.trim() + '\n');
       process.env[args.key] = args.value;
       return `已保存：${args.key}`;
+    }
+
+    case 'glob': {
+      const { searchFiles, formatGlobResults } = await import('./tools/glob');
+      try {
+        const files = await searchFiles({
+          pattern: args.pattern,
+          limit: args.limit,
+        });
+        return formatGlobResults(files, args.pattern);
+      } catch (err: any) {
+        return `搜索失败: ${err.message}`;
+      }
+    }
+
+    case 'grep': {
+      const { searchContent, formatGrepResults } = await import('./tools/grep');
+      try {
+        const matches = await searchContent({
+          pattern: args.pattern,
+          filePattern: args.filePattern,
+          ignoreCase: args.ignoreCase,
+          limit: args.limit,
+        });
+        return formatGrepResults(matches, args.pattern);
+      } catch (err: any) {
+        return `搜索失败: ${err.message}`;
+      }
     }
 
     case 'run_shell': {
