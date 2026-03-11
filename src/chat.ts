@@ -103,6 +103,23 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'run_shell',
+      description: '执行安全的 shell 命令（只读操作），如查看进程、读取日志、Git 状态。禁止写操作和危险命令。',
+      parameters: {
+        type: 'object',
+        required: ['command'],
+        properties: {
+          command: {
+            type: 'string',
+            description: '要执行的命令，如 "ps aux | grep node" 或 "tail -20 /tmp/hireclaw.log"',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'read_code',
       description: '读取 src/ 目录下的源代码文件。用于了解自己的实现，再决定如何修改。',
       parameters: {
@@ -270,6 +287,34 @@ async function executeTool(name: string, args: any): Promise<string> {
       fs.writeFileSync(envPath, content.trim() + '\n');
       process.env[args.key] = args.value;
       return `已保存：${args.key}`;
+    }
+
+    case 'run_shell': {
+      const cmd = args.command.trim();
+
+      // 安全检查：禁止危险命令
+      const forbidden = ['rm', 'sudo', 'su', 'shutdown', 'reboot', 'mkfs', 'dd', '>', '>>', 'curl.*sh', 'wget.*sh'];
+      const dangerous = forbidden.some(pattern => new RegExp(`\\b${pattern}\\b`, 'i').test(cmd));
+      if (dangerous) return '⛔ 禁止执行危险命令（rm/sudo/shutdown等）';
+
+      // 禁止链式执行和命令替换
+      if (/[;&`$]|\|\|/.test(cmd.replace(/\|(?!\|)/g, ''))) {
+        return '⛔ 禁止使用 ; && || ` $() 等链式执行语法，每次只能执行一条命令';
+      }
+
+      // 执行命令（10秒超时，限制输出）
+      try {
+        const output = execSync(cmd, {
+          cwd: process.cwd(),
+          timeout: 10000,
+          maxBuffer: 1024 * 100, // 100KB
+          encoding: 'utf-8',
+        });
+        return output.slice(0, 2000) || '（命令执行成功，无输出）';
+      } catch (e: any) {
+        const err = e.stderr?.toString() || e.stdout?.toString() || e.message;
+        return `命令执行失败：\n${err.slice(0, 1000)}`;
+      }
     }
 
     case 'read_code': {
