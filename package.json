@@ -1,41 +1,17 @@
 {
-  "name": "hireclaw",
-  "version": "0.1.0",
-  "description": "智能招聘 Agent - 面向 HR 的自主 Sourcing 系统",
-  "main": "dist/index.js",
-  "bin": {
-    "hireclaw": "bin/hireclaw"
-  },
+  "name": "hireclaw-monorepo",
+  "private": true,
+  "description": "🦞 Autonomous recruiting agent SDK",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "run:boss": "tsx src/index.ts run boss",
-    "run:maimai": "tsx src/index.ts run maimai",
-    "daemon": "tsx src/index.ts start"
+    "build": "pnpm -r run build",
+    "dev": "pnpm -r --parallel run dev",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "clean": "pnpm -r run clean"
   },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "@types/glob": "^8.1.0",
-    "@types/js-yaml": "^4.0.9",
-    "axios": "^1.6.0",
-    "better-sqlite3": "^11.0.0",
-    "chalk": "^4.1.2",
-    "dayjs": "^1.11.0",
-    "dotenv": "^16.4.0",
-    "glob": "^13.0.6",
-    "js-yaml": "^4.1.1",
-    "node-cron": "^3.0.0",
-    "openai": "^4.104.0",
-    "pdf-parse": "^2.4.5",
-    "playwright": "^1.50.0"
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
   },
-  "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^22.0.0",
-    "@types/node-cron": "^3.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.0.0"
-  }
+  "packageManager": "pnpm@10.32.1"
 }

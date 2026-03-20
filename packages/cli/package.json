@@ -1,0 +1,24 @@
+{
+  "name": "@hireclaw/cli",
+  "version": "0.1.0",
+  "description": "🦞 HireClaw CLI — 命令行入口（向后兼容现有 hireclaw 命令）",
+  "type": "module",
+  "bin": {
+    "hireclaw": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@hireclaw/core": "workspace:*",
+    "@hireclaw/boss-adapter": "workspace:*",
+    "@hireclaw/maimai-adapter": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0",
+    "tsx": "^4.19.0"
+  }
+}

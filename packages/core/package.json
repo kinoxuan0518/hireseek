@@ -1,0 +1,46 @@
+{
+  "name": "@hireclaw/core",
+  "version": "0.1.0",
+  "description": "🦞 HireClaw SDK Core — 招聘智能体引擎（评估、触达、记忆、流水线）",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./evaluator": {
+      "types": "./dist/evaluator/index.d.ts",
+      "import": "./dist/evaluator/index.js"
+    },
+    "./outreach": {
+      "types": "./dist/outreach/index.d.ts",
+      "import": "./dist/outreach/index.js"
+    },
+    "./memory": {
+      "types": "./dist/memory/index.d.ts",
+      "import": "./dist/memory/index.js"
+    },
+    "./pipeline": {
+      "types": "./dist/pipeline/index.d.ts",
+      "import": "./dist/pipeline/index.js"
+    },
+    "./knowledge": {
+      "types": "./dist/knowledge/index.d.ts",
+      "import": "./dist/knowledge/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "test": "echo 'no tests yet' && exit 0",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "dayjs": "^1.11.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
