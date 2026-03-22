@@ -308,6 +308,222 @@ export class CandidateTracker {
     return stats;
   }
 
+  // ── BOSS Session Sync ──
+
+  /**
+   * 从 BOSS 操作会话结果同步候选人状态
+   * 将 BossSessionResult 中的触达记录批量写入 tracker
+   *
+   * @param sessionData - BossAdapter.getSessionResult() 的输出
+   * @returns 同步统计
+   */
+  syncFromBossSession(sessionData: {
+    jobId: string;
+    contacted: Array<{
+      fingerprint: string;    // name|school|company
+      timestamp: string;
+      matchedRules: string[];
+      screening: Record<string, string>;
+    }>;
+    skipped: Array<{ name: string; reason: string }>;
+    totalViewed: number;
+    terminationReason: string;
+  }): {
+    registered: number;
+    transitioned: number;
+    skipped: number;
+    errors: string[];
+  } {
+    let registered = 0;
+    let transitioned = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const record of sessionData.contacted) {
+      // Parse fingerprint: name|school|company
+      const parts = record.fingerprint.split('|');
+      const name = parts[0] || 'unknown';
+      const school = parts[1] || '';
+      const company = parts[2] || '';
+      const candidateId = `boss_${record.fingerprint.replace(/\|/g, '_')}`;
+
+      try {
+        let entry = this.cache.get(candidateId);
+
+        if (!entry) {
+          // Register new candidate
+          entry = this.register(candidateId, name, 'boss');
+          entry.notes = `school: ${school}, company: ${company}`;
+          registered++;
+        }
+
+        // Transition to contacted if needed
+        if (entry.status === 'new') {
+          this.transition(candidateId, 'contacted', `BOSS session sync — rules: ${record.matchedRules.join(', ')}`);
+          transitioned++;
+        }
+
+        // Record outreach event
+        this.recordOutreach(candidateId, {
+          type: 'sent',
+          platform: 'boss',
+          result: 'sent',
+        });
+      } catch (err) {
+        errors.push(`Failed to sync ${record.fingerprint}: ${(err as Error).message}`);
+      }
+    }
+
+    // Track skipped candidates (register but don't contact)
+    for (const skip of sessionData.skipped) {
+      const candidateId = `boss_${skip.name}_${sessionData.jobId}`;
+      if (!this.cache.has(candidateId)) {
+        this.register(candidateId, skip.name, 'boss');
+        registered++;
+      }
+      skipped++;
+    }
+
+    this.dirty = true;
+    return { registered, transitioned, skipped, errors };
+  }
+
+  // ── Daily Report ──
+
+  /**
+   * 生成每日招聘报告
+   * 包含漏斗概览、状态分布、近期活动、跟进提醒
+   */
+  generateDailyReport(): {
+    date: string;
+    funnel: Record<CandidateStatus, number>;
+    conversions: { [key: string]: number };
+    recentActivity: Array<{
+      candidateName: string;
+      action: string;
+      timestamp: string;
+    }>;
+    followUpReminders: FollowUpReminder[];
+    summary: string;
+  } {
+    const funnel = this.getFunnelStats();
+    const total = Object.values(funnel).reduce((a, b) => a + b, 0);
+    const contacted = funnel.contacted;
+    const replied = funnel.replied;
+    const conversionRate = contacted > 0 ? ((replied / contacted) * 100).toFixed(1) : '0';
+
+    // Conversions (stage-to-stage rates)
+    const conversions: { [key: string]: number } = {};
+    const stages: CandidateStatus[] = ['new', 'contacted', 'replied', 'screening', 'interviewed', 'offered', 'joined'];
+    for (let i = 0; i < stages.length - 1; i++) {
+      const from = funnel[stages[i]];
+      const to = funnel[stages[i + 1]];
+      const key = `${stages[i]}→${stages[i + 1]}`;
+      conversions[key] = from > 0 ? Math.round((to / from) * 100) : 0;
+    }
+
+    // Recent activity (last 24h)
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const recentActivity: Array<{ candidateName: string; action: string; timestamp: string }> = [];
+    for (const entry of this.cache.values()) {
+      for (const event of entry.outreachRecords) {
+        if (new Date(event.timestamp).getTime() >= oneDayAgo) {
+          recentActivity.push({
+            candidateName: entry.candidateName,
+            action: `${event.type} (${event.platform})`,
+            timestamp: event.timestamp,
+          });
+        }
+      }
+    }
+    recentActivity.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    const followUpReminders = this.getFollowUpReminders({ maxDaysSinceActivity: 3 });
+
+    const summary = [
+      `📋 招聘日报 ${new Date().toISOString().slice(0, 10)}`,
+      `漏斗总量: ${total} 人`,
+      `今日触达: ${recentActivity.filter(a => a.action.includes('sent')).length} 人`,
+      `触达→回复转化: ${conversionRate}%`,
+      `待跟进: ${followUpReminders.length} 人`,
+    ].join('\n');
+
+    return {
+      date: new Date().toISOString().slice(0, 10),
+      funnel,
+      conversions,
+      recentActivity: recentActivity.slice(0, 20), // Cap at 20
+      followUpReminders,
+      summary,
+    };
+  }
+
+  // ── Markdown Export ──
+
+  /**
+   * 导出漏斗数据为 Markdown（方便发飞书）
+   */
+  exportToMarkdown(): string {
+    const report = this.generateDailyReport();
+    const { funnel, conversions, recentActivity, followUpReminders } = report;
+
+    const lines: string[] = [];
+
+    // Header
+    lines.push(`# 🦞 HireClaw 招聘日报`);
+    lines.push(`> ${report.date}`);
+    lines.push('');
+
+    // Funnel overview
+    lines.push(`## 漏斗概览`);
+    lines.push('');
+    lines.push('| 阶段 | 数量 |');
+    lines.push('|------|------|');
+    for (const [status, count] of Object.entries(funnel)) {
+      if (count > 0) {
+        const label = STATUS_LABELS[status as CandidateStatus];
+        lines.push(`| ${label} ${status} | ${count} |`);
+      }
+    }
+    lines.push('');
+
+    // Conversion rates
+    lines.push(`## 阶段转化率`);
+    lines.push('');
+    lines.push('| 转化 | 率 |');
+    lines.push('|------|-----|');
+    for (const [key, rate] of Object.entries(conversions)) {
+      if (rate > 0) {
+        lines.push(`| ${key} | ${rate}% |`);
+      }
+    }
+    lines.push('');
+
+    // Recent activity
+    if (recentActivity.length > 0) {
+      lines.push(`## 近 24h 活动`);
+      lines.push('');
+      for (const activity of recentActivity) {
+        const time = new Date(activity.timestamp).toLocaleString('zh-CN', { hour12: false });
+        lines.push(`- **${activity.candidateName}** — ${activity.action} (${time})`);
+      }
+      lines.push('');
+    }
+
+    // Follow-up reminders
+    if (followUpReminders.length > 0) {
+      lines.push(`## ⚠️ 待跟进`);
+      lines.push('');
+      for (const reminder of followUpReminders) {
+        const priorityEmoji = reminder.priority === 'urgent' ? '🔴' : reminder.priority === 'normal' ? '🟡' : '🟢';
+        lines.push(`- ${priorityEmoji} **${reminder.candidateName}** (${reminder.status}) — ${reminder.daysSinceActivity}天未活动 — ${reminder.suggestedAction}`);
+      }
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  }
+
   // ── Helpers ──
 
   private getLastActivity(entry: TrackingEntry): Date {

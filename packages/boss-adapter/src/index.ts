@@ -198,7 +198,7 @@ export class BossRateLimiter {
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise<void>(resolve => setTimeout(resolve as () => void, ms));
   }
 }
 
@@ -207,7 +207,7 @@ export class BossRateLimiter {
 // ────────────────────────────────────────────────────────────
 
 export class BossCandidateFilter {
-  private config: BossFilterConfig;
+  private config: Required<BossFilterConfig>;
   /** 当日已触达指纹集合（幂等保护） */
   private contactedFingerprints = new Set<string>();
 
@@ -221,9 +221,10 @@ export class BossCandidateFilter {
       campusExceptionEnabled: true,
       targetCompanies: [],
       relevantMajors: [],
+      expectedCity: '',
       scoreThreshold: 60,
       ...config,
-    };
+    } as Required<BossFilterConfig>;
   }
 
   /**
@@ -304,7 +305,7 @@ export class BossCandidateFilter {
       this_week: 12,
       inactive: 7,
     };
-    total += activityScore[raw.onlineStatus ?? 'inactive'];
+    total += activityScore[raw.onlineStatus ?? 'inactive'] ?? 7;
 
     // 求职意愿 (20)
     const intentionScore: Record<string, number> = {
@@ -313,7 +314,7 @@ export class BossCandidateFilter {
       soon: 12,
       not_interested: 6,
     };
-    total += intentionScore[raw.jobIntention ?? 'not_interested'];
+    total += intentionScore[raw.jobIntention ?? 'not_interested'] ?? 6;
 
     return total;
   }
@@ -394,6 +395,16 @@ export class BossCandidateFilter {
   private checkCompany(raw: BossCandidateRaw): boolean {
     if (this.config.targetCompanies.length === 0) return true;
     return this.config.targetCompanies.some(c => raw.company?.includes(c));
+  }
+
+  /** Check if a fingerprint string has been contacted (for non-BossCandidateRaw usage) */
+  isContactedByFingerprint(fingerprint: string): boolean {
+    return this.contactedFingerprints.has(fingerprint);
+  }
+
+  /** Mark a fingerprint as contacted (for non-BossCandidateRaw usage) */
+  markContactedByFingerprint(fingerprint: string): void {
+    this.contactedFingerprints.add(fingerprint);
   }
 }
 
@@ -570,7 +581,7 @@ export class BossAdapter implements PlatformAdapter {
 
     // 幂等检查
     const fingerprint = this.getFingerprint(request);
-    if (this.filter.isContactedByName(fingerprint)) {
+    if (this.filter.isContactedByFingerprint(fingerprint)) {
       return {
         success: false,
         error: 'ALREADY_CONTACTED_TODAY',
@@ -584,7 +595,7 @@ export class BossAdapter implements PlatformAdapter {
     // 4. 检测频率限制弹窗
 
     await this.rateLimiter.waitAndRecord();
-    this.filter.markContactedByName(fingerprint);
+    this.filter.markContactedByFingerprint(fingerprint);
     this.sessionContactedCount++;
 
     // 模拟成功（Sprint 4 会替换为真实检测）
@@ -660,17 +671,6 @@ export class BossAdapter implements PlatformAdapter {
   private getFingerprint(request: ReachOutRequest): string {
     const { candidate } = request;
     return `${candidate.name}|${candidate.profile.education[0]?.school ?? ''}|${candidate.profile.experience[0]?.company ?? ''}`;
-  }
-
-  /** Extension: add isContactedByName/markContactedByName for non-BossCandidateRaw usage */
-  private contactedNames = new Set<string>();
-
-  isContactedByName(fingerprint: string): boolean {
-    return this.contactedNames.has(fingerprint);
-  }
-
-  markContactedByName(fingerprint: string): void {
-    this.contactedNames.add(fingerprint);
   }
 }
 
