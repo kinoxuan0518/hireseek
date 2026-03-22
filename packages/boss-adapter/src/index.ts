@@ -532,6 +532,7 @@ export class BossAdapter implements PlatformAdapter {
   private sessionSkipped: Array<{ name: string; reason: string }> = [];
   private sessionContactedCount = 0;
   private quotaExhausted = false;
+  private browserSession: import('./browser.js').BrowserSession | null = null;
 
   constructor(config: BossAdapterConfig = {}, filterConfig?: BossFilterConfig) {
     this.config = {
@@ -544,26 +545,100 @@ export class BossAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
-    // TODO: Sprint 4 — 初始化 Playwright、加载登录状态
+    const { BrowserSession } = await import('./browser.js');
+    this.browserSession = new BrowserSession(
+      {
+        headless: this.config.headless,
+        executablePath: this.config.executablePath,
+        userDataDir: this.config.userDataDir,
+      },
+      (msg) => console.log(msg)
+    );
+    await this.browserSession.init();
     this.initialized = true;
   }
 
   async destroy(): Promise<void> {
-    // TODO: Sprint 4 — 关闭浏览器
+    if (this.browserSession) {
+      await this.browserSession.destroy();
+      this.browserSession = null;
+    }
     this.initialized = false;
   }
 
   async getCandidates(request: CandidateFetchRequest): Promise<CandidateFetchResult> {
     this.ensureInitialized();
+    if (!this.browserSession) throw new Error('Browser session not available');
 
-    // TODO: Sprint 4 — 浏览器自动化
-    // 1. 导航到 BOSS直聘推荐页 zhipin.com/web/employer/talent/recommend
-    // 2. 选择职位
-    // 3. 设置页面筛选（经验/学历/院校/关键词/活跃时间）
-    // 4. 滚动收集候选人原始数据
-    // 5. 返回标准化 Candidate[]
+    const { rawToCandidate } = await import('./browser.js');
+    const page = this.browserSession.getPage();
 
-    throw new Error('Not implemented — browser automation pending (Sprint 4)');
+    // 1. 导航到推荐牛人页
+    await page.goto('https://www.zhipin.com/web/employer/talent/recommend', { waitUntil: 'domcontentloaded' });
+    await this.sleep(2000, 4000);
+
+    // 2. 应用页面筛选条件
+    const filters = request.job.filters ?? {};
+    await this.browserSession.applyFilters({
+      keywords: filters.keywords as string[] | undefined,
+      degree: filters.degree as string[] | undefined,
+      experience: filters.experience as string[] | undefined,
+      schoolTags: filters.schoolTags as string[] | undefined,
+    });
+
+    // 3. 切换到推荐 tab（默认）
+    await this.browserSession.switchTab('推荐');
+
+    // 4. 滚动收集 + 实时过滤
+    const allPassed: Candidate[] = [];
+    const limit = request.limit ?? 50;
+    const signal = { stop: false };
+
+    const result = await this.browserSession.scrollAndCollectCandidates({
+      rateLimiter: this.rateLimiter,
+      signal,
+      onBatch: (raws) => {
+        // 实时过滤和评分
+        const { passed, rejected } = this.filter.filterAndRank(raws);
+        for (const { raw } of rejected) {
+          this.sessionSkipped.push({ name: raw.name, reason: 'filtered_out' });
+        }
+        for (const { raw, score } of passed) {
+          const candidate = rawToCandidate(raw);
+          candidate.evaluation = {
+            score,
+            passed: true,
+            threshold: this.filter['config'].scoreThreshold ?? 60,
+            dimensions: [],
+            vetoed: [],
+            bonuses: [],
+            priority: score >= 90 ? 'critical' : score >= 80 ? 'high' : score >= 70 ? 'medium' : 'low',
+          };
+          allPassed.push(candidate);
+        }
+        // 如果收集够了，发停止信号
+        if (allPassed.length >= limit) {
+          signal.stop = true;
+        }
+      },
+    });
+
+    // 处理终止原因
+    if (result.terminatedBy === 'quota_exhausted') {
+      this.quotaExhausted = true;
+    }
+
+    const candidates = allPassed.slice(0, limit);
+    return {
+      candidates,
+      hasMore: result.terminatedBy === 'scroll_stable' && allPassed.length > limit,
+      platformStatus: {
+        platform: 'boss',
+        loggedIn: true,
+        rateLimited: result.terminatedBy === 'quota_exhausted',
+        accountStatus: 'active',
+      },
+    };
   }
 
   async reachOut(request: ReachOutRequest): Promise<ReachOutResult> {
@@ -588,24 +663,78 @@ export class BossAdapter implements PlatformAdapter {
       };
     }
 
-    // TODO: Sprint 4 — 浏览器自动化
-    // 1. 导航到候选人聊天页
-    // 2. 发送消息
-    // 3. 等待确认按钮变为"继续沟通"
-    // 4. 检测频率限制弹窗
+    if (!this.browserSession) throw new Error('Browser session not available');
 
+    // 生成消息
+    const { generateDefaultMessage } = await import('./browser.js');
+    const message = request.message || generateDefaultMessage(
+      request.candidate.profile.experience[0]?.title ?? '我们的岗位'
+    );
+
+    // 频率控制
     await this.rateLimiter.waitAndRecord();
+
+    // 发送打招呼
+    const result = await this.browserSession.reachOut(request.candidate, message);
+
+    if (result.alreadyContacted) {
+      return { success: false, error: 'ALREADY_CONTACTED_TODAY' };
+    }
+
+    if (result.rateLimited) {
+      if (result.error === 'DAILY_QUOTA_EXHAUSTED') {
+        this.quotaExhausted = true;
+        return {
+          success: false,
+          error: 'DAILY_QUOTA_EXHAUSTED',
+          rateLimited: true,
+          remainingQuota: 0,
+        };
+      }
+      // 软退避
+      await this.rateLimiter.handleRateLimit();
+      return {
+        success: false,
+        error: 'RATE_LIMITED',
+        rateLimited: true,
+      };
+    }
+
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
+
+    // 记录留痕
     this.filter.markContactedByFingerprint(fingerprint);
     this.sessionContactedCount++;
 
-    // 模拟成功（Sprint 4 会替换为真实检测）
+    this.sessionRecords.push({
+      fingerprint,
+      timestamp: new Date().toISOString(),
+      matchedRules: [],
+      screening: { school: 'skip', skill: 'skip', company: 'skip', experience: 'skip' },
+    });
+
     return { success: true };
   }
 
   async getConversationStatus(candidateId: string): Promise<ConversationStatus> {
     this.ensureInitialized();
-    // TODO: Sprint 4 — 读取对话页面，判断最后一条消息发送者
-    throw new Error('Not implemented — browser automation pending (Sprint 4)');
+    if (!this.browserSession) throw new Error('Browser session not available');
+
+    // 我们需要用 candidateId 查找对应的 Candidate 对象
+    // candidateId 在我们的系统里就是 BossCandidateRaw.id
+    // 这里构造一个最小 Candidate 对象用于定位
+    const dummyCandidate: import('@hireclaw/core').Candidate = {
+      id: candidateId,
+      name: '', // 将在 findCandidateCard 中通过其他方式查找
+      platform: 'boss',
+      profile: { education: [], experience: [], skills: [], ext: {} },
+      source: { rawData: { id: candidateId } },
+    };
+
+    const result = await this.browserSession.getConversationStatus(dummyCandidate);
+    return result.status;
   }
 
   async getStatus(): Promise<PlatformStatus> {
@@ -672,8 +801,18 @@ export class BossAdapter implements PlatformAdapter {
     const { candidate } = request;
     return `${candidate.name}|${candidate.profile.education[0]?.school ?? ''}|${candidate.profile.experience[0]?.company ?? ''}`;
   }
+
+  private sleep(minMs: number, maxMs: number): Promise<void> {
+    const ms = minMs + Math.random() * (maxMs - minMs);
+    return new Promise<void>(resolve => setTimeout(resolve as () => void, ms));
+  }
 }
 
 // ── Export helpers ──
 
 export { type ConversationStatus, type EvaluationResult, type EvaluationDimension, type Candidate, type CandidateProfile, type Education, type Experience, type JobConfig };
+
+// ── Re-export browser module ──
+
+export { BrowserSession, rawToCandidate, generateDefaultMessage } from './browser.js';
+export type { BrowserConfig } from './browser.js';
