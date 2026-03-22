@@ -49,7 +49,7 @@ export async function generateMessageWithLLM(
     system: systemPrompt,
     prompt: userPrompt,
     jsonMode: true,
-    maxTokens: 1024,
+    maxTokens: 2048, // Reasoning models (GLM-5 etc.) use tokens for thinking
     temperature: 0.7, // Higher temp for creative messages
   });
 
