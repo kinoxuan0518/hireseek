@@ -30,6 +30,14 @@
       "types": "./dist/pipeline/index.d.ts",
       "import": "./dist/pipeline/index.js"
     },
+    "./tracking": {
+      "types": "./dist/tracking/index.d.ts",
+      "import": "./dist/tracking/index.js"
+    },
+    "./llm": {
+      "types": "./dist/llm/index.d.ts",
+      "import": "./dist/llm/index.js"
+    },
     "./knowledge": {
       "types": "./dist/knowledge/index.d.ts",
       "import": "./dist/knowledge/index.js"

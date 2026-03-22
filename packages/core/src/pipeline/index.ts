@@ -16,10 +16,11 @@ import type {
   OutreachConfig,
   OutreachRecord,
 } from '../types.js';
-import { evaluateBatch } from '../evaluator/index.js';
-import type { EvaluateResult } from '../evaluator/index.js';
-import { generateMessage, planOutreachBatch } from '../outreach/index.js';
-import type { OutreachPlan } from '../outreach/index.js';
+import { evaluateBatch, evaluateBatchWithLLM } from '../evaluator/index.js';
+import type { EvaluateResult, LLMEvaluatorOptions } from '../evaluator/index.js';
+import { generateMessage, generateMessageWithLLM, planOutreachBatch } from '../outreach/index.js';
+import type { OutreachPlan, LLMOutreachOptions } from '../outreach/index.js';
+import type { LLMConfig } from '../types.js';
 
 // ────────────────────────────────────────────────────────────
 // Pipeline Events
@@ -48,6 +49,8 @@ export interface PipelineConfig {
   evaluation?: EvaluationConfig;
   /** 触达配置 */
   outreach?: OutreachConfig;
+  /** LLM 配置（提供后评估和触达将使用 LLM，不可用时自动 fallback） */
+  llm?: LLMConfig;
   /** 事件回调 */
   onEvent?: PipelineEventHandler;
   /** 每日触达上限 */
@@ -196,9 +199,27 @@ export class Pipeline {
     const evalStart = Date.now();
     emit({ type: 'evaluate:start', count: allCandidates.length });
 
-    const evalResults = evaluateBatch(allCandidates, request.job, {
-      config: config.evaluation,
-    });
+    // Use LLM evaluator when LLM config is provided, otherwise fall back to rule engine
+    let evalResults: Array<{ candidate: Candidate; result: EvaluateResult }>;
+    if (config.llm) {
+      try {
+        evalResults = await evaluateBatchWithLLM(allCandidates, request.job, {
+          llm: config.llm,
+          config: config.evaluation,
+        });
+      } catch (err) {
+        // LLM failed, fall back to rule engine
+        const errMsg = err instanceof Error ? err.message : String(err);
+        emit({ type: 'error', stage: 'evaluate', error: `LLM evaluation failed: ${errMsg}, using rule engine`, recoverable: true });
+        evalResults = evaluateBatch(allCandidates, request.job, {
+          config: config.evaluation,
+        });
+      }
+    } else {
+      evalResults = evaluateBatch(allCandidates, request.job, {
+        config: config.evaluation,
+      });
+    }
 
     const totalEvaluated = evalResults.length;
     const totalPassed = evalResults.filter(r => r.result.passed).length;
@@ -242,19 +263,46 @@ export class Pipeline {
       for (const plan of contactPlans) {
         const candidate = evalResults.find(r => r.candidate.id === plan.candidateId)?.candidate;
         if (!candidate) continue;
+        const evaluation = candidate.evaluation ?? evalResults.find(r => r.candidate.id === plan.candidateId)!.result;
 
         for (const attempt of plan.attempts) {
           const adapter = this.adapters.get(attempt.platform);
           if (!adapter) continue;
 
-          const message = generateMessage({
-            candidate,
-            evaluation: candidate.evaluation ?? evalResults.find(r => r.candidate.id === plan.candidateId)!.result,
-            job: request.job,
-            tier: plan.tier,
-            attemptNumber: attempt.attemptNumber,
-            brandTone: config.outreach?.brandTone,
-          });
+          // Try LLM message generation when available, fall back to template
+          let message;
+          if (config.llm) {
+            try {
+              message = await generateMessageWithLLM({
+                candidate,
+                evaluation,
+                job: request.job,
+                tier: plan.tier,
+                attemptNumber: attempt.attemptNumber,
+                brandTone: config.outreach?.brandTone,
+                llm: config.llm,
+              });
+            } catch {
+              // LLM failed, use template
+              message = generateMessage({
+                candidate,
+                evaluation,
+                job: request.job,
+                tier: plan.tier,
+                attemptNumber: attempt.attemptNumber,
+                brandTone: config.outreach?.brandTone,
+              });
+            }
+          } else {
+            message = generateMessage({
+              candidate,
+              evaluation,
+              job: request.job,
+              tier: plan.tier,
+              attemptNumber: attempt.attemptNumber,
+              brandTone: config.outreach?.brandTone,
+            });
+          }
 
           try {
             const result = await adapter.reachOut({
