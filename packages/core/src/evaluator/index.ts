@@ -20,3 +20,31 @@ export {
   evaluateBatchWithLLM,
 } from './llm.js';
 export type { LLMEvaluatorOptions } from './llm.js';
+
+// ── Evaluator (higher-level API) ──
+export { Evaluator } from './Evaluator.js';
+export type { EvaluatorConfig } from './Evaluator.js';
+export {
+  DIMENSION_DEFINITIONS,
+  validateWeights,
+  normalizeWeights,
+  scoreToLevel,
+  LEVEL_LABELS,
+  LEVEL_COLORS,
+} from './dimensions/Dimensions.js';
+export type {
+  DimensionDef,
+  DimensionKey,
+  ScoreLevel,
+  ScoredDimension,
+} from './dimensions/Dimensions.js';
+
+// ── Report Generator ──
+export { ReportGenerator } from './report/ReportGenerator.js';
+export type {
+  EvaluationReport,
+  BatchReport,
+  RankedCandidate,
+  ScoreDistribution,
+  PlatformStats,
+} from './report/ReportGenerator.js';
