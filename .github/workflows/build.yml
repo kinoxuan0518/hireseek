@@ -1,0 +1,28 @@
+name: Build
+
+on:
+  push:
+    branches: [main, claw-code-phase2]
+  pull_request:
+    branches: [main, claw-code-phase2]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --manifest-path rust/Cargo.toml --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claw-code-binary
+          path: rust/target/release/claw-code
