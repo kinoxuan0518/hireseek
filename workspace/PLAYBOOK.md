@@ -1,5 +1,11 @@
 # HireClaw 使用手册
 
+## 它们分别负责什么
+
+- HireClaw 是总控 Agent：负责理解你的招聘意图、承接上下文，并决定下一步该走寻源、渠道执行还是跟进复盘。
+- `talent-sourcing` 是能力模块之一：当你在问“要找什么样的人”“该怎么找”“先做人物/群体调研”时，优先由它处理。
+- 脉脉 / BOSS / LinkedIn 这些渠道 skill 是执行单元：当你明确说“现在去某个渠道搜人和触达”时，再由对应 skill 执行。
+
 ## 第一次使用
 
 1. 在 [console.anthropic.com](https://console.anthropic.com) 获取 API Key
