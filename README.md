@@ -20,7 +20,7 @@
 export DEEPSEEK_API_KEY="sk-..."   # 唯一必需配置
 ```
 
-- 默认 provider 为 `deepseek`，默认模型 `deepseek-chat`，复杂推理可切 `deepseek-reasoner`
+- 默认 provider 为 `deepseek`，默认模型 `deepseek-v4-flash`，复杂推理可切 `deepseek-v4-pro`（旧名 deepseek-chat/reasoner 将于 2026-07-24 弃用）
 - 仍兼容 Claude / OpenAI / MiniMax / 任意 OpenAI 兼容 API（`LLM_PROVIDER` 切换）
 
 ### 2. 纯文本 DOM Runner（无视觉浏览器驱动）
@@ -94,7 +94,8 @@ hireseek/
 |---------|--------|------|
 | `DEEPSEEK_API_KEY` | — | DeepSeek API Key（默认大脑，必填） |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API 地址 |
-| `LLM_MODEL` | `deepseek-chat` | 模型名 |
+| `LLM_MODEL` | `deepseek-v4-flash` | 模型名 |
+| `DEEPSEEK_REASONER_MODEL` | `deepseek-v4-pro` | 评估/策略等深推理场景 |
 | `LLM_PROVIDER` | `deepseek` | 可选 deepseek / claude / openai / minimax / custom |
 | `HIRESEEK_DB_PATH` | `~/.hireseek/hireseek.db` | 数据库路径（自动兼容旧 ~/.hireclaw） |
 | `FEISHU_WEBHOOK_URL` | — | 飞书执行报告推送 |
