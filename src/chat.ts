@@ -1841,7 +1841,7 @@ export async function startChat(): Promise<void> {
   });
 
   console.log(chalk.cyan('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-  console.log(chalk.cyan('🦞 HireSeek 对话模式 - 你的智能招聘助手'));
+  console.log(chalk.cyan('🔱 HireSeek 对话模式 - 你的智能招聘助手'));
   console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
   console.log(chalk.bold('💡 快速开始：'));
@@ -1851,12 +1851,11 @@ export async function startChat(): Promise<void> {
   console.log(chalk.gray('  • "把张三标记为已面试"\n'));
 
   console.log(chalk.bold('⚡ 快捷命令：'));
+  console.log(chalk.gray('  /help             - 全部命令     /status - 状态'));
+  console.log(chalk.gray('  /skills           - 技能列表     /clear  - 清空上下文'));
   console.log(chalk.gray('  /找候选人 <职位>    - 自动 sourcing'));
-  console.log(chalk.gray('  /候选人漏斗        - 查看招聘数据'));
-  console.log(chalk.gray('  /分析简历 <路径>   - PDF 简历分析'));
-  console.log(chalk.gray('  /export [标题]     - 导出会话'));
-  console.log(chalk.gray('  /sessions         - 查看所有会话'));
-  console.log(chalk.gray('  exit              - 退出对话\n'));
+  console.log(chalk.gray('  /rbt 等技能名      - 直接触发已接管的招聘技能'));
+  console.log(chalk.gray('  /q 或 Ctrl+C 两次  - 退出（生成中按 Ctrl+C 可打断）\n'));
 
   console.log(chalk.bold('🎯 核心功能：'));
   console.log(chalk.gray('  ✓ 智能对话 - 自然语言控制所有功能'));
@@ -1874,7 +1873,7 @@ export async function startChat(): Promise<void> {
 
   if (isFirstTime) {
     // AI 主动发起对话
-    console.log(chalk.cyan('🦞: ') + chalk.white('你好！我注意到你还没有配置招聘职位。'));
+    console.log(chalk.cyan('🔱: ') + chalk.white('你好！我注意到你还没有配置招聘职位。'));
     console.log(chalk.cyan('    ') + chalk.white('你想招什么职位呢？你可以：\n'));
     console.log(chalk.gray('    • 直接口头描述：') + chalk.white('"我想招一个前端工程师，要求..."'));
     console.log(chalk.gray('    • 提供 JD 文档：') + chalk.white('"读取这个 JD: /path/to/jd.pdf"'));
@@ -1882,26 +1881,147 @@ export async function startChat(): Promise<void> {
     console.log('');
   }
 
-  // Ctrl+C 也触发记忆保存
-  process.once('SIGINT', async () => {
+  // ── CC 风格交互：流式输出 / Ctrl+C 打断 / 双击退出 / Ctrl+D ───────────
+  let generating: AbortController | null = null;
+  let lastSigint = 0;
+  let exiting = false;
+
+  const gracefulExit = async (): Promise<void> => {
+    if (exiting) return;
+    exiting = true;
     console.log(chalk.gray('\n\n正在保存本次对话记忆...'));
-    await saveConversationMemory(client, model, messages);
-    console.log(chalk.gray('再见！\n'));
+    try {
+      await saveConversationMemory(client, model, messages);
+    } catch { /* 保存失败不阻断退出 */ }
+    console.log(chalk.gray('再见！🔱\n'));
     rl.close();
     process.exit(0);
+  };
+
+  // readline 激活时 Ctrl+C 触发的是 rl 的 SIGINT，不是 process 的
+  rl.on('SIGINT', () => {
+    if (generating) {
+      generating.abort(); // 打断当前生成，回到输入框
+      return;
+    }
+    const now = Date.now();
+    if (now - lastSigint < 2000) {
+      void gracefulExit();
+      return;
+    }
+    lastSigint = now;
+    console.log(chalk.gray('\n(再按一次 Ctrl+C 退出，或输入 /q)'));
+    ask();
   });
 
+  // Ctrl+D（EOF）→ 优雅退出
+  rl.on('close', () => {
+    if (!exiting) void gracefulExit();
+  });
+
+  const EXIT_WORDS = new Set(['exit', 'quit', 'q', '退出', '/exit', '/quit', '/q']);
+
+  const printHelp = (): void => {
+    console.log([
+      '',
+      chalk.bold('命令：'),
+      chalk.gray('  /q | /exit | 退出   结束对话（Ctrl+C 两次、Ctrl+D 同效）'),
+      chalk.gray('  /clear              清空对话上下文，重新开始'),
+      chalk.gray('  /status             模型 / 职位 / 数据库状态'),
+      chalk.gray('  /skills             列出全部可用技能'),
+      chalk.gray('  /export [标题]      导出会话      /sessions  查看会话'),
+      chalk.gray('  /<技能名> [参数]    直接触发技能，如 /rbt、/找候选人'),
+      chalk.gray('  Ctrl+C              打断正在生成的回复'),
+      '',
+    ].join('\n'));
+  };
+
+  /** 一轮流式请求：边生成边输出，返回完整 message（含工具调用） */
+  const streamRound = async (): Promise<OpenAI.Chat.Completions.ChatCompletionMessage> => {
+    generating = new AbortController();
+    let firstChunk = true;
+    process.stdout.write(chalk.gray('✻ 思考中'));
+    const spinner = setInterval(() => {
+      if (firstChunk) process.stdout.write(chalk.gray('·'));
+    }, 400);
+
+    try {
+      const stream = client.beta.chat.completions.stream(
+        { model, messages, tools: CHAT_TOOLS, tool_choice: 'auto', max_tokens: 4096 },
+        { signal: generating.signal },
+      );
+
+      stream.on('content', (delta) => {
+        if (firstChunk) {
+          process.stdout.write(`\r\x1b[K${chalk.cyan('HireSeek')}: `);
+          firstChunk = false;
+        }
+        process.stdout.write(delta);
+      });
+
+      const completion = await stream.finalChatCompletion();
+      if (firstChunk) {
+        process.stdout.write('\r\x1b[K'); // 纯工具调用轮，清掉思考提示
+      } else {
+        process.stdout.write('\n');
+      }
+      return completion.choices[0].message;
+    } finally {
+      clearInterval(spinner);
+      generating = null;
+    }
+  };
+
   const ask = (): void => {
-    rl.question(chalk.green('你: '), async (input) => {
+    if (exiting) return;
+    rl.question(chalk.green('\n❯ '), async (input) => {
       const text = input.trim();
       if (!text) { ask(); return; }
 
       // 退出命令
-      if (text === 'exit' || text === '退出') {
-        console.log(chalk.gray('\n正在保存本次对话记忆...'));
-        await saveConversationMemory(client, model, messages);
-        console.log(chalk.gray('再见！\n'));
-        rl.close();
+      if (EXIT_WORDS.has(text.toLowerCase())) {
+        await gracefulExit();
+        return;
+      }
+
+      // 帮助
+      if (text === '/help' || text === '/h' || text === '?') {
+        printHelp();
+        ask();
+        return;
+      }
+
+      // 清空上下文（保留 system prompt）
+      if (text === '/clear') {
+        messages.length = 1;
+        console.log(chalk.gray('\n✓ 上下文已清空，重新开始\n'));
+        ask();
+        return;
+      }
+
+      // 状态
+      if (text === '/status') {
+        const activeJob = loadActiveJob();
+        const { listClaudeSkills } = await import('./skills/claude-skills');
+        console.log([
+          '',
+          chalk.bold('状态：'),
+          chalk.gray(`  模型      ${model}（${config.llm.provider}）`),
+          chalk.gray(`  职位      ${activeJob?.title ?? '未配置'}`),
+          chalk.gray(`  数据库    ${db.name}`),
+          chalk.gray(`  技能      ${listClaudeSkills().length} 个已接管`),
+          chalk.gray(`  上下文    ${messages.length} 条消息`),
+          '',
+        ].join('\n'));
+        ask();
+        return;
+      }
+
+      // 技能列表
+      if (text === '/skills') {
+        const { formatSkillList } = await import('./skill-system');
+        console.log('\n' + formatSkillList() + '\n');
+        ask();
         return;
       }
 
@@ -1969,22 +2089,16 @@ export async function startChat(): Promise<void> {
       }
 
       try {
-        let response = await client.chat.completions.create({
-          model,
-          messages,
-          tools: CHAT_TOOLS,
-          tool_choice: 'auto',
-          max_tokens: 1024,
-        });
-
-        let msg = response.choices[0].message;
+        console.log('');
+        let msg = await streamRound();
         messages.push(msg);
 
-        // 处理工具调用
+        // 处理工具调用（每轮工具结果回传后继续流式生成）
         while (msg.tool_calls && msg.tool_calls.length > 0) {
           const toolResults: OpenAI.ChatCompletionToolMessageParam[] = [];
 
           for (const call of msg.tool_calls) {
+            console.log(chalk.gray(`  ⚙ ${call.function.name}`));
             const args   = JSON.parse(call.function.arguments || '{}');
             const result = await executeTool(call.function.name, args);
             toolResults.push({ role: 'tool', tool_call_id: call.id, content: result });
@@ -1992,23 +2106,16 @@ export async function startChat(): Promise<void> {
 
           messages.push(...toolResults);
 
-          response = await client.chat.completions.create({
-            model,
-            messages,
-            tools: CHAT_TOOLS,
-            tool_choice: 'auto',
-            max_tokens: 1024,
-          });
-
-          msg = response.choices[0].message;
+          msg = await streamRound();
           messages.push(msg);
         }
 
-        const reply = msg.content ?? '';
-        console.log(`\n${chalk.cyan('HireSeek')}: ${reply}\n`);
-
       } catch (err: any) {
-        console.error(chalk.red(`\n出错了: ${err.message}\n`));
+        if (err?.name === 'APIUserAbortError' || generating === null && err?.message?.includes('abort')) {
+          console.log(chalk.yellow('\n⎋ 已打断'));
+        } else {
+          console.error(chalk.red(`\n出错了: ${err.message}\n`));
+        }
       }
 
       ask();
