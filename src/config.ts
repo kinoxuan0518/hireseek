@@ -13,7 +13,8 @@ const provider = (process.env.LLM_PROVIDER || 'deepseek') as 'deepseek' | 'claud
 
 // 每个 provider 的默认模型
 const DEFAULT_MODELS: Record<string, string> = {
-  deepseek: 'deepseek-chat',
+  // deepseek-chat/deepseek-reasoner 旧模型名将于 2026-07-24 弃用
+  deepseek: 'deepseek-v4-flash',
   claude:  'claude-opus-4-6',
   openai:  'computer-use-preview',
   minimax: 'MiniMax-Text-01',
@@ -40,8 +41,8 @@ export const config = {
     apiKey:  process.env.DEEPSEEK_API_KEY || '',
     baseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
     model:   process.env.LLM_MODEL || DEFAULT_MODELS.deepseek,
-    /** 复杂推理场景（评估、策略）可切换 deepseek-reasoner */
-    reasonerModel: process.env.DEEPSEEK_REASONER_MODEL || 'deepseek-reasoner',
+    /** 复杂推理场景（评估、策略）用更强的 v4-pro；v4-flash 思考模式是低成本替代 */
+    reasonerModel: process.env.DEEPSEEK_REASONER_MODEL || 'deepseek-v4-pro',
   },
   anthropic: {
     apiKey:  process.env.ANTHROPIC_API_KEY || '',

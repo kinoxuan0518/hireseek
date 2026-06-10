@@ -16,7 +16,9 @@
 | setup 向导 DeepSeek 设为首选项（原生 provider，不再走 custom） | `src/setup.ts` |
 | 入口 API Key 检查加 `DEEPSEEK_API_KEY` | `src/index.ts` |
 
-环境变量：`DEEPSEEK_API_KEY`（必填）、`DEEPSEEK_BASE_URL`（默认 api.deepseek.com）、`LLM_MODEL`（默认 deepseek-chat）、`DEEPSEEK_REASONER_MODEL`（默认 deepseek-reasoner）。
+环境变量：`DEEPSEEK_API_KEY`（必填）、`DEEPSEEK_BASE_URL`（默认 api.deepseek.com）、`LLM_MODEL`（默认 deepseek-v4-flash）、`DEEPSEEK_REASONER_MODEL`（默认 deepseek-v4-pro）。
+
+> 注：deepseek-chat 与 deepseek-reasoner 旧模型名将于北京时间 2026-07-24 23:59 弃用（二者分别对应 deepseek-v4-flash 的非思考/思考模式），HireSeek 已于 2026-06-10 切换为 v4 系列模型名。
 
 ## 进化点二：纯文本 DOM Runner
 

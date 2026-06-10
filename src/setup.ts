@@ -110,7 +110,7 @@ async function testConnection(env: Record<string, string>): Promise<boolean> {
     const baseURL = env.DEEPSEEK_API_KEY
       ? (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com')
       : env.CUSTOM_BASE_URL || undefined;
-    const model   = env.LLM_MODEL || (env.DEEPSEEK_API_KEY ? 'deepseek-chat' : 'claude-sonnet-4-6');
+    const model   = env.LLM_MODEL || (env.DEEPSEEK_API_KEY ? 'deepseek-v4-flash' : 'claude-sonnet-4-6');
 
     const client = new OpenAI({ apiKey, baseURL });
     const res = await client.chat.completions.create({
@@ -203,7 +203,7 @@ export async function runSetup(): Promise<void> {
         const key = await ask(rl, chalk.white('\nDeepSeek API Key: '));
         if (key) {
           env.LLM_PROVIDER = 'deepseek';
-          env.LLM_MODEL = 'deepseek-chat';
+          env.LLM_MODEL = 'deepseek-v4-flash';
           env.DEEPSEEK_API_KEY = key;
           configured = true;
         }
