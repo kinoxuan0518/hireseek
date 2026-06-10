@@ -1,16 +1,19 @@
 #!/usr/bin/env node
+const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
-// 获取项目根目录
 const projectRoot = path.join(__dirname, '..');
-const indexPath = path.join(projectRoot, 'dist', 'index.js');
+const distPath = path.join(projectRoot, 'dist', 'index.js');
 
-// 运行编译后的 JS 文件
-const child = spawn('node', [indexPath, ...process.argv.slice(2)], {
-  cwd: projectRoot,
-  stdio: 'inherit'
-});
+// 有编译产物用编译产物，否则用 tsx 直跑 TypeScript 源码
+const child = fs.existsSync(distPath)
+  ? spawn('node', [distPath, ...process.argv.slice(2)], { cwd: projectRoot, stdio: 'inherit' })
+  : spawn(
+      path.join(projectRoot, 'node_modules', '.bin', 'tsx'),
+      [path.join(projectRoot, 'src', 'index.ts'), ...process.argv.slice(2)],
+      { cwd: projectRoot, stdio: 'inherit' },
+    );
 
 child.on('exit', (code) => {
   process.exit(code || 0);
