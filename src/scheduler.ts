@@ -88,6 +88,18 @@ export function startScheduler(): void {
   });
   console.log(`  ${'主动检查'.padEnd(20)} → 每小时`);
 
+  // 每周进化：基于一周真实数据复盘并改写话术/筛选规则，报告推飞书
+  cron.schedule(config.schedule.evolve, async () => {
+    console.log('[Scheduler] 🧬 每周进化复盘...');
+    try {
+      const { evolve } = await import('./evolution');
+      await evolve({ notify: true });
+    } catch (e) {
+      console.error('[Scheduler] 进化出错:', e instanceof Error ? e.message : e);
+    }
+  });
+  console.log(`  ${'每周进化'.padEnd(20)} → ${config.schedule.evolve}`);
+
   // 启动后立即跑一次，别等到整点
   setTimeout(() => proactiveCheck().catch(() => {}), 5000);
 }

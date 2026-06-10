@@ -93,6 +93,8 @@ export const config = {
     boss:     process.env.SCHEDULE_BOSS     || '0 9 * * 1-5',
     maimai:   process.env.SCHEDULE_MAIMAI   || '0 10 * * 1-5',
     followup: process.env.SCHEDULE_FOLLOWUP || '0 14 * * 1-5',
+    // 每周五 18:00 自动复盘进化（基于一周真实数据）
+    evolve:   process.env.SCHEDULE_EVOLVE   || '0 18 * * 5',
   },
 };
 
