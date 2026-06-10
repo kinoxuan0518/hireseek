@@ -36,6 +36,10 @@ const USAGE = `
   hireseek funnel              查看招聘漏斗
   hireseek tasks               查看任务看板
   hireseek tasks <ID>          查看任务详情
+  hireseek evo                 进化：基于真实数据复盘并改写话术/筛选规则
+  hireseek evo dry             只出复盘报告，不落盘
+  hireseek evo back            回滚最近一次进化
+  hireseek evo log             进化历史与效果对比
   hireseek start               启动定时守护进程
 
 渠道: boss | maimai | linkedin | followup
@@ -209,6 +213,25 @@ async function main(): Promise<void> {
       displayTaskBoard(jobId);
     }
 
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'evo' || command === 'evolve') {
+    const { evolve, rollbackLastEvolution, evolutionHistory, evolutionImpact } = await import('./evolution');
+    const sub = args[1];
+
+    if (sub === 'back' || args.includes('--rollback')) {
+      console.log(rollbackLastEvolution());
+    } else if (sub === 'log' || args.includes('--history')) {
+      console.log(chalk.cyan('\n🧬 进化历史\n'));
+      console.log(evolutionHistory());
+      console.log('\n' + evolutionImpact());
+    } else {
+      const dryRun = sub === 'dry' || args.includes('--dry-run');
+      console.log(chalk.cyan(`\n🧬 开始进化复盘${dryRun ? '（dry-run）' : ''}...\n`));
+      const report = await evolve({ dryRun, notify: !dryRun });
+      console.log(report);
+    }
     db.close();
     process.exit(0);
 

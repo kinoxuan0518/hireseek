@@ -94,6 +94,26 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'evolve',
+      description:
+        '进化闭环：基于飞书多维表格真实招聘结果 + 本地漏斗数据复盘，' +
+        '由深推理模型诊断话术/筛选规则的问题并自动改写（git 留版本可回滚）。' +
+        '用户说"复盘"、"进化"、"优化话术"、"为什么回复率低"时调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          mode: {
+            type: 'string',
+            enum: ['run', 'dry', 'back', 'log'],
+            description: 'run=复盘并落盘改写；dry=只出报告不改；back=回滚上次进化；log=进化历史与效果',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'run_sourcing',
       description: '在指定招聘渠道执行 sourcing 任务。不指定渠道时自动根据职位配置决定。',
       parameters: {
@@ -911,6 +931,17 @@ async function executeTool(name: string, args: any): Promise<string> {
       } catch (e: any) {
         return `飞书数据读取失败：${e.message}\n提示：需要配置 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BITABLE_APP_TOKEN / FEISHU_BITABLE_TABLE_ID，并为自建应用开通多维表格只读权限。`;
       }
+    }
+
+    case 'evolve': {
+      const { evolve, rollbackLastEvolution, evolutionHistory, evolutionImpact } = await import('./evolution');
+      const mode = (args.mode as string) || 'dry';
+
+      if (mode === 'back') return rollbackLastEvolution();
+      if (mode === 'log') return `${evolutionHistory()}\n\n${evolutionImpact()}`;
+
+      console.log(chalk.gray(`\n[进化] 复盘中${mode === 'dry' ? '（dry-run）' : ''}...\n`));
+      return await evolve({ dryRun: mode === 'dry', notify: mode === 'run' });
     }
 
     case 'use_recruiting_skill': {
