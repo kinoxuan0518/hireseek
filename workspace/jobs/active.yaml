@@ -1,0 +1,32 @@
+# 当前激活的招聘职位
+title: AI 工程师
+department: 技术
+
+requirements:
+  must_have:
+    - 1-3 年工作经验
+    - Agent 相关的工作经历
+    - 互联网大厂 / 明星创业公司背景
+  nice_to_have: []
+  deal_breaker:
+    - 跳槽超过 3 次且无合理解释
+    - 简历模糊、夸大其词
+
+salary:
+  min: 20000
+  max: 40000
+  unit: 月薪（税前）
+
+channels:
+  boss:
+    enabled: true
+    accounts: 1
+  maimai:
+    enabled: true
+    accounts: 1
+
+daily_goal:
+  contact: 30
+  quality: 5
+
+urgency: high

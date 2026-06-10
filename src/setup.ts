@@ -116,9 +116,10 @@ async function testConnection(env: Record<string, string>): Promise<boolean> {
     const res = await client.chat.completions.create({
       model,
       messages: [{ role: 'user', content: '回复 ok 两个字' }],
-      max_tokens: 10,
+      max_tokens: 50,
     });
-    return !!res.choices[0]?.message?.content;
+    // 请求成功即视为连通（思考型模型在小 max_tokens 下 content 可能为空，不能据此判失败）
+    return Array.isArray(res.choices) && res.choices.length > 0;
   } catch {
     return false;
   }
