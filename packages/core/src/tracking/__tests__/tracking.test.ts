@@ -1,4 +1,4 @@
-// @hireclaw/core/tracking — Tests
+// @hireseek/core/tracking — Tests
 
 import {
   CandidateTracker,
@@ -15,7 +15,7 @@ function assert(condition: boolean, message: string) {
   else { failed++; console.log(`  ❌ ${message}`); }
 }
 
-console.log('\n📋 @hireclaw/core/tracking Tests\n');
+console.log('\n📋 @hireseek/core/tracking Tests\n');
 
 // 1. Status transitions are valid
 console.log('--- Status transitions ---');
@@ -230,7 +230,7 @@ console.log('\n--- Follow-up reminders ---');
 // 12. Save and reload
 console.log('\n--- Save and reload ---');
 {
-  const tmpDir = `C:\\Users\\Kino Xuan\\.openclaw-autoclaw\\workspace\\hireclaw\\.tmp-test-${Date.now()}`;
+  const tmpDir = `C:\\Users\\Kino Xuan\\.openclaw-autoclaw\\workspace\\hireseek\\.tmp-test-${Date.now()}`;
   const storagePath = `${tmpDir}\\tracking.json`;
 
   const tracker1 = new CandidateTracker({ storagePath });

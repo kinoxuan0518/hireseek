@@ -1,4 +1,4 @@
-// @hireclaw/core/evaluator — 评估引擎主入口
+// @hireseek/core/evaluator — 评估引擎主入口
 //
 // 参考 Claude Code 的结构化评估模式：
 // - 清晰的维度定义（Dimensions.ts）

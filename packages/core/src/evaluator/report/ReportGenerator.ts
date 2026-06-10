@@ -1,4 +1,4 @@
-// @hireclaw/core/evaluator/report — 评估报告生成
+// @hireseek/core/evaluator/report — 评估报告生成
 //
 // 参考 Claude Code 的结构化输出模式，生成多格式评估报告
 // - Markdown（人类可读）

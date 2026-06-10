@@ -37,7 +37,7 @@ async function proactiveCheck(): Promise<void> {
 
   if (stale.length > 0) {
     const names = stale.map(c => `${c.name}（${c.company || '未知'}）`).join('、');
-    await notify('🦞 HireClaw 提醒', `以下候选人联系超过 7 天未回复，考虑跟进或放弃：\n${names}`);
+    await notify('🦞 HireSeek 提醒', `以下候选人联系超过 7 天未回复，考虑跟进或放弃：\n${names}`);
   }
 
   // 2. 今天还没跑 sourcing（早上 10 点后检查）
@@ -49,7 +49,7 @@ async function proactiveCheck(): Promise<void> {
       LIMIT 1
     `).get();
     if (!todayRun) {
-      await notify('🦞 HireClaw 提醒', '今天还没有跑 sourcing，要现在开始吗？\n运行 hireclaw run');
+      await notify('🦞 HireSeek 提醒', '今天还没有跑 sourcing，要现在开始吗？\n运行 hireseek run');
     }
   }
 
@@ -61,7 +61,7 @@ async function proactiveCheck(): Promise<void> {
   `).get(jobId) as { count: number };
 
   if (contacted.count === 0 && hour >= 9) {
-    await notify('🦞 HireClaw 提醒', '最近 3 天没有新触达候选人，漏斗顶部快空了。');
+    await notify('🦞 HireSeek 提醒', '最近 3 天没有新触达候选人，漏斗顶部快空了。');
   }
 }
 

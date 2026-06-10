@@ -25,18 +25,18 @@ const CHANNELS: Channel[] = ['boss', 'maimai', 'linkedin', 'followup'];
 
 const USAGE = `
 用法:
-  hireclaw                     对话模式（默认）
-  hireclaw setup               初始化向导：一步步配置好一切
-  hireclaw dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
-  hireclaw run                 自主模式：自动决定今天跑哪些渠道
-  hireclaw run --plan          计划模式：先分析生成计划，用户确认后执行
-  hireclaw run <渠道>          指定渠道立即执行
-  hireclaw scan                扫描收件箱，更新已回复候选人
-  hireclaw update <姓名> <状态>  手动更新候选人状态
-  hireclaw funnel              查看招聘漏斗
-  hireclaw tasks               查看任务看板
-  hireclaw tasks <ID>          查看任务详情
-  hireclaw start               启动定时守护进程
+  hireseek                     对话模式（默认）
+  hireseek setup               初始化向导：一步步配置好一切
+  hireseek dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
+  hireseek run                 自主模式：自动决定今天跑哪些渠道
+  hireseek run --plan          计划模式：先分析生成计划，用户确认后执行
+  hireseek run <渠道>          指定渠道立即执行
+  hireseek scan                扫描收件箱，更新已回复候选人
+  hireseek update <姓名> <状态>  手动更新候选人状态
+  hireseek funnel              查看招聘漏斗
+  hireseek tasks               查看任务看板
+  hireseek tasks <ID>          查看任务详情
+  hireseek start               启动定时守护进程
 
 渠道: boss | maimai | linkedin | followup
 状态: replied | interviewed | offered | joined | rejected | dropped
@@ -46,8 +46,8 @@ async function checkSetup(): Promise<boolean> {
   const issues: string[] = [];
   const hints:  string[] = [];
 
-  // 检查 API key
-  const hasKey = process.env.ANTHROPIC_API_KEY || process.env.CUSTOM_API_KEY;
+  // 检查 API key（DeepSeek 优先）
+  const hasKey = process.env.DEEPSEEK_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.CUSTOM_API_KEY;
   if (!hasKey) {
     issues.push('未配置 API Key');
   }
@@ -63,11 +63,11 @@ async function checkSetup(): Promise<boolean> {
   // 如果有配置缺失，显示欢迎信息并引导 setup
   if (issues.length > 0) {
     console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-    console.log(chalk.cyan('👋 欢迎使用 HireClaw！'));
+    console.log(chalk.cyan('👋 欢迎使用 HireSeek！'));
     console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
-    console.log(chalk.white('看起来这是你第一次使用 HireClaw 🦞\n'));
-    console.log(chalk.gray('HireClaw 是一个智能招聘助手，可以帮你：'));
+    console.log(chalk.white('看起来这是你第一次使用 HireSeek 🔱\n'));
+    console.log(chalk.gray('HireSeek 是一个智能招聘助手，可以帮你：'));
     console.log(chalk.gray('  • 自动在 BOSS直聘、脉脉等平台寻找候选人'));
     console.log(chalk.gray('  • 智能筛选和评估候选人'));
     console.log(chalk.gray('  • 追踪招聘进展和数据分析'));
@@ -83,7 +83,7 @@ async function checkSetup(): Promise<boolean> {
     // 自动运行 setup
     await runSetup();
 
-    console.log(chalk.green('\n✨ 配置完成！HireClaw 已准备就绪\n'));
+    console.log(chalk.green('\n✨ 配置完成！HireSeek 已准备就绪\n'));
     console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
     return true; // 表示运行了 setup
@@ -99,7 +99,7 @@ async function checkSetup(): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-  console.log(chalk.cyan('\n🦞 HireClaw - 智能招聘 Agent\n'));
+  console.log(chalk.cyan('\n🔱 HireSeek - DeepSeek 驱动的智能招聘 Agent\n'));
   console.log(`数据库: ${chalk.gray(db.name)}\n`);
 
   const args = process.argv.slice(2);
@@ -141,7 +141,7 @@ async function main(): Promise<void> {
     } else if (CHANNELS.includes(channelArg as Channel)) {
       // 指定渠道模式
       if (usePlan) {
-        console.log(chalk.yellow('⚠️  计划模式仅支持 "hireclaw run --plan"（全渠道），指定渠道时不支持'));
+        console.log(chalk.yellow('⚠️  计划模式仅支持 "hireseek run --plan"（全渠道），指定渠道时不支持'));
         process.exit(1);
       }
       await runChannel(channelArg as Channel);
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
     const name   = args[1];
     const status = args[2];
     if (!name || !status || !VALID_STATUSES.includes(status)) {
-      console.error(chalk.red(`用法: hireclaw update <姓名> <状态>`));
+      console.error(chalk.red(`用法: hireseek update <姓名> <状态>`));
       console.log(`状态可选: ${VALID_STATUSES.join(' | ')}`);
       process.exit(1);
     }
@@ -218,7 +218,7 @@ async function main(): Promise<void> {
     console.log(chalk.gray('\n按 Ctrl+C 退出\n'));
 
     process.on('SIGINT', () => {
-      console.log('\n[HireClaw] 退出');
+      console.log('\n[HireSeek] 退出');
       db.close();
       process.exit(0);
     });
@@ -229,6 +229,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(chalk.red('[HireClaw] 启动失败:'), err.message);
+  console.error(chalk.red('[HireSeek] 启动失败:'), err.message);
   process.exit(1);
 });

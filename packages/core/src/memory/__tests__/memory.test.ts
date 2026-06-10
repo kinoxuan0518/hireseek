@@ -1,4 +1,4 @@
-// @hireclaw/core/memory — Memory Module Tests
+// @hireseek/core/memory — Memory Module Tests
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryStore, FileStore, createMemoryStore } from '../MemoryStore.js';

@@ -1,4 +1,4 @@
-// @hireclaw/core/outreach/llm — LLM-powered Message Generation
+// @hireseek/core/outreach/llm — LLM-powered Message Generation
 //
 // Sends candidate profile + evaluation + job config + outreach guide to LLM,
 // receives Level 3-4 personalized outreach messages.

@@ -1,4 +1,4 @@
-// @hireclaw/core — Main Entry Point
+// @hireseek/core — Main Entry Point
 
 // ── Types ──
 export type {
@@ -50,7 +50,7 @@ export type {
   ConversationStatus,
   PlatformStatus,
   // SDK
-  HireClawSDKConfig,
+  HireSeekSDKConfig,
   LLMConfig,
   KnowledgeConfig,
 } from './types.js';

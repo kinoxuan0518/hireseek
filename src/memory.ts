@@ -90,7 +90,7 @@ export function buildMemoryContext(channel: Channel, jobId: string): string {
   return `# 记忆上下文\n\n${sections.join('\n\n')}`;
 }
 
-/** 注入历史对话记忆，让 HireClaw 跨会话记住和用户的交流 */
+/** 注入历史对话记忆，让 HireSeek 跨会话记住和用户的交流 */
 export function buildConversationMemory(jobId: string): string {
   const rows = conversationOps.recent.all(jobId) as {
     summary: string;

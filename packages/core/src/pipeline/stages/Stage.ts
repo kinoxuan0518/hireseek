@@ -1,4 +1,4 @@
-// @hireclaw/core/pipeline/stages — 流水线阶段定义
+// @hireseek/core/pipeline/stages — 流水线阶段定义
 //
 // 参考 Claude Code 的 Agentic Loop（收集上下文 → 采取行动 → 验证结果）
 // 将招聘流水线拆解为明确的阶段，每个阶段可配置、可观察、可审计

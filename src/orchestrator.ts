@@ -61,8 +61,8 @@ export async function runChannel(
     const targetUrl = CHANNEL_URL[channel];
     const isOnTargetPage = currentUrl.startsWith(targetUrl) || currentUrl.includes(new URL(targetUrl).pathname);
     if (!isOnTargetPage) {
-      console.log(`\n[HireClaw] ⚠️  未能进入目标页（当前：${currentUrl}）`);
-      console.log('[HireClaw] 请在浏览器窗口中完成登录，登录完成后按 Enter 继续...');
+      console.log(`\n[HireSeek] ⚠️  未能进入目标页（当前：${currentUrl}）`);
+      console.log('[HireSeek] 请在浏览器窗口中完成登录，登录完成后按 Enter 继续...');
       await new Promise<void>(resolve => {
         process.stdin.once('data', () => resolve());
       });
@@ -161,7 +161,7 @@ export async function scanInbox(jobId: string = 'default'): Promise<void> {
 
   const currentUrl = page.url();
   if (!currentUrl.includes('zhipin.com/web')) {
-    console.log('\n[HireClaw] ⚠️  请先登录 BOSS直聘，登录完成后按 Enter 继续...');
+    console.log('\n[HireSeek] ⚠️  请先登录 BOSS直聘，登录完成后按 Enter 继续...');
     await new Promise<void>(resolve => { process.stdin.once('data', () => resolve()); });
     await page.goto('https://www.zhipin.com/web/im/', { waitUntil: 'domcontentloaded', timeout: 30000 });
   }
@@ -261,7 +261,7 @@ export async function runJob(usePlan: boolean = false): Promise<void> {
     return;
   }
 
-  console.log(`\n🦞 HireClaw 并行模式`);
+  console.log(`\n🦞 HireSeek 并行模式`);
   console.log(`职位：${job.title}  |  今日目标：${dailyGoal} 人`);
 
   // 构建任务列表（每个账号一个任务）

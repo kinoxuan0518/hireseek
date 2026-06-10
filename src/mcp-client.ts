@@ -37,7 +37,7 @@ class MCPClientManager {
 
       const client = new Client(
         {
-          name: 'hireclaw',
+          name: 'hireseek',
           version: '0.1.0',
         },
         {

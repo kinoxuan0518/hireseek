@@ -1,4 +1,4 @@
-// @hireclaw/boss-adapter/browser — Playwright 浏览器自动化
+// @hireseek/boss-adapter/browser — Playwright 浏览器自动化
 //
 // 实现 BOSS直聘企业端的浏览器操作：
 // 1. 初始化（持久化用户数据目录 + 登录检测）
@@ -15,7 +15,7 @@ import type {
   Education,
   Experience,
   ConversationStatus,
-} from '@hireclaw/core';
+} from '@hireseek/core';
 import type { BossCandidateRaw, BossRateLimiter } from './index.js';
 
 // ────────────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ export interface BrowserConfig {
 }
 
 const DEFAULT_BASE_URL = 'https://www.zhipin.com/web/recruit/';
-const DEFAULT_USER_DATA_DIR = join(homedir(), '.hireclaw', 'browser-data');
+const DEFAULT_USER_DATA_DIR = join(homedir(), '.hireseek', 'browser-data');
 
 // ────────────────────────────────────────────────────────────
 // Selectors

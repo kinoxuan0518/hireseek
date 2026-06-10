@@ -1,4 +1,4 @@
-// @hireclaw/core/memory — 统一导出
+// @hireseek/core/memory — 统一导出
 
 // MemoryStore (interface + implementations)
 export {

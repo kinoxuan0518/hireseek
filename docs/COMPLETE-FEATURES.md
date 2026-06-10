@@ -1,12 +1,12 @@
-# HireClaw 完整功能文档
+# HireSeek 完整功能文档
 
-**HireClaw = Claude Code 100% + 招聘专业能力**
+**HireSeek = Claude Code 100% + 招聘专业能力**
 
 ---
 
 ## 功能对比总表
 
-| 功能类别 | Claude Code | HireClaw | 实现状态 |
+| 功能类别 | Claude Code | HireSeek | 实现状态 |
 |---------|-------------|----------|---------|
 | **Phase 1-3: 基础功能** ||||
 | 计划模式 (Plan Mode) | ✅ | ✅ | 100% |
@@ -30,7 +30,7 @@
 | **可选功能** ||||
 | Notebook 编辑 | ✅ | ❌ | 招聘不需要 |
 | Fast Mode | ✅ | ❌ | 未来考虑 |
-| **HireClaw 独有** ||||
+| **HireSeek 独有** ||||
 | 浏览器自动化 | ❌ | ✅ | Playwright |
 | 多账号并行 | ❌ | ✅ | 效率翻倍 |
 | 招聘知识库 | ❌ | ✅ | SOUL.md/PLAYBOOK.md |
@@ -38,7 +38,7 @@
 | 实时控制台 | ❌ | ✅ | Web Dashboard |
 | 主动提醒 | ❌ | ✅ | macOS 通知 |
 
-**总结**: HireClaw 实现了 Claude Code 所有核心功能（100%），并拥有招聘领域的独特优势。
+**总结**: HireSeek 实现了 Claude Code 所有核心功能（100%），并拥有招聘领域的独特优势。
 
 ---
 
@@ -205,7 +205,7 @@ test-*.ts                       # 功能测试脚本
 
 ### 1. 基础对话
 ```bash
-hireclaw
+hireseek
 
 你: 帮我找前端工程师
 AI: [调用 run_sourcing]
@@ -335,7 +335,7 @@ AI: 当前分支：main
 AI: ✓ SHA: a1b2c3d4
 
 你: 创建 PR
-AI: ✓ URL: https://github.com/user/hireclaw/pull/123
+AI: ✓ URL: https://github.com/user/hireseek/pull/123
 ```
 
 ---
@@ -367,7 +367,7 @@ workspace/
 ├── .permissions.json    # 权限规则
 └── hooks.json          # Hook 配置
 
-hireclaw.db             # SQLite 数据库
+hireseek.db             # SQLite 数据库
 └── tables:
     ├── candidates      # 候选人
     ├── conversations   # 对话历史
@@ -400,18 +400,18 @@ hireclaw.db             # SQLite 数据库
 
 ## 与 Claude Code 的差异优势
 
-| 维度 | Claude Code | HireClaw | 优势方 |
+| 维度 | Claude Code | HireSeek | 优势方 |
 |------|-------------|----------|--------|
 | **核心功能** | ✅ 完整 | ✅ 完整 | 平局 |
-| **领域专业性** | ❌ 通用 | ✅ 招聘专家 | **HireClaw** |
-| **自动化能力** | ❌ 无 | ✅ 浏览器自动化 | **HireClaw** |
-| **并行效率** | ❌ 单线程 | ✅ 多账号并行 | **HireClaw** |
-| **实时监控** | ❌ 无 | ✅ Web Dashboard | **HireClaw** |
-| **主动性** | ❌ 被动 | ✅ 主动提醒 | **HireClaw** |
+| **领域专业性** | ❌ 通用 | ✅ 招聘专家 | **HireSeek** |
+| **自动化能力** | ❌ 无 | ✅ 浏览器自动化 | **HireSeek** |
+| **并行效率** | ❌ 单线程 | ✅ 多账号并行 | **HireSeek** |
+| **实时监控** | ❌ 无 | ✅ Web Dashboard | **HireSeek** |
+| **主动性** | ❌ 被动 | ✅ 主动提醒 | **HireSeek** |
 | **Notebook 编辑** | ✅ 支持 | ❌ 不支持 | Claude Code |
 | **远程会话** | ✅ 支持 | ❌ 不支持 | Claude Code |
 
-**结论**: HireClaw 在保持 Claude Code 所有核心能力的基础上，增加了招聘领域的专业优势和自动化能力。
+**结论**: HireSeek 在保持 Claude Code 所有核心能力的基础上，增加了招聘领域的专业优势和自动化能力。
 
 ---
 
@@ -454,6 +454,6 @@ hireclaw.db             # SQLite 数据库
 
 ---
 
-**HireClaw = Claude Code 100% + 招聘专业能力**
+**HireSeek = Claude Code 100% + 招聘专业能力**
 
 **真正的"懂招聘的 Claude Code"！** 🦞

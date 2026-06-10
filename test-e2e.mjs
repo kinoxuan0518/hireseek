@@ -1,4 +1,4 @@
-// test-e2e.mjs — HireClaw E2E test with GLM
+// test-e2e.mjs — HireSeek E2E test with GLM
 //
 // Tests three LLM-powered features:
 //   3a. Evaluator E2E — evaluateWithLLM()
@@ -184,7 +184,7 @@ console.log('='.repeat(70));
 // Use a temp path so we don't pollute real data
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-const trackerStoragePath = join(tmpdir(), `hireclaw-e2e-tracking-${Date.now()}.json`);
+const trackerStoragePath = join(tmpdir(), `hireseek-e2e-tracking-${Date.now()}.json`);
 
 const tracker = new CandidateTracker({ storagePath: trackerStoragePath });
 await tracker.init();

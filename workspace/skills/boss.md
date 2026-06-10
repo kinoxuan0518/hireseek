@@ -69,9 +69,9 @@ description: Boss直聘自动招聘技能（带缓存）：智能存储职位配
 ## 二、缓存结构与规则分层
 
 ### 缓存文件位置
-- 缓存目录：`${BOSSZHIBIN_CACHE_DIR:-~/.hireclaw/bosszhibin_cache}`
-- 主缓存：`${BOSSZHIBIN_CACHE_DIR:-~/.hireclaw/bosszhibin_cache}/bosszhibin_jobs_cache.json`
-- 进化历史：`${BOSSZHIBIN_CACHE_DIR:-~/.hireclaw/bosszhibin_cache}/evolution_history.json`
+- 缓存目录：`${BOSSZHIBIN_CACHE_DIR:-~/.hireseek/bosszhibin_cache}`
+- 主缓存：`${BOSSZHIBIN_CACHE_DIR:-~/.hireseek/bosszhibin_cache}/bosszhibin_jobs_cache.json`
+- 进化历史：`${BOSSZHIBIN_CACHE_DIR:-~/.hireseek/bosszhibin_cache}/evolution_history.json`
 
 ### v7.3 缓存核心结构
 
@@ -335,7 +335,7 @@ effective_prefilter = effective_rules.ui_prefilter_policy
 - `references/evolution_history_template.json` — 进化历史结构
 
 ### 4.3 更新进化历史
-将本次复盘结果追加到 `${BOSSZHIBIN_CACHE_DIR:-~/.hireclaw/bosszhibin_cache}/evolution_history.json`。
+将本次复盘结果追加到 `${BOSSZHIBIN_CACHE_DIR:-~/.hireseek/bosszhibin_cache}/evolution_history.json`。
 
 ---
 

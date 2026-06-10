@@ -27,9 +27,9 @@ function ensureMemoryDir(): void {
 
   // 如果 MEMORY.md 不存在，创建默认内容
   if (!fs.existsSync(MEMORY_FILE)) {
-    const defaultContent = `# HireClaw 自动记忆
+    const defaultContent = `# HireSeek 自动记忆
 
-这个文件会自动记录 HireClaw 学到的招聘经验、用户偏好、常见模式等。
+这个文件会自动记录 HireSeek 学到的招聘经验、用户偏好、常见模式等。
 每次启动时，这些内容会注入到系统提示中。
 
 ## 使用规则

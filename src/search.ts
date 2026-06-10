@@ -44,7 +44,7 @@ async function searchBrave(query: string, apiKey: string): Promise<SearchResult[
 /** DuckDuckGo 免费搜索（无需 key，结果有限） */
 async function searchDuckDuckGo(query: string): Promise<SearchResult[]> {
   const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'HireClaw/1.0' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'HireSeek/1.0' } });
   if (!res.ok) throw new Error(`DDG error: ${res.status}`);
   const data = await res.json() as any;
 

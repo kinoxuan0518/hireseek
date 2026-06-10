@@ -1,4 +1,4 @@
-// @hireclaw/core/memory — 自动记忆（模式发现）
+// @hireseek/core/memory — 自动记忆（模式发现）
 //
 // 参考 Claude Code 的 compact.rs 结构化压缩摘要设计
 // - 自动发现招聘模式并记录

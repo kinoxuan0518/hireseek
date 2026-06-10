@@ -7,6 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { config } from './config';
+import { listClaudeSkills, getClaudeSkill, skillToPrompt } from './skills/claude-skills';
 
 export interface SkillDefinition {
   name: string;
@@ -54,6 +55,17 @@ export function listSkills(): SkillDefinition[] {
     }
   }
 
+  // 并入 Claude Code 技能（~/.claude/skills + 插件），同名时本地 chat-skills 优先
+  const localNames = new Set(skills.map(s => s.name));
+  for (const cs of listClaudeSkills()) {
+    if (localNames.has(cs.name)) continue;
+    skills.push({
+      name: cs.name,
+      description: cs.description,
+      prompt: skillToPrompt(cs),
+    });
+  }
+
   return skills;
 }
 
@@ -66,6 +78,11 @@ export function loadSkill(skillName: string): SkillDefinition | null {
   const filepath = path.join(SKILLS_DIR, `${skillName}.md`);
 
   if (!fs.existsSync(filepath)) {
+    // 本地没有时回退到 Claude Code 技能（/rbt、/maimai-recruiter 等）
+    const cs = getClaudeSkill(skillName);
+    if (cs) {
+      return { name: cs.name, description: cs.description, prompt: skillToPrompt(cs) };
+    }
     return null;
   }
 

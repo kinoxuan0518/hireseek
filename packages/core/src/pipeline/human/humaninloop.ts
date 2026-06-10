@@ -1,4 +1,4 @@
-// @hireclaw/core/pipeline/human — 人工介入机制
+// @hireseek/core/pipeline/human — 人工介入机制
 //
 // 参考 Claude Code 的 Ordinal 权限模式，设计三层人工介入机制：
 // - Ordinal 0: 完全自主（自动执行）

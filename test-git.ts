@@ -93,7 +93,7 @@ async function testGitAutomation() {
 
   // 提示
   console.log('提示：');
-  console.log('- 在对话模式中运行 "hireclaw" 即可使用 Git 自动化功能');
+  console.log('- 在对话模式中运行 "hireseek" 即可使用 Git 自动化功能');
   console.log('- 可用命令：查看状态、提交代码、创建分支、推送、创建 PR');
   console.log('- 参考文档：docs/GIT-AUTOMATION.md\n');
 }

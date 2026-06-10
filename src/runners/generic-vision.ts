@@ -15,7 +15,7 @@ import { parseSkillSummary } from './interface';
 import type { LLMRunner } from './interface';
 import type { SkillResult } from '../types';
 
-const SCREENSHOT_PATH = '/tmp/hireclaw-latest.jpg';
+const SCREENSHOT_PATH = '/tmp/hireseek-latest.jpg';
 
 function saveScreenshot(base64: string): void {
   try {

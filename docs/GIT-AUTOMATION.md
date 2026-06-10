@@ -1,6 +1,6 @@
 # Git 自动化使用指南
 
-HireClaw 支持 Git 自动化功能，可以在对话模式中直接管理代码版本控制。
+HireSeek 支持 Git 自动化功能，可以在对话模式中直接管理代码版本控制。
 
 ## 功能概览
 
@@ -112,7 +112,7 @@ AI: [自动调用 git_push 工具，force=true]
 AI: [自动调用 git_create_pr 工具]
 PR 创建成功！
 分支: feature/git-tools -> main
-URL: https://github.com/user/hireclaw/pull/123
+URL: https://github.com/user/hireseek/pull/123
 ```
 
 **带描述的 PR：**
@@ -277,14 +277,14 @@ gh auth login
 
 ## 限制和注意事项
 
-1. **当前工作目录**：Git 操作在 HireClaw 当前工作目录执行（通常是 `hireclaw/`）
+1. **当前工作目录**：Git 操作在 HireSeek 当前工作目录执行（通常是 `hireseek/`）
 2. **分支保护**：如果目标分支有保护规则，PR 创建可能需要额外审批
 3. **权限要求**：推送和创建 PR 需要有仓库的写权限
 4. **gh CLI 版本**：建议使用最新版本的 gh CLI
 
 ## 与 Claude Code 对比
 
-| 功能 | HireClaw | Claude Code |
+| 功能 | HireSeek | Claude Code |
 |------|----------|-------------|
 | 查看 git 状态 | ✅ | ✅ |
 | 提交代码 | ✅ | ✅ |

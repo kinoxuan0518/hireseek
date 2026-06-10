@@ -10,6 +10,16 @@ export function createRunner(): LLMRunner {
   const { GenericVisionRunner } = require('./generic-vision');
 
   switch (provider) {
+    case 'deepseek': {
+      // DeepSeek 无视觉能力，使用纯文本 DOM Runner 驱动浏览器
+      const { DomRunner } = require('./dom-runner');
+      return new DomRunner(
+        config.deepseek.baseUrl,
+        config.deepseek.apiKey,
+        config.deepseek.model
+      );
+    }
+
     case 'claude':
       return new (require('./claude').ClaudeRunner)();
 
@@ -35,7 +45,7 @@ export function createRunner(): LLMRunner {
 
     default:
       throw new Error(
-        `不支持的 LLM_PROVIDER: "${provider}"。可选: claude | openai | minimax | custom`
+        `不支持的 LLM_PROVIDER: "${provider}"。可选: deepseek | claude | openai | minimax | custom`
       );
   }
 }

@@ -1,4 +1,4 @@
-// @hireclaw/core/outreach — 触达策略引擎
+// @hireseek/core/outreach — 触达策略引擎
 //
 // Unified entry point: LLM-driven message generation with template fallback.
 // - Tier classification & outreach planning always use rules (deterministic)

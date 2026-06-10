@@ -168,7 +168,7 @@ export function initializeExampleHooks(): void {
   }
 
   const exampleHooks: HookConfig = {
-    'post-sourcing': 'osascript -e \'display notification "Sourcing 完成" with title "HireClaw"\'',
+    'post-sourcing': 'osascript -e \'display notification "Sourcing 完成" with title "HireSeek"\'',
     'post-commit': 'echo "Commit 完成: {message}"',
   };
 

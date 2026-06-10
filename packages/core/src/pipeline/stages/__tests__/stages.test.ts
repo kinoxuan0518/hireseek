@@ -1,4 +1,4 @@
-// @hireclaw/core/pipeline/stages — Tests
+// @hireseek/core/pipeline/stages — Tests
 
 import { describe, it, expect } from 'vitest';
 import { STAGE_METADATA, type StageId } from '../Stage.js';

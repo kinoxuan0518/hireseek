@@ -1,4 +1,4 @@
-// @hireclaw/core/outreach — 触达策略引擎（模板版本）
+// @hireseek/core/outreach — 触达策略引擎（模板版本）
 //
 // Template-based outreach message generation + tier classification + outreach planning.
 // This is the fallback when LLM is unavailable.

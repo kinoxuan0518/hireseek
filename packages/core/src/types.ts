@@ -1,5 +1,5 @@
 // ============================================================
-// @hireclaw/core — Types & Interfaces
+// @hireseek/core — Types & Interfaces
 // 招聘智能体 SDK 的公共类型定义
 // ============================================================
 
@@ -8,7 +8,7 @@
 // ────────────────────────────────────────────────────────────
 
 /**
- * 任何招聘平台只需实现此接口即可接入 HireClaw SDK
+ * 任何招聘平台只需实现此接口即可接入 HireSeek SDK
  * "手脚"与"大脑"的连接点
  */
 export interface PlatformAdapter {
@@ -444,7 +444,7 @@ export interface PlatformStatus {
 // SDK Configuration
 // ────────────────────────────────────────────────────────────
 
-export interface HireClawSDKConfig {
+export interface HireSeekSDKConfig {
   /** LLM 配置 */
   llm: LLMConfig;
   /** 知识库配置 */
@@ -454,7 +454,7 @@ export interface HireClawSDKConfig {
 }
 
 export interface LLMConfig {
-  provider: 'claude' | 'openai' | 'custom';
+  provider: 'deepseek' | 'claude' | 'openai' | 'custom';
   model: string;
   apiKey?: string;
   baseUrl?: string; // 自定义 endpoint

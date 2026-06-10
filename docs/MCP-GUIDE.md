@@ -1,6 +1,6 @@
 # MCP (Model Context Protocol) 使用指南
 
-HireClaw 现在支持 MCP 协议，可以连接各种外部服务扩展功能。
+HireSeek 现在支持 MCP 协议，可以连接各种外部服务扩展功能。
 
 ## 什么是 MCP？
 
@@ -40,7 +40,7 @@ servers:
 ### 2. 启动对话模式
 
 ```bash
-hireclaw
+hireseek
 ```
 
 系统会自动连接配置的 MCP 服务器。
@@ -163,7 +163,7 @@ https://github.com/modelcontextprotocol/servers
 
 ## 对话工具
 
-HireClaw 提供 3 个 MCP 相关工具：
+HireSeek 提供 3 个 MCP 相关工具：
 
 ### 1. mcp_list_servers
 列出所有已连接的 MCP 服务器及其提供的工具和资源。

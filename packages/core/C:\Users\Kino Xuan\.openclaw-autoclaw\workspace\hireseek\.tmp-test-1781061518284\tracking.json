@@ -1,0 +1,22 @@
+[
+  {
+    "candidateId": "c1",
+    "candidateName": "张三",
+    "status": "replied",
+    "history": [
+      {
+        "from": "new",
+        "to": "contacted",
+        "timestamp": "2026-06-10T03:18:38.285Z"
+      },
+      {
+        "from": "contacted",
+        "to": "replied",
+        "timestamp": "2026-06-10T03:18:38.285Z"
+      }
+    ],
+    "outreachRecords": [],
+    "updatedAt": "2026-06-10T03:18:38.285Z",
+    "createdAt": "2026-06-10T03:18:38.285Z"
+  }
+]

@@ -23,7 +23,7 @@ description: >
 1. 确认浏览器会话可用且已登录 LinkedIn Recruiter。
 2. 进入招聘页：`https://www.linkedin.com/talent/hire`。
 3. 检查账号权限：确认有发送 InMail 或 Connect 的额度。
-4. 检查缓存目录：`${LINKEDIN_CACHE_DIR:-~/.hireclaw/linkedin_cache/}`。
+4. 检查缓存目录：`${LINKEDIN_CACHE_DIR:-~/.hireseek/linkedin_cache/}`。
 
 ## 2. 读取或创建岗位配置
 

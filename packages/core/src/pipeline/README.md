@@ -1,4 +1,4 @@
-# @hireclaw/core/pipeline — 流水线编排
+# @hireseek/core/pipeline — 流水线编排
 
 > 参考 Claude Code 的 Agentic Loop（收集上下文 → 采取行动 → 验证结果）设计
 
@@ -15,7 +15,7 @@ while (task = get_pending_task()):
         rollback()
 ```
 
-hireclaw 的招聘流水线对应：
+hireseek 的招聘流水线对应：
 
 ```
 Pipeline:

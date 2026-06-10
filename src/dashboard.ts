@@ -1,5 +1,5 @@
 /**
- * HireClaw 本地控制台
+ * HireSeek 本地控制台
  * 启动一个本地 HTTP 服务，提供实时截图、日志流、候选人数据和任务控制。
  */
 
@@ -18,7 +18,7 @@ const HTML = `<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>🦞 HireClaw</title>
+<title>🦞 HireSeek</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0d0d0d; color: #e0e0e0; font-family: 'Menlo', monospace; font-size: 13px; height: 100vh; display: flex; flex-direction: column; }
@@ -52,7 +52,7 @@ const HTML = `<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>🦞 HireClaw</h1>
+  <h1>🦞 HireSeek</h1>
   <span id="status">空闲</span>
   <span id="job-title" style="color:#9ca3af;font-size:12px;margin-left:8px;"></span>
   <div style="flex:1"></div>
@@ -183,7 +183,7 @@ function router(req: http.IncomingMessage, res: http.ServerResponse): void {
   // GET /screenshot
   if (req.method === 'GET' && url === '/screenshot') {
     const fs = require('fs');
-    const p = '/tmp/hireclaw-latest.jpg';
+    const p = '/tmp/hireseek-latest.jpg';
     if (!fs.existsSync(p)) {
       res.writeHead(204); res.end(); return;
     }
