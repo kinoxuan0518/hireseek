@@ -119,6 +119,8 @@ interface BrowserAction {
  * 在浏览器上下文中执行，给元素写入 data-hs-ref 属性供后续定位。
  */
 async function takeDomSnapshot(page: Page): Promise<string> {
+  // tsx/esbuild 的 keepNames 会向 evaluate 回调注入 __name 辅助调用，浏览器端需兜底定义
+  await page.evaluate('window.__name = window.__name || ((fn) => fn)');
   const data = await page.evaluate(
     ({ maxElements, maxBodyText }) => {
       const isVisible = (el: Element): boolean => {
