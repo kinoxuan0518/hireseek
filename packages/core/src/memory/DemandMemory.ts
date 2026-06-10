@@ -1,4 +1,4 @@
-// @hireclaw/core/memory — 招聘需求记忆
+// @hireseek/core/memory — 招聘需求记忆
 //
 // 记住招聘需求（职位要求、公司偏好），参考 Claude Code 的 CLAUDE.md 理念
 // - 职位详情（技能要求、薪资范围）

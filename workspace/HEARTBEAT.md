@@ -1,4 +1,4 @@
-# HireClaw Heartbeat
+# HireSeek Heartbeat
 
 定时自动执行的招聘任务。对应 .env 里的 SCHEDULE_* 配置。
 

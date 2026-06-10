@@ -94,6 +94,6 @@ displayTask(mainTaskId);
 
 console.log('🎉 测试完成！\n');
 console.log('💡 运行以下命令查看任务看板：');
-console.log('   hireclaw tasks\n');
+console.log('   hireseek tasks\n');
 
 db.close();

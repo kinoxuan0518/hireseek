@@ -1,4 +1,4 @@
-// @hireclaw/core/evaluator/dimensions — Tests
+// @hireseek/core/evaluator/dimensions — Tests
 
 import { describe, it, expect } from 'vitest';
 import {

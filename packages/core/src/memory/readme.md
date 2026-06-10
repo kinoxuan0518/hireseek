@@ -1,4 +1,4 @@
-# @hireclaw/core/memory — 记忆系统
+# @hireseek/core/memory — 记忆系统
 
 > 参考 Claude Code 的双轨记忆（CLAUDE.md + Auto Memory）设计
 
@@ -8,9 +8,9 @@ Claude Code 的记忆系统采用双轨架构：
 1. **CLAUDE.md** — 显式记忆，由用户手动维护项目上下文
 2. **Auto Memory** — 自动记忆，系统发现模式后自动记录
 
-hireclaw 的记忆系统借鉴这一理念，但面向招聘场景：
+hireseek 的记忆系统借鉴这一理念，但面向招聘场景：
 
-| Claude Code | hireclaw |
+| Claude Code | hireseek |
 |-------------|----------|
 | CLAUDE.md | DemandMemory（招聘需求记忆） |
 | Auto Memory | CandidateMemory + AutoMemory |
@@ -114,7 +114,7 @@ class AutoMemory {
 ## 使用示例
 
 ```typescript
-import { InMemoryStore, CandidateMemory, DemandMemory, AutoMemory } from '@hireclaw/core/memory';
+import { InMemoryStore, CandidateMemory, DemandMemory, AutoMemory } from '@hireseek/core/memory';
 
 // 创建存储
 const store = new InMemoryStore();

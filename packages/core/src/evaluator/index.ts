@@ -1,4 +1,4 @@
-// @hireclaw/core/evaluator — 候选人评估引擎
+// @hireseek/core/evaluator — 候选人评估引擎
 //
 // Unified entry point: LLM-driven evaluation with rule engine fallback.
 // - With LLM config → calls LLM, falls back to rules on failure

@@ -1,4 +1,4 @@
-// @hireclaw/core/evaluator — 候选人评估引擎（规则引擎版本）
+// @hireseek/core/evaluator — 候选人评估引擎（规则引擎版本）
 //
 // 纯规则引擎，硬编码 TOP_COMPANIES/TOP_SCHOOLS 等关键词 Set
 // 作为 LLM 驱动评估的 fallback 使用

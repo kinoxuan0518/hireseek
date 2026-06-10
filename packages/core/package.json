@@ -1,7 +1,7 @@
 {
-  "name": "@hireclaw/core",
+  "name": "@hireseek/core",
   "version": "0.1.0",
-  "description": "🦞 HireClaw SDK Core — 招聘智能体引擎（评估、触达、记忆、流水线）",
+  "description": "🔱 HireSeek SDK Core — 招聘智能体引擎（评估、触达、记忆、流水线）",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,4 +1,4 @@
-// @hireclaw/maimai-adapter — 脉脉平台适配器
+// @hireseek/maimai-adapter — 脉脉平台适配器
 //
 // TODO: Sprint 4 之后实现，结构同 boss-adapter
 // 参考 workspace/skills/maimai.md 的执行逻辑
@@ -11,7 +11,7 @@ import type {
   ReachOutResult,
   ConversationStatus,
   PlatformStatus,
-} from '@hireclaw/core';
+} from '@hireseek/core';
 
 export class MaimaiAdapter implements PlatformAdapter {
   readonly name = 'maimai';

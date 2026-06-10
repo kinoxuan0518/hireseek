@@ -184,10 +184,10 @@ async function testClaudeFeatures() {
   console.log(chalk.gray('  - 自动记忆、结构化问答、PDF 阅读\n'));
 
   console.log(chalk.bold('使用方式:'));
-  console.log(chalk.gray('  hireclaw                 # 对话模式'));
-  console.log(chalk.gray('  hireclaw run --plan      # 计划模式'));
-  console.log(chalk.gray('  hireclaw tasks           # 任务看板'));
-  console.log(chalk.gray('  hireclaw dashboard       # 实时控制台\n'));
+  console.log(chalk.gray('  hireseek                 # 对话模式'));
+  console.log(chalk.gray('  hireseek run --plan      # 计划模式'));
+  console.log(chalk.gray('  hireseek tasks           # 任务看板'));
+  console.log(chalk.gray('  hireseek dashboard       # 实时控制台\n'));
 
   console.log(chalk.bold('技能调用:'));
   console.log(chalk.gray('  /找候选人 前端工程师'));

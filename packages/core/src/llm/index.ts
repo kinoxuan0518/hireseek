@@ -1,4 +1,4 @@
-// @hireclaw/core/llm — Multi-LLM Provider
+// @hireseek/core/llm — Multi-LLM Provider
 //
 // Unified interface for calling Claude / OpenAI / DeepSeek / any OpenAI-compatible API.
 // All SDK modules that need LLM go through this single abstraction.
@@ -92,6 +92,15 @@ interface ProviderConfig {
 
 function resolveProvider(config: LLMConfig): ProviderConfig {
   switch (config.provider) {
+    case 'deepseek':
+      return {
+        url: config.baseUrl
+          ? `${config.baseUrl.replace(/\/$/, '')}/chat/completions`
+          : 'https://api.deepseek.com/chat/completions',
+        headers: (cfg) => ({
+          Authorization: `Bearer ${cfg.apiKey ?? process.env.DEEPSEEK_API_KEY ?? ''}`,
+        }),
+      };
     case 'claude':
       return {
         url: config.baseUrl ?? 'https://api.anthropic.com/v1/messages',

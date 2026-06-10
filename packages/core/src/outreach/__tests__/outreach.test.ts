@@ -1,4 +1,4 @@
-// @hireclaw/core/outreach — Tests
+// @hireseek/core/outreach — Tests
 
 import {
   generateMessage,
@@ -46,7 +46,7 @@ const AI_JOB = {
   description: '负责大模型训练、RAG系统搭建。要求熟悉PyTorch、Transformers。',
 };
 
-console.log('\n📋 @hireclaw/core/outreach Tests\n');
+console.log('\n📋 @hireseek/core/outreach Tests\n');
 
 // 1. 段位分类
 console.log('--- 段位分类 ---');

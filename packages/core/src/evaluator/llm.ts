@@ -1,4 +1,4 @@
-// @hireclaw/core/evaluator/llm — LLM-powered Candidate Evaluation
+// @hireseek/core/evaluator/llm — LLM-powered Candidate Evaluation
 //
 // Sends candidate profile + job config + evaluation guide to LLM,
 // receives structured EvaluationResult back.

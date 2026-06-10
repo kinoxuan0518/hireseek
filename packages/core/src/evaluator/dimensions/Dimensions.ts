@@ -1,4 +1,4 @@
-// @hireclaw/core/evaluator/dimensions — 评估维度定义
+// @hireseek/core/evaluator/dimensions — 评估维度定义
 //
 // 参考 Claude Code 的结构化评估模式，为每个维度定义清晰的标准
 // - 维度元数据（名称、描述、权重、评分指南）

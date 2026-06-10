@@ -1,4 +1,4 @@
-// @hireclaw/core/memory — 候选人记忆管理
+// @hireseek/core/memory — 候选人记忆管理
 //
 // 跨会话记住候选人信息，参考 Claude Code 的 Auto Memory 理念
 // - 每次触达后自动记录评估快照

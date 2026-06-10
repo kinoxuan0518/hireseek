@@ -1,4 +1,4 @@
-// @hireclaw/core/pipeline/human — Tests
+// @hireseek/core/pipeline/human — Tests
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { HumanInLoop } from '../HumanInLoop.js';

@@ -1,5 +1,5 @@
 /**
- * HireClaw 交互式初始化向导
+ * HireSeek 交互式初始化向导
  * 像小龙虾一样一步步引导你配置好一切
  */
 
@@ -71,7 +71,7 @@ function writeJobYaml(fields: {
   dailyContact: string;
   urgency: string;
 }): void {
-  const yaml = `# 当前激活的招聘职位（由 hireclaw setup 生成）
+  const yaml = `# 当前激活的招聘职位（由 hireseek setup 生成）
 title: ${fields.title}
 department: 技术
 
@@ -106,9 +106,11 @@ urgency: ${fields.urgency}
 async function testConnection(env: Record<string, string>): Promise<boolean> {
   try {
     const OpenAI = (await import('openai')).default;
-    const apiKey  = env.CUSTOM_API_KEY || env.ANTHROPIC_API_KEY || '';
-    const baseURL = env.CUSTOM_BASE_URL || undefined;
-    const model   = env.LLM_MODEL || 'claude-sonnet-4-6';
+    const apiKey  = env.DEEPSEEK_API_KEY || env.CUSTOM_API_KEY || env.ANTHROPIC_API_KEY || '';
+    const baseURL = env.DEEPSEEK_API_KEY
+      ? (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com')
+      : env.CUSTOM_BASE_URL || undefined;
+    const model   = env.LLM_MODEL || (env.DEEPSEEK_API_KEY ? 'deepseek-chat' : 'claude-sonnet-4-6');
 
     const client = new OpenAI({ apiKey, baseURL });
     const res = await client.chat.completions.create({
@@ -131,7 +133,7 @@ function section(title: string): void {
 
 // ── 主向导 ───────────────────────────────────────────────
 export async function runSetup(): Promise<void> {
-  console.log(chalk.cyan('\n🦞 HireClaw 初始化向导\n'));
+  console.log(chalk.cyan('\n🔱 HireSeek 初始化向导\n'));
   console.log(chalk.gray('我会一步步引导你配置好所有东西，大概 3 分钟。'));
   console.log(chalk.gray('随时按 Ctrl+C 退出，已填的不会丢失。\n'));
 
@@ -143,21 +145,21 @@ export async function runSetup(): Promise<void> {
     // ── STEP 1: API Key ──────────────────────────────────
     section('第一步：配置 AI 大模型');
 
-    const hasKey = env.ANTHROPIC_API_KEY || env.CUSTOM_API_KEY;
+    const hasKey = env.DEEPSEEK_API_KEY || env.ANTHROPIC_API_KEY || env.CUSTOM_API_KEY;
     if (hasKey) {
       console.log(chalk.green('✓ 已检测到 API Key，跳过此步'));
     } else {
-      console.log('HireClaw 需要一个 AI 大模型来驱动智能对话。\n');
+      console.log('HireSeek 需要一个 AI 大模型来驱动智能对话。\n');
       console.log(chalk.bold('🌟 推荐模型（按性价比排序）：\n'));
 
-      console.log(`  ${chalk.cyan('1')}  ${chalk.white('Anthropic Claude Sonnet 4.5')} ${chalk.gray('（推荐）')}`);
-      console.log(chalk.gray('      性能强、稳定、支持工具调用'));
-      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://console.anthropic.com'));
+      console.log(`  ${chalk.cyan('1')}  ${chalk.white('DeepSeek Chat')} ${chalk.gray('（推荐，HireSeek 默认大脑）')}`);
+      console.log(chalk.gray('      性价比极高、中文友好、原生支持纯文本 DOM 浏览器驱动'));
+      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://platform.deepseek.com'));
       console.log('');
 
-      console.log(`  ${chalk.cyan('2')}  ${chalk.white('DeepSeek Chat')}`);
-      console.log(chalk.gray('      国产大模型、便宜、中文友好'));
-      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://platform.deepseek.com'));
+      console.log(`  ${chalk.cyan('2')}  ${chalk.white('Anthropic Claude Sonnet 4.5')}`);
+      console.log(chalk.gray('      性能强、稳定、原生 computer-use'));
+      console.log(chalk.gray('      获取 Key: ') + chalk.blue('https://console.anthropic.com'));
       console.log('');
 
       console.log(`  ${chalk.cyan('3')}  ${chalk.white('OpenRouter')}`);
@@ -196,6 +198,16 @@ export async function runSetup(): Promise<void> {
       let configured = false;
 
       if (choice === '1') {
+        // DeepSeek（原生 provider，默认大脑）
+        console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://platform.deepseek.com') + chalk.gray(' 注册并创建 Key'));
+        const key = await ask(rl, chalk.white('\nDeepSeek API Key: '));
+        if (key) {
+          env.LLM_PROVIDER = 'deepseek';
+          env.LLM_MODEL = 'deepseek-chat';
+          env.DEEPSEEK_API_KEY = key;
+          configured = true;
+        }
+      } else if (choice === '2') {
         // Anthropic Claude
         console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://console.anthropic.com') + chalk.gray(' 创建 API Key'));
         const key = await ask(rl, chalk.white('\nAnthropic API Key (sk-ant-...): '));
@@ -203,17 +215,6 @@ export async function runSetup(): Promise<void> {
           env.LLM_PROVIDER = 'claude';
           env.LLM_MODEL = 'claude-sonnet-4-5';
           env.ANTHROPIC_API_KEY = key;
-          configured = true;
-        }
-      } else if (choice === '2') {
-        // DeepSeek
-        console.log(chalk.gray('\n💡 提示：访问 ') + chalk.blue('https://platform.deepseek.com') + chalk.gray(' 注册并创建 Key'));
-        const key = await ask(rl, chalk.white('\nDeepSeek API Key: '));
-        if (key) {
-          env.LLM_PROVIDER = 'custom';
-          env.LLM_MODEL = 'deepseek-chat';
-          env.CUSTOM_API_KEY = key;
-          env.CUSTOM_BASE_URL = 'https://api.deepseek.com';
           configured = true;
         }
       } else if (choice === '3') {
@@ -303,7 +304,7 @@ export async function runSetup(): Promise<void> {
         writeEnv(env);
         console.log(chalk.green('\n✓ API Key 已保存到 .env 文件'));
       } else {
-        console.log(chalk.yellow('\n⚠️  未配置 API Key，稍后可运行 hireclaw setup 重新配置'));
+        console.log(chalk.yellow('\n⚠️  未配置 API Key，稍后可运行 hireseek setup 重新配置'));
       }
     }
 

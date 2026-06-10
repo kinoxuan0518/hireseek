@@ -1,4 +1,4 @@
-// @hireclaw/core/pipeline — Tests
+// @hireseek/core/pipeline — Tests
 
 import { Pipeline } from '../index.js';
 import type {
@@ -57,7 +57,7 @@ const JOB: JobConfig = {
   description: '负责大模型训练。要求熟悉PyTorch。',
 };
 
-console.log('\n📋 @hireclaw/core/pipeline Tests\n');
+console.log('\n📋 @hireseek/core/pipeline Tests\n');
 
 // 1. 基本流水线 — dry run
 console.log('--- 基本流水线（dry run）---');

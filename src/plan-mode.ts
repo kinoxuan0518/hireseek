@@ -157,7 +157,7 @@ _待执行时确定_
 
 ---
 
-_此计划由 HireClaw 在计划模式下生成_
+_此计划由 HireSeek 在计划模式下生成_
 `;
 
   fs.writeFileSync(planModeState.planFile, planContent, 'utf-8');

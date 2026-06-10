@@ -1,4 +1,4 @@
-// @hireclaw/core/tracking — 候选人触达状态追踪
+// @hireseek/core/tracking — 候选人触达状态追踪
 //
 // Track candidate status through the recruitment funnel:
 // contacted → replied → screening → interviewed → offered → joined → rejected/dropped
@@ -118,7 +118,7 @@ export class CandidateTracker {
   private dirty = false;
 
   constructor(config: TrackerConfig = {}) {
-    this.storagePath = config.storagePath ?? join(process.cwd(), '.hireclaw', 'tracking.json');
+    this.storagePath = config.storagePath ?? join(process.cwd(), '.hireseek', 'tracking.json');
   }
 
   // ── Core CRUD ──
@@ -470,7 +470,7 @@ export class CandidateTracker {
     const lines: string[] = [];
 
     // Header
-    lines.push(`# 🦞 HireClaw 招聘日报`);
+    lines.push(`# 🦞 HireSeek 招聘日报`);
     lines.push(`> ${report.date}`);
     lines.push('');
 

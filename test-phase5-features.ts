@@ -101,7 +101,7 @@ async function testPhase5Features() {
 
     // 创建测试消息
     const testMessages = [
-      { role: 'system' as const, content: '你是 HireClaw，一个招聘助手' },
+      { role: 'system' as const, content: '你是 HireSeek，一个招聘助手' },
       { role: 'user' as const, content: '帮我找候选人' },
       { role: 'assistant' as const, content: '好的，我来帮你找候选人' },
       { role: 'user' as const, content: '查看候选人列表' },

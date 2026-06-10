@@ -28,7 +28,7 @@ function test(name: string, fn: () => Promise<void> | void) {
 
 async function runAllTests() {
   console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-  console.log(chalk.cyan('HireClaw 完整功能测试'));
+  console.log(chalk.cyan('HireSeek 完整功能测试'));
   console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
   // Phase 1-3: 基础功能

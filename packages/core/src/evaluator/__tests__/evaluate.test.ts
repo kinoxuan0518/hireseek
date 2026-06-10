@@ -1,4 +1,4 @@
-// @hireclaw/core/evaluator — 测试
+// @hireseek/core/evaluator — 测试
 //
 // 验证评估引擎在各种候选人场景下的打分行为
 
@@ -48,7 +48,7 @@ const AI_JOB: JobConfig = {
 // Test Cases
 // ────────────────────────────────────────────────────────────
 
-console.log('\n📋 @hireclaw/core/evaluator Tests\n');
+console.log('\n📋 @hireseek/core/evaluator Tests\n');
 
 // 1. 顶级候选人
 console.log('--- 顶级候选人（清华博士 + 字节 + PyTorch）---');

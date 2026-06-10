@@ -2,7 +2,7 @@
 
 ## 1. 定位
 
-`talent-sourcing` 是 Hireclaw 的人才情报与寻源能力模块。
+`talent-sourcing` 是 Hireseek 的人才情报与寻源能力模块。
 
 它负责：
 
@@ -10,7 +10,7 @@
 - 生成可执行的寻源策略
 - 做冰山以下人才挖掘
 - 做指定人物或指定群体调研
-- 给下游渠道 skill 或 Hireclaw 总控输出结构化输入
+- 给下游渠道 skill 或 Hireseek 总控输出结构化输入
 
 它不负责：
 
@@ -100,7 +100,7 @@
 - 给脉脉：`search_rounds_json`
 - 给 LinkedIn：title + keyword + verification focus
 - 给人工研究：query plan
-- 给 Hireclaw：结构化任务描述
+- 给 Hireseek：结构化任务描述
 
 ### 4.5 `candidate_result_set`
 
@@ -170,9 +170,9 @@
 - 必须给出下一步建议，而不是只输出名单
 - 如果输入是样本人物，必须先抽 archetype，再做扩展搜索
 
-## 8. 与 Hireclaw 的关系
+## 8. 与 Hireseek 的关系
 
-- Hireclaw 负责总控编排与上下文理解
+- Hireseek 负责总控编排与上下文理解
 - `talent-sourcing` 负责“找什么人、怎么找”
 - 渠道 skill 负责“去哪里执行、如何触达”
 

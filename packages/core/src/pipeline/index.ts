@@ -1,4 +1,4 @@
-// @hireclaw/core/pipeline — 招聘流水线编排
+// @hireseek/core/pipeline — 招聘流水线编排
 //
 // 把评估引擎、触达引擎、平台适配器串联成完整流水线
 // Think → Plan → Build → Review → Test → Ship 的招聘版本：

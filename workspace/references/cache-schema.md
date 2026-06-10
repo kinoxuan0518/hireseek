@@ -1,14 +1,14 @@
 # Cache Schema Reference
 
-HireClaw 使用本地 JSON 文件缓存职位配置与触达历史，避免每次运行重复解析，支持增量更新。
+HireSeek 使用本地 JSON 文件缓存职位配置与触达历史，避免每次运行重复解析，支持增量更新。
 
 ---
 
 ## 目录结构
 
 ```
-~/.hireclaw/
-├── hireclaw.db                    # SQLite 主数据库（任务记录、候选人）
+~/.hireseek/
+├── hireseek.db                    # SQLite 主数据库（任务记录、候选人）
 ├── bosszhibin_cache/
 │   ├── bosszhibin_jobs_cache.json # BOSS 职位配置缓存
 │   └── evolution_history.json     # 执行历史与复盘记录

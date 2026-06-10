@@ -1,6 +1,6 @@
 /**
- * HireClaw Chat 模式
- * 让用户和 HireClaw 自然对话，同时能触发执行动作。
+ * HireSeek Chat 模式
+ * 让用户和 HireSeek 自然对话，同时能触发执行动作。
  */
 
 import readline from 'readline';
@@ -45,6 +45,52 @@ async function initializeMCPIfConfigured(): Promise<void> {
 
 // ── 可用工具定义 ─────────────────────────────────────────
 const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'use_recruiting_skill',
+      description:
+        '调用一项招聘技能（来自 ~/.claude/skills 及插件，如 rbt、maimai-recruiter、talent-sourcing、' +
+        'candidate-intelligence、blacklake-targeted-talent-hunting 等）。' +
+        '当用户的请求匹配某项技能的触发场景时调用此工具，技能的完整执行指令会注入对话，随后按指令执行。' +
+        '可先传 list=true 查看全部可用技能及描述。',
+      parameters: {
+        type: 'object',
+        properties: {
+          skill_name: {
+            type: 'string',
+            description: '技能名称（如 rbt、maimai-recruiter、talent-sourcing）',
+          },
+          args: {
+            type: 'string',
+            description: '传给技能的参数或任务描述（可选）',
+          },
+          list: {
+            type: 'boolean',
+            description: '为 true 时仅返回全部技能清单，不执行',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'feishu_recruiting_stats',
+      description:
+        '读取飞书招聘多维表格的真实结果数据（候选人状态分布、渠道转化等聚合统计）。' +
+        '用于复盘招聘效果、反思话术与筛选策略、驱动技能进化。需要配置飞书自建应用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          max_records: {
+            type: 'number',
+            description: '最多读取的记录数，默认 500',
+          },
+        },
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -158,7 +204,7 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
         properties: {
           command: {
             type: 'string',
-            description: '要执行的命令，如 "ps aux | grep node" 或 "tail -20 /tmp/hireclaw.log"',
+            description: '要执行的命令，如 "ps aux | grep node" 或 "tail -20 /tmp/hireseek.log"',
           },
         },
       },
@@ -828,8 +874,10 @@ async function executeTool(name: string, args: any): Promise<string> {
       // 调用 vision API
       try {
         const client = new OpenAI({
-          apiKey: config.custom.apiKey || config.anthropic.apiKey,
-          baseURL: config.custom.baseUrl || config.anthropic.baseUrl || undefined,
+          apiKey: config.deepseek.apiKey || config.custom.apiKey || config.anthropic.apiKey,
+          baseURL: config.deepseek.apiKey
+            ? config.deepseek.baseUrl
+            : config.custom.baseUrl || config.anthropic.baseUrl || undefined,
         });
 
         const response = await client.chat.completions.create({
@@ -853,6 +901,36 @@ async function executeTool(name: string, args: any): Promise<string> {
         }
         return `图片分析失败：${e.message}`;
       }
+    }
+
+    case 'feishu_recruiting_stats': {
+      try {
+        const { buildEvolutionContext } = await import('./channels/feishu');
+        console.log(chalk.gray('\n[执行中] 读取飞书招聘数据...\n'));
+        return await buildEvolutionContext(typeof args.max_records === 'number' ? args.max_records : 500);
+      } catch (e: any) {
+        return `飞书数据读取失败：${e.message}\n提示：需要配置 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BITABLE_APP_TOKEN / FEISHU_BITABLE_TABLE_ID，并为自建应用开通多维表格只读权限。`;
+      }
+    }
+
+    case 'use_recruiting_skill': {
+      const { listClaudeSkills, getClaudeSkill, skillToPrompt } = await import('./skills/claude-skills');
+
+      if (args.list || !args.skill_name) {
+        const catalog = listClaudeSkills()
+          .map(s => `- ${s.name}（${s.source}）: ${s.description.slice(0, 150)}`)
+          .join('\n');
+        return `可用招聘技能：\n${catalog || '（未发现技能，请确认 ~/.claude/skills 目录）'}`;
+      }
+
+      const skill = getClaudeSkill(String(args.skill_name));
+      if (!skill) {
+        const names = listClaudeSkills().map(s => s.name).join(', ');
+        return `未找到技能 "${args.skill_name}"。可用技能: ${names}`;
+      }
+
+      console.log(chalk.gray(`\n[技能注入] ${skill.name}\n`));
+      return skillToPrompt(skill, args.args ? String(args.args) : undefined);
     }
 
     case 'run_sourcing': {
@@ -1056,7 +1134,7 @@ async function executeTool(name: string, args: any): Promise<string> {
           completed: tasks.filter(t => t.status === 'completed').length,
         };
 
-        return `任务总览：\n- 待处理：${summary.pending} 个\n- 进行中：${summary.in_progress} 个\n- 已完成：${summary.completed} 个\n\n详细看板请运行：hireclaw tasks`;
+        return `任务总览：\n- 待处理：${summary.pending} 个\n- 进行中：${summary.in_progress} 个\n- 已完成：${summary.completed} 个\n\n详细看板请运行：hireseek tasks`;
       }
     }
 
@@ -1564,7 +1642,19 @@ function buildSystemPrompt(): string {
 直接、专业、有温度。像一个真正懂招聘、又在乎结果的伙伴在聊天，不是客服，不是助手，是伙伴。
 `.trim();
 
-  return [soul, wisdom, jobCtx, memory, convMem, autoMemory, chatGuide].filter(Boolean).join('\n\n---\n\n');
+  // 招聘技能目录（来自 ~/.claude/skills 及插件）
+  let skillsCtx = '';
+  try {
+    const { skillCatalog } = require('./skills/claude-skills');
+    const catalog = skillCatalog();
+    if (catalog) {
+      skillsCtx = `## 已接管的招聘技能\n\n以下技能可通过 use_recruiting_skill 工具调用（用户也可用 /技能名 直接触发）。当用户请求匹配某技能的触发场景时，优先调用对应技能而不是临时发挥：\n\n${catalog}`;
+    }
+  } catch {
+    // 技能目录不可用时跳过
+  }
+
+  return [soul, wisdom, jobCtx, memory, convMem, autoMemory, skillsCtx, chatGuide].filter(Boolean).join('\n\n---\n\n');
 }
 
 // ── 对话记忆保存 ─────────────────────────────────────────
@@ -1584,7 +1674,7 @@ async function saveConversationMemory(
     // 提取最后 6 轮对话原文（user + assistant 交替）
     const turns = messages.filter(m => m.role === 'user' || m.role === 'assistant');
     const lastTurns = turns.slice(-6).map(m => {
-      const role = m.role === 'user' ? '你' : 'HireClaw';
+      const role = m.role === 'user' ? '你' : 'HireSeek';
       const text = typeof m.content === 'string' ? m.content : '[操作]';
       return `${role}: ${text.slice(0, 300)}`;
     }).join('\n');
@@ -1672,30 +1762,36 @@ export async function startChat(): Promise<void> {
     // 静默失败
   }
 
-  // 检查 API Key - 直接从环境变量读取，不依赖 config 缓存
-  const apiKey = process.env.CUSTOM_API_KEY ||
+  // 检查 API Key - 直接从环境变量读取，不依赖 config 缓存（DeepSeek 优先）
+  const apiKey = process.env.DEEPSEEK_API_KEY ||
+                 process.env.CUSTOM_API_KEY ||
                  process.env.ANTHROPIC_API_KEY ||
                  process.env.OPENAI_API_KEY ||
+                 config.deepseek.apiKey ||
                  config.custom.apiKey ||
                  config.anthropic.apiKey;
 
   if (!apiKey) {
     console.log(chalk.red('\n❌ 错误：未配置 API Key\n'));
     console.log(chalk.yellow('请先配置 API Key：'));
-    console.log(chalk.gray('  1. 方法一：运行 hireclaw setup 进行配置'));
+    console.log(chalk.gray('  1. 方法一：运行 hireseek setup 进行配置'));
     console.log(chalk.gray('  2. 方法二：设置环境变量'));
-    console.log(chalk.gray('     export OPENAI_API_KEY="your-key"'));
+    console.log(chalk.gray('     export DEEPSEEK_API_KEY="your-key"'));
     console.log(chalk.gray('  3. 方法三：编辑配置文件'));
     console.log(chalk.gray(`     ${path.join(config.workspace.dir, 'config.yaml')}\n`));
     process.exit(1);
   }
 
-  // Base URL 也从环境变量优先读取
-  const baseURL = process.env.CUSTOM_BASE_URL ||
-                  process.env.ANTHROPIC_BASE_URL ||
-                  config.custom.baseUrl ||
-                  config.anthropic.baseUrl ||
-                  undefined;
+  // Base URL 与 API Key 来源保持一致（DeepSeek 优先）
+  const usingDeepseek = Boolean(process.env.DEEPSEEK_API_KEY || config.deepseek.apiKey) &&
+                        !process.env.CUSTOM_API_KEY;
+  const baseURL = usingDeepseek
+    ? config.deepseek.baseUrl
+    : process.env.CUSTOM_BASE_URL ||
+      process.env.ANTHROPIC_BASE_URL ||
+      config.custom.baseUrl ||
+      config.anthropic.baseUrl ||
+      undefined;
 
   const model = process.env.LLM_MODEL || config.llm.model;
 
@@ -1714,7 +1810,7 @@ export async function startChat(): Promise<void> {
   });
 
   console.log(chalk.cyan('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-  console.log(chalk.cyan('🦞 HireClaw 对话模式 - 你的智能招聘助手'));
+  console.log(chalk.cyan('🦞 HireSeek 对话模式 - 你的智能招聘助手'));
   console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
   console.log(chalk.bold('💡 快速开始：'));
@@ -1878,7 +1974,7 @@ export async function startChat(): Promise<void> {
         }
 
         const reply = msg.content ?? '';
-        console.log(`\n${chalk.cyan('HireClaw')}: ${reply}\n`);
+        console.log(`\n${chalk.cyan('HireSeek')}: ${reply}\n`);
 
       } catch (err: any) {
         console.error(chalk.red(`\n出错了: ${err.message}\n`));

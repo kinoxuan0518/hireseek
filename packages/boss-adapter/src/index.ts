@@ -1,4 +1,4 @@
-﻿// @hireclaw/boss-adapter — BOSS直聘平台适配器
+﻿// @hireseek/boss-adapter — BOSS直聘平台适配器
 //
 // 实现 PlatformAdapter 接口，核心逻辑：
 // 1. 候选人搜索与筛选（硬性筛选 + 评分排序）
@@ -23,7 +23,7 @@ import type {
   EvaluationResult,
   EvaluationDimension,
   JobConfig,
-} from '@hireclaw/core';
+} from '@hireseek/core';
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -725,7 +725,7 @@ export class BossAdapter implements PlatformAdapter {
     // 我们需要用 candidateId 查找对应的 Candidate 对象
     // candidateId 在我们的系统里就是 BossCandidateRaw.id
     // 这里构造一个最小 Candidate 对象用于定位
-    const dummyCandidate: import('@hireclaw/core').Candidate = {
+    const dummyCandidate: import('@hireseek/core').Candidate = {
       id: candidateId,
       name: '', // 将在 findCandidateCard 中通过其他方式查找
       platform: 'boss',

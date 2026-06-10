@@ -1,55 +1,130 @@
-# 🦞 HireClaw SDK
+# 🔱 HireSeek（深聘）
 
-**自主招聘智能体框架** — 平台无关的招聘 AI "大脑"。
+**DeepSeek 驱动的自主招聘智能体** — 接管你的全部招聘任务与招聘技能。
 
-## 架构
+> 前身为 HireClaw 🦞。究极进化后改名 HireSeek：Hire 是使命，Seek 既是猎寻人才的本能，也致敬默认大脑 DeepSeek。
+
+## 它能做什么
+
+- **全渠道自主寻源**：BOSS直聘、脉脉、LinkedIn，自动搜索、筛选、打招呼、跟进
+- **接管你的 Claude 技能库**：自动扫描 `~/.claude/skills` 与插件目录，rbt、maimai-recruiter、talent-sourcing、candidate-intelligence、blacklake-targeted-talent-hunting、bosszhibin-auto-recruiter 等招聘技能全部可被 DeepSeek 调用
+- **对话即工作**：chat 模式下自然语言下达任务，agent 自动路由到对应技能或渠道
+- **候选人评估 / 触达策略 / 跨会话记忆 / 招聘漏斗**：core SDK 内置
+- **定时调度**：工作日自动执行 BOSS / 脉脉 / 跟进任务
+
+## 三大进化点（v2 "HireSeek"）
+
+### 1. DeepSeek 一等公民（默认大脑）
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."   # 唯一必需配置
+```
+
+- 默认 provider 为 `deepseek`，默认模型 `deepseek-chat`，复杂推理可切 `deepseek-reasoner`
+- 仍兼容 Claude / OpenAI / MiniMax / 任意 OpenAI 兼容 API（`LLM_PROVIDER` 切换）
+
+### 2. 纯文本 DOM Runner（无视觉浏览器驱动）
+
+DeepSeek 没有视觉能力，传统截图方案走不通。HireSeek 的解法：
 
 ```
-hireclaw/
-├── packages/
-│   ├── core/              # @hireclaw/core — 招聘智能体引擎
-│   │   ├── evaluator/     # 候选人评估引擎
-│   │   ├── outreach/      # 触达策略引擎
-│   │   ├── memory/        # 跨会话记忆系统
-│   │   ├── pipeline/      # 招聘流水线编排
-│   │   └── knowledge/     # 招聘知识库（可扩展）
-│   │
-│   ├── boss-adapter/      # @hireclaw/boss-adapter — BOSS直聘适配器
-│   ├── maimai-adapter/    # @hireclaw/maimai-adapter — 脉脉适配器
-│   └── cli/               # @hireclaw/cli — 命令行入口
-│
-├── src/                   # [legacy] 原始单体代码（逐步迁移）
-└── workspace/             # [legacy] 原始工作区（逐步迁移）
+页面 → 可交互元素打 ref 标记 → 文本快照（元素清单+正文）→ DeepSeek
+DeepSeek → browser(click, ref=42) → Playwright 精确定位执行 → 新快照
 ```
+
+相比视觉方案：**token 更省、定位零坐标偏差、任何文本模型都能开车**。
+
+### 3. Claude Skills 桥接层
+
+```
+~/.claude/skills/*/SKILL.md  ──┐
+~/.claude/plugins/.../skills ──┴→ 技能注册表 → DeepSeek 智能路由
+```
+
+- chat 中直接 `/rbt`、`/maimai-recruiter` 触发
+- 或自然语言："帮我处理一下BOSS的消息" → agent 自动匹配技能并执行
+- 技能的 references/ scripts/ 路径自动解析
 
 ## 快速开始
 
 ```bash
-pnpm install
-pnpm build
+pnpm install && pnpm build
+
+export DEEPSEEK_API_KEY="sk-..."
+
+# 对话模式（推荐入口）
+npx tsx src/index.ts chat
+
+# 直接执行渠道 sourcing
+npx tsx src/index.ts run boss
+
+# 定时调度（工作日自动跑）
+npx tsx src/index.ts schedule
 ```
+
+## 架构
+
+```
+hireseek/
+├── packages/
+│   ├── core/              # @hireseek/core — 招聘智能体引擎
+│   │   ├── evaluator/     # 候选人评估引擎
+│   │   ├── outreach/      # 触达策略引擎
+│   │   ├── memory/        # 跨会话记忆系统
+│   │   ├── pipeline/      # 招聘流水线编排
+│   │   └── llm/           # 多模型抽象（deepseek/claude/openai/custom）
+│   │
+│   ├── boss-adapter/      # @hireseek/boss-adapter — BOSS直聘适配器
+│   ├── maimai-adapter/    # @hireseek/maimai-adapter — 脉脉适配器
+│   └── cli/               # @hireseek/cli — 命令行入口
+│
+├── src/                   # agent 运行时（chat / orchestrator / scheduler）
+│   ├── runners/
+│   │   ├── dom-runner.ts  # ★ 纯文本 DOM 浏览器驱动（DeepSeek 默认）
+│   │   ├── claude.ts      # Claude 原生 computer-use
+│   │   └── generic-vision.ts # 视觉模型通用驱动（MiniMax/Qwen-VL等）
+│   └── skills/
+│       └── claude-skills.ts  # ★ Claude Skills 桥接层
+└── workspace/             # 职位配置、渠道技能、记忆
+```
+
+## 配置参考
+
+| 环境变量 | 默认值 | 说明 |
+|---------|--------|------|
+| `DEEPSEEK_API_KEY` | — | DeepSeek API Key（默认大脑，必填） |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API 地址 |
+| `LLM_MODEL` | `deepseek-chat` | 模型名 |
+| `LLM_PROVIDER` | `deepseek` | 可选 deepseek / claude / openai / minimax / custom |
+| `HIRESEEK_DB_PATH` | `~/.hireseek/hireseek.db` | 数据库路径（自动兼容旧 ~/.hireclaw） |
+| `FEISHU_WEBHOOK_URL` | — | 飞书执行报告推送 |
+| `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | — | 飞书自建应用（多维表格读取，进化闭环） |
+| `FEISHU_BITABLE_APP_TOKEN` / `FEISHU_BITABLE_TABLE_ID` | — | 招聘结果多维表格 |
+| `SCHEDULE_BOSS` 等 | 工作日 9/10/14 点 | cron 调度表达式 |
+
+## 代码层风控（不依赖模型自觉）
+
+DOM Runner 内置三条硬约束，即使模型忘了 prompt 里的协议也会被强制执行：
+
+1. **打招呼节流**：识别"打招呼/立即沟通"类按钮，点击间隔强制 ≥5 秒
+2. **每日上限硬终止**：快照中检测到"今日沟通已达上限/需付费"立即锁死所有操作，只允许输出总结
+3. **频率告警软退避**：检测到"开聊太频繁"自动等待 10-30 秒再继续
+
+## 进化闭环
+
+chat 中的 `feishu_recruiting_stats` 工具读取飞书多维表格的真实招聘结果
+（状态分布、渠道转化），agent 据此复盘话术与筛选策略——用真实数据驱动技能进化，
+而不是凭感觉调 prompt。
 
 ## 角色分层
 
-- **HireClaw 是总控 Agent**：负责承载上下文、理解招聘任务、与用户共创画像，并决定下一步该调用什么能力。
-- **`talent-sourcing` 是能力模块之一**：负责人才情报、岗位画像澄清、寻源策略生成、冰山以下人才挖掘与人物调研。
-- **渠道 skill / adapter 是执行单元**：如脉脉、BOSS、LinkedIn，负责在具体渠道里执行搜索、筛选、触达与跟进。
+- **HireSeek 是总控 Agent**：承载上下文、理解招聘任务、与用户共创画像，决定调用什么能力
+- **Claude Skills 是能力库**：寻源策略、竞调、定向挖猎、渠道操作手册，全部即插即用
+- **Adapter / DOM Runner 是手脚**：在具体渠道执行搜索、筛选、触达与跟进
 
 ## 设计原则
 
 - **"大脑"与"手脚"分离** — SDK 提供招聘智能，Adapter 提供平台接入
 - **知识不硬编码** — 评估维度、话术策略、风控规则全部可配置
-- **不绑定特定 LLM** — Claude / DeepSeek / OpenAI / 任意兼容 API
+- **不绑定特定 LLM** — DeepSeek 默认，Claude / OpenAI / 任意兼容 API 可切换
 - **不绑定特定平台** — 实现一个 interface 即可接入新平台
-
-## 开发路线
-
-| Sprint | 状态 | 内容 |
-|--------|------|------|
-| 0 | ✅ 完成 | Monorepo 搭建，类型定义 |
-| 1 | 🔲 待开始 | @hireclaw/core/evaluator — 评估引擎 |
-| 2 | 🔲 | @hireclaw/core/outreach — 触达策略引擎 |
-| 3 | 🔲 | @hireclaw/core/pipeline — 流水线编排 |
-| 4 | 🔲 | @hireclaw/boss-adapter — BOSS直适配器 |
-| 5 | 🔲 | @hireclaw/core/memory — 记忆系统 |
-| 6 | 🔲 | 文档 + npm 发布 + 使用示例 |

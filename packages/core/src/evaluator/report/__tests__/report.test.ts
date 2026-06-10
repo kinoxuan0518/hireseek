@@ -1,4 +1,4 @@
-// @hireclaw/core/evaluator/report — Tests
+// @hireseek/core/evaluator/report — Tests
 
 import { describe, it, expect } from 'vitest';
 import { ReportGenerator } from '../ReportGenerator.js';

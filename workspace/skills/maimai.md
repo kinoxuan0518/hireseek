@@ -31,7 +31,7 @@ description: >
 - 用户当轮明确指令
 - `talent-sourcing` 输出
 - 当前 `active.yaml` 中的岗位约束
-4. 若环境配置了本地缓存目录（`${MAIMAI_CACHE_DIR:-~/.hireclaw/maimai_cache/}`），仅将其视为执行镜像，而不是主策略源。
+4. 若环境配置了本地缓存目录（`${MAIMAI_CACHE_DIR:-~/.hireseek/maimai_cache/}`），仅将其视为执行镜像，而不是主策略源。
 5. 检查触达历史，避免重复沟通。
 
 如启用本地镜像，缓存结构见：`references/cache-schema.md`
