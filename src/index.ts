@@ -103,11 +103,14 @@ async function checkSetup(): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-  console.log(chalk.cyan('\n🔱 HireSeek - DeepSeek 驱动的智能招聘 Agent\n'));
-  console.log(`数据库: ${chalk.gray(db.name)}\n`);
-
   const args = process.argv.slice(2);
   const command = args[0];
+
+  // chat 模式有自己的极简启动界面，这里只为其他命令打 banner
+  if (command && command !== 'chat') {
+    console.log(chalk.cyan('\n🔱 HireSeek - DeepSeek 驱动的智能招聘 Agent\n'));
+    console.log(`数据库: ${chalk.gray(db.name)}\n`);
+  }
   const channel = args[1] as Channel | undefined;
 
   if (!command || command === 'chat') {

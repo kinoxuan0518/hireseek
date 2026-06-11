@@ -1922,46 +1922,39 @@ export async function startChat(): Promise<void> {
     output: process.stdout,
   });
 
-  console.log(chalk.cyan('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-  console.log(chalk.cyan('🔱 HireSeek 对话模式 - 你的智能招聘助手'));
-  console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
-
-  console.log(chalk.bold('💡 快速开始：'));
-  console.log(chalk.gray('  • "帮我在 BOSS直聘找 10 个前端工程师"'));
-  console.log(chalk.gray('  • "查看今天的候选人"'));
-  console.log(chalk.gray('  • "分析一下候选人回复率"'));
-  console.log(chalk.gray('  • "把张三标记为已面试"\n'));
-
-  console.log(chalk.bold('⚡ 快捷命令：'));
-  console.log(chalk.gray('  /help             - 全部命令     /status - 状态'));
-  console.log(chalk.gray('  /skills           - 技能列表     /clear  - 清空上下文'));
-  console.log(chalk.gray('  /找候选人 <职位>    - 自动 sourcing'));
-  console.log(chalk.gray('  /rbt 等技能名      - 直接触发已接管的招聘技能'));
-  console.log(chalk.gray('  /q 或 Ctrl+C 两次  - 退出（生成中按 Ctrl+C 可打断）\n'));
-
-  console.log(chalk.bold('🎯 核心功能：'));
-  console.log(chalk.gray('  ✓ 智能对话 - 自然语言控制所有功能'));
-  console.log(chalk.gray('  ✓ 自动记忆 - 记住你的偏好和工作习惯'));
-  console.log(chalk.gray('  ✓ 工具调用 - 44+ 工具随时待命'));
-  console.log(chalk.gray('  ✓ Git 集成 - 代码管理一句话搞定'));
-  console.log(chalk.gray('  ✓ 跨平台导出 - 会话可导出到 claude.ai\n'));
-
-  console.log(chalk.yellow('💭 提示：直接说出你的需求，我会自动调用合适的工具完成任务'));
-  console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
-
-  // 检查是否首次使用（没有职位配置）
+  // ── 极简启动（CC 风格：安静，信息在需要时出现）──────────────────────
   const job = loadActiveJob();
-  const isFirstTime = !job || job.title === 'AI 算法工程师';
+  console.log('');
+  console.log(
+    `${chalk.cyan.bold('🔱 HireSeek')} ${chalk.gray(`${model} · ${job?.title ?? '未配置职位'}`)}`,
+  );
+  console.log(chalk.gray(`   /help 命令 · /skills 技能 · Ctrl+C 两次退出`));
 
+  const isFirstTime = !job || job.title === 'AI 算法工程师';
   if (isFirstTime) {
-    // AI 主动发起对话
-    console.log(chalk.cyan('🔱: ') + chalk.white('你好！我注意到你还没有配置招聘职位。'));
-    console.log(chalk.cyan('    ') + chalk.white('你想招什么职位呢？你可以：\n'));
-    console.log(chalk.gray('    • 直接口头描述：') + chalk.white('"我想招一个前端工程师，要求..."'));
-    console.log(chalk.gray('    • 提供 JD 文档：') + chalk.white('"读取这个 JD: /path/to/jd.pdf"'));
-    console.log(chalk.gray('    • 分享在线链接：') + chalk.white('"分析这个职位: https://..."'));
     console.log('');
+    console.log(chalk.white('   还没配置职位——直接告诉我你想招什么人就行，'));
+    console.log(chalk.white('   也可以丢给我 JD 文件路径或在线链接。'));
   }
+
+  // 输入区分隔线：嵌入轻量状态（模型 · 今日触达），宽度自适应
+  const todayContacted = (): number => {
+    try {
+      const row = db.prepare(
+        `SELECT COUNT(*) AS n FROM candidates WHERE date(contacted_at) = date('now', 'localtime')`,
+      ).get() as { n: number };
+      return row.n;
+    } catch {
+      return 0;
+    }
+  };
+
+  const promptHeader = (): string => {
+    const info = ` ${model} · 今日触达 ${todayContacted()} `;
+    const width = Math.min(process.stdout.columns || 60, 78);
+    const pad = Math.max(4, width - info.length - 2);
+    return chalk.gray(`\n──${info}${'─'.repeat(pad)}`);
+  };
 
   // ── CC 风格交互：流式输出 / Ctrl+C 打断 / 双击退出 / Ctrl+D ───────────
   let generating: AbortController | null = null;
@@ -2092,7 +2085,7 @@ export async function startChat(): Promise<void> {
 
   const ask = (): void => {
     if (exiting) return;
-    rl.question(chalk.green('\n❯ '), async (input) => {
+    rl.question(`${promptHeader()}\n${chalk.green('❯ ')}`, async (input) => {
       const text = input.trim();
       if (!text) { ask(); return; }
 
