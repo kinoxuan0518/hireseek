@@ -44,7 +44,34 @@ async function initializeMCPIfConfigured(): Promise<void> {
 }
 
 // ── 可用工具定义 ─────────────────────────────────────────
-const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
+export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'spawn_task',
+      description:
+        '把耗时且不需要用户实时监督的工作派给后台 sub-agent 执行（批量候选人调研、报告整理、数据核对等），' +
+        '主对话立即返回继续服务用户，任务完成后自动通知。' +
+        '注意：需要用户配合的事（扫码登录）或用户明确想盯着看的执行不要派后台。' +
+        'task 要写成自包含指令（后台 agent 看不到当前对话历史）。',
+      parameters: {
+        type: 'object',
+        required: ['task', 'label'],
+        properties: {
+          task: { type: 'string', description: '完整自包含的任务指令，含必要上下文' },
+          label: { type: 'string', description: '任务短名（≤12字），如"调研5位候选人"' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_tasks',
+      description: '查看后台任务状态（运行中/已完成/失败）。用户问"刚才那个任务怎么样了"时调用。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -955,7 +982,18 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
 ];
 
 // ── 工具执行 ─────────────────────────────────────────────
-async function executeTool(name: string, args: any): Promise<string> {
+export async function executeTool(name: string, args: any): Promise<string> {
+  // ── 后台任务 ─────────────────────────────────────────
+  if (name === 'spawn_task') {
+    const { spawnSubAgent } = await import('./sub-agent');
+    const t = spawnSubAgent({ task: String(args.task ?? ''), label: String(args.label ?? '后台任务') });
+    return `✓ 已派发后台任务 #${t.id}「${t.label}」，完成后会自动通知。用户可用 /tasks 查看进度，期间可继续其他对话。`;
+  }
+  if (name === 'check_tasks') {
+    const { tasksPanel } = await import('./sub-agent');
+    return tasksPanel();
+  }
+
   // 权限检查
   const { checkPermission } = await import('./permissions');
   const approved = await checkPermission({
@@ -1819,6 +1857,7 @@ function buildSystemPrompt(): string {
 4. **长任务每完成一批（约 5 人）主动汇报一次**：已触达名单、跳过原因、剩余权益、下一步。让用户随时知道进度，而不是闷头跑。
 5. **风控红线由代码强制执行**（打招呼 ≥5 秒间隔、每日上限硬终止），你只需在触发时向用户解释发生了什么。
 6. **需要用户做决定时用 ask_user_choice 弹选择器**——选模式、选渠道、确认下一步，都给 2-6 个选项让用户方向键选，不要抛开放式问题或表格让用户打字回答。
+7. **耗时且无需监督的工作派后台**——批量候选人调研、报告整理、数据核对用 spawn_task 派给后台 sub-agent，主对话继续服务用户；但需要扫码登录、用户想盯着看的执行（如打招呼）留在前台。
 7. **用户可以随时插话**——执行长任务时收到 [用户插话] 消息，立即按新指示调整（跳过某人、换条件、停止某步），调整后继续任务，不要忽略也不要从头再来；收到暂停消息则立刻停手汇报。
 
 ### 风格
@@ -1993,6 +2032,7 @@ export async function startChat(): Promise<void> {
     { cmd: '/status', desc: '模型 / 职位 / 浏览器状态' },
     { cmd: '/skills', desc: '技能列表' },
     { cmd: '/model', desc: '切换模型（flash/pro/自定义）' },
+    { cmd: '/tasks', desc: '后台任务面板（stop <id> 停止）' },
     { cmd: '/clear', desc: '清空对话上下文' },
     { cmd: '/export', desc: '导出会话' },
     { cmd: '/sessions', desc: '查看历史会话' },
@@ -2141,6 +2181,17 @@ export async function startChat(): Promise<void> {
     if (!exiting) void gracefulExit();
   });
 
+  // 后台任务完成 → 实时推送通知（正在生成时排队，空闲时立即打印并恢复输入行）
+  {
+    const { setNotifier } = require('./sub-agent') as typeof import('./sub-agent');
+    setNotifier(msg => {
+      console.log('\n' + chalk.yellow(msg));
+      if (!generating) {
+        (rl as unknown as { _refreshLine?: () => void })._refreshLine?.();
+      }
+    });
+  }
+
   // Esc 单键中断（CC 同款）：生成中=打断；任务中=暂停；空闲=清空输入行
   process.stdin.on('keypress', (_s: unknown, key: { name?: string } | undefined) => {
     if (key?.name !== 'escape') return;
@@ -2172,6 +2223,7 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /clear              清空对话上下文，重新开始'),
       chalk.gray('  /status             模型 / 职位 / 数据库状态'),
       chalk.gray('  /model [名称]       切换模型（不带参数弹选择器）'),
+      chalk.gray('  /tasks              后台任务面板（/tasks stop <id> 停止）'),
       chalk.gray('  /skills             列出全部可用技能'),
       chalk.gray('  /export [标题]      导出会话      /sessions  查看会话'),
       chalk.gray('  /<技能名> [参数]    直接触发技能，如 /rbt、/找候选人'),
@@ -2232,6 +2284,8 @@ export async function startChat(): Promise<void> {
         return `🌐 ${a}`;
       }
       case 'ask_user_choice':  return `🔘 ${short(args.question, 30)}`;
+      case 'spawn_task':       return `🧵 派发后台任务「${short(args.label, 16)}」`;
+      case 'check_tasks':      return '🧵 查看后台任务';
       case 'manage_schedule': {
         const a = String(args.action ?? 'list');
         if (a === 'list') return '⏰ 查看定时计划';
@@ -2297,6 +2351,14 @@ export async function startChat(): Promise<void> {
 
   const ask = (): void => {
     if (exiting) return;
+    // 补发在通知器注册前完成的后台任务通知（同步，保证打印在提示符之前）
+    {
+      const { drainNotifications } = require('./sub-agent') as typeof import('./sub-agent');
+      for (const n of drainNotifications()) {
+        console.log('\n' + chalk.yellow(n));
+      }
+    }
+
     // 分隔线独立打印：prompt 保持单行，↑↓ 历史回溯时重绘才不会乱
     console.log(promptHeader());
     rl.question(chalk.green('❯ '), async (input) => {
@@ -2358,6 +2420,7 @@ export async function startChat(): Promise<void> {
           chalk.gray(`  浏览器    ${browserStatus()}`),
           chalk.gray(`  数据库    ${db.name}`),
           chalk.gray(`  技能      ${listClaudeSkills().length} 个已接管`),
+          chalk.gray(`  后台任务  ${(require('./sub-agent') as typeof import('./sub-agent')).runningCount()} 个运行中`),
           chalk.gray(`  上下文    ${messages.length} 条消息`),
           '',
         ].join('\n'));
@@ -2409,6 +2472,21 @@ export async function startChat(): Promise<void> {
           console.log(chalk.gray(`\n✓ 已切换到 ${chalk.white(next)}（已保存，下次启动沿用）\n`));
         } catch {
           console.log(chalk.gray(`\n✓ 已切换到 ${chalk.white(next)}（仅本次会话，.env 写入失败）\n`));
+        }
+        ask();
+        return;
+      }
+
+      // 后台任务面板
+      if (text === '/tasks' || text.startsWith('/tasks ')) {
+        const { tasksPanel, taskDetail, stopTask } = await import('./sub-agent');
+        const parts = text.split(/\s+/);
+        if (parts[1] === 'stop' && parts[2]) {
+          console.log('\n' + stopTask(parseInt(parts[2], 10)) + '\n');
+        } else if (parts[1] && /^\d+$/.test(parts[1])) {
+          console.log('\n' + taskDetail(parseInt(parts[1], 10)) + '\n');
+        } else {
+          console.log('\n🧵 后台任务\n\n' + tasksPanel() + '\n');
         }
         ask();
         return;
