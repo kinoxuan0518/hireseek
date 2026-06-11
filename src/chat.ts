@@ -114,6 +114,28 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'ask_user_choice',
+      description:
+        '需要用户做决定时（选执行模式、选渠道、确认下一步），弹出方向键选择器让用户选，' +
+        '比开放式提问体验好得多。给 2-6 个简短选项；如果允许自由回答，把"其他（我来描述）"作为最后一项。' +
+        '返回用户选中的选项文本，用户取消则提示改用文字询问。',
+      parameters: {
+        type: 'object',
+        required: ['question', 'options'],
+        properties: {
+          question: { type: 'string', description: '要问的问题，简短' },
+          options: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '2-6 个选项，每个一句话以内',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browser_connect',
       description:
         '连接浏览器（优先接管用户已登录的 Chrome）。操作 BOSS直聘/脉脉等页面前必须先调用一次。' +
@@ -996,6 +1018,18 @@ async function executeTool(name: string, args: any): Promise<string> {
       return await evolve({ dryRun: mode === 'dry', notify: mode === 'run' });
     }
 
+    case 'ask_user_choice': {
+      const { selectOption } = await import('./select');
+      const options = (Array.isArray(args.options) ? args.options : []).map(String).slice(0, 9);
+      if (options.length < 2) return '选项不足 2 个，请直接用文字询问用户。';
+
+      const picked = await selectOption(String(args.question ?? '请选择'), options.map((o: string) => ({ label: o })));
+      if (picked == null) {
+        return '用户取消了选择（或当前环境不支持交互）。请改用文字简洁询问，不要再弹选择器。';
+      }
+      return `用户选择：${options[picked]}`;
+    }
+
     case 'browser_connect': {
       const { connectBrowser } = await import('./chat-browser');
       return await connectBrowser(args.url_hint ? String(args.url_hint) : undefined);
@@ -1750,6 +1784,7 @@ function buildSystemPrompt(): string {
 3. **汇报说招聘语言**：说"已打招呼 5 人（常迈/熊文韬…），今日权益剩 196 次"，不说 SPA / DOM / ref / AppleScript / bodyLen 这类词。技术报错先翻译成业务影响再说，不贴原始错误。
 4. **长任务每完成一批（约 5 人）主动汇报一次**：已触达名单、跳过原因、剩余权益、下一步。让用户随时知道进度，而不是闷头跑。
 5. **风控红线由代码强制执行**（打招呼 ≥5 秒间隔、每日上限硬终止），你只需在触发时向用户解释发生了什么。
+6. **需要用户做决定时用 ask_user_choice 弹选择器**——选模式、选渠道、确认下一步，都给 2-6 个选项让用户方向键选，不要抛开放式问题或表格让用户打字回答。
 
 ### 风格
 直接、专业、有温度。像一个真正懂招聘、又在乎结果的伙伴在聊天，不是客服，不是助手，是伙伴。
@@ -2128,6 +2163,7 @@ export async function startChat(): Promise<void> {
         if (a === 'wait')   return `🌐 等待加载`;
         return `🌐 ${a}`;
       }
+      case 'ask_user_choice':  return `🔘 ${short(args.question, 30)}`;
       case 'use_recruiting_skill':
         return args.list ? '📋 查看技能清单' : `📋 调用技能「${args.skill_name ?? ''}」`;
       case 'run_sourcing':     return `🔍 启动寻源${args.channel ? `（${args.channel}）` : ''}`;
@@ -2193,8 +2229,20 @@ export async function startChat(): Promise<void> {
       if (process.stdout.isTTY) process.stdout.write('\x1b[J');
       menuShown = false;
 
-      const text = await readFullInput(input);
+      let text = await readFullInput(input);
       if (!text) { ask(); return; }
+
+      // 单独输入 / → 弹出命令选择器（方向键选，不用记命令名）
+      if (text === '/') {
+        const { selectOption } = await import('./select');
+        const entries = allEntries().slice(0, 10);
+        const picked = await selectOption(
+          '选择命令',
+          entries.map(e => ({ label: e.cmd, hint: e.desc })),
+        );
+        if (picked == null) { ask(); return; }
+        text = entries[picked].cmd;
+      }
 
       // 写入跨会话历史（多行压平成单行，↑ 调出时仍可直接复用）
       try {
