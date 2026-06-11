@@ -1,0 +1,16 @@
+(function(){
+  var iframe=document.querySelector('iframe');
+  var doc=iframe.contentDocument||iframe.contentWindow.document;
+  var all=doc.querySelectorAll('*');
+  for(var i=0;i<all.length;i++){
+    var h=all[i].offsetHeight;
+    if(h<1){continue;}
+    var t=all[i].innerText;
+    var hasAgent=t.indexOf('Agent 开发工程师');
+    if(hasAgent>-1&&t.length<80){
+      all[i].click();
+      return String('trigger_clicked:'+all[i].tagName);
+    }
+  }
+  return 'no_visible_agent_label';
+})()

@@ -136,6 +136,30 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'manage_schedule',
+      description:
+        '查看或修改定时招聘计划（BOSS寻源/脉脉寻源/跟进未回复/每周进化复盘）。' +
+        '用户说"每天早上8点跑BOSS""周末别跑""把脉脉关掉"这类需求时调用。' +
+        '你负责把自然语言时间转成 cron（分 时 日 月 周），如"工作日早上8点"→"0 8 * * 1-5"。' +
+        '修改前先 list 给用户看现状；修改是写配置，确认用户意图明确后再 set。',
+      parameters: {
+        type: 'object',
+        required: ['action'],
+        properties: {
+          action: { type: 'string', enum: ['list', 'set', 'disable', 'enable'], description: '操作' },
+          task: {
+            type: 'string',
+            enum: ['boss', 'maimai', 'followup', 'evolve'],
+            description: 'set/disable/enable 时必填',
+          },
+          cron: { type: 'string', description: 'set 时必填，5 段 cron 表达式' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browser_connect',
       description:
         '连接浏览器（优先接管用户已登录的 Chrome）。操作 BOSS直聘/脉脉等页面前必须先调用一次。' +
@@ -1028,6 +1052,16 @@ async function executeTool(name: string, args: any): Promise<string> {
         return '用户取消了选择（或当前环境不支持交互）。请改用文字简洁询问，不要再弹选择器。';
       }
       return `用户选择：${options[picked]}`;
+    }
+
+    case 'manage_schedule': {
+      const { describeSchedule, setSchedule } = await import('./schedule-manager');
+      const action = String(args.action ?? 'list');
+      if (action === 'list') return describeSchedule();
+      const task = String(args.task ?? '');
+      if (action === 'disable') return setSchedule(task, 'off');
+      if (action === 'enable') return setSchedule(task, 'default');
+      return setSchedule(task, String(args.cron ?? ''));
     }
 
     case 'browser_connect': {
@@ -2166,6 +2200,13 @@ export async function startChat(): Promise<void> {
         return `🌐 ${a}`;
       }
       case 'ask_user_choice':  return `🔘 ${short(args.question, 30)}`;
+      case 'manage_schedule': {
+        const a = String(args.action ?? 'list');
+        if (a === 'list') return '⏰ 查看定时计划';
+        if (a === 'disable') return `⏰ 关闭计划「${args.task}」`;
+        if (a === 'enable') return `⏰ 恢复计划「${args.task}」`;
+        return `⏰ 调整计划「${args.task}」`;
+      }
       case 'use_recruiting_skill':
         return args.list ? '📋 查看技能清单' : `📋 调用技能「${args.skill_name ?? ''}」`;
       case 'run_sourcing':     return `🔍 启动寻源${args.channel ? `（${args.channel}）` : ''}`;

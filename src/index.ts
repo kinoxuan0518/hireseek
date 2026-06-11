@@ -40,6 +40,9 @@ const USAGE = `
   hireseek evo dry             只出复盘报告，不落盘
   hireseek evo back            回滚最近一次进化
   hireseek evo log             进化历史与效果对比
+  hireseek sched               查看定时计划（人话时间 + 下次/上次执行）
+  hireseek sched set <任务> "<cron>"  修改计划，如 sched set boss "0 8 * * 1-5"
+  hireseek sched off|on <任务>  关闭/恢复某项计划
   hireseek start               启动定时守护进程
 
 渠道: boss | maimai | linkedin | followup
@@ -234,6 +237,26 @@ async function main(): Promise<void> {
       console.log(chalk.cyan(`\n🧬 开始进化复盘${dryRun ? '（dry-run）' : ''}...\n`));
       const report = await evolve({ dryRun, notify: !dryRun });
       console.log(report);
+    }
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'sched' || command === 'schedule') {
+    const { describeSchedule, setSchedule, findTask } = await import('./schedule-manager');
+    const sub = args[1];
+
+    if (sub === 'set' && args[2] && args[3]) {
+      console.log('\n' + setSchedule(args[2], args[3]) + '\n');
+    } else if (sub === 'off' && args[2]) {
+      console.log('\n' + setSchedule(args[2], 'off') + '\n');
+    } else if (sub === 'on' && args[2]) {
+      console.log('\n' + setSchedule(args[2], 'default') + '\n');
+    } else if (sub && !findTask(sub)) {
+      console.log(chalk.yellow(`\n用法: hireseek sched [set <任务> "<cron>" | off <任务> | on <任务>]\n`));
+    } else {
+      console.log('\n⏰ 定时计划\n');
+      console.log(describeSchedule());
+      console.log('');
     }
     db.close();
     process.exit(0);
