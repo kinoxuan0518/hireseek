@@ -8,3 +8,4 @@ data/
 workspace/accounts/
 workspace/checkpoints/
 workspace/mcp-servers.yaml
+workspace/tmp/
