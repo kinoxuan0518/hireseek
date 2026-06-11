@@ -1941,7 +1941,7 @@ export async function startChat(): Promise<void> {
       config.anthropic.baseUrl ||
       undefined;
 
-  const model = process.env.LLM_MODEL || config.llm.model;
+  let model = process.env.LLM_MODEL || config.llm.model;
 
   const client = new OpenAI({
     apiKey,
@@ -1957,6 +1957,7 @@ export async function startChat(): Promise<void> {
     { cmd: '/help', desc: '全部命令' },
     { cmd: '/status', desc: '模型 / 职位 / 浏览器状态' },
     { cmd: '/skills', desc: '技能列表' },
+    { cmd: '/model', desc: '切换模型（flash/pro/自定义）' },
     { cmd: '/clear', desc: '清空对话上下文' },
     { cmd: '/export', desc: '导出会话' },
     { cmd: '/sessions', desc: '查看历史会话' },
@@ -2104,6 +2105,7 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /q | /exit | 退出   结束对话（Ctrl+C 两次、Ctrl+D 同效）'),
       chalk.gray('  /clear              清空对话上下文，重新开始'),
       chalk.gray('  /status             模型 / 职位 / 数据库状态'),
+      chalk.gray('  /model [名称]       切换模型（不带参数弹选择器）'),
       chalk.gray('  /skills             列出全部可用技能'),
       chalk.gray('  /export [标题]      导出会话      /sessions  查看会话'),
       chalk.gray('  /<技能名> [参数]    直接触发技能，如 /rbt、/找候选人'),
@@ -2286,6 +2288,55 @@ export async function startChat(): Promise<void> {
           chalk.gray(`  上下文    ${messages.length} 条消息`),
           '',
         ].join('\n'));
+        ask();
+        return;
+      }
+
+      // 切换模型（会话内即时生效 + 持久化到 .env）
+      if (text === '/model' || text.startsWith('/model ')) {
+        const direct = text.slice(6).trim();
+        const MODEL_CHOICES = [
+          { label: 'deepseek-v4-flash', hint: '快 · 省 · 日常对话与浏览器操作（默认）' },
+          { label: 'deepseek-v4-pro', hint: '深推理 · 候选人评估与复盘策略' },
+          { label: '自定义…', hint: '手动输入任意模型名' },
+        ];
+
+        let next = direct;
+        if (!next) {
+          const { selectOption } = await import('./select');
+          const picked = await selectOption('切换到哪个模型？', MODEL_CHOICES.map(c => ({
+            label: c.label === model ? `${c.label}（当前）` : c.label,
+            hint: c.hint,
+          })));
+          if (picked == null) { ask(); return; }
+          if (MODEL_CHOICES[picked].label === '自定义…') {
+            next = (await new Promise<string>(res => rl.question(chalk.gray('模型名: '), res))).trim();
+            if (!next) { ask(); return; }
+          } else {
+            next = MODEL_CHOICES[picked].label;
+          }
+        }
+
+        if (next === model) {
+          console.log(chalk.gray(`\n已经在用 ${model} 了\n`));
+          ask();
+          return;
+        }
+
+        model = next;
+        // 持久化到 .env，下次启动沿用
+        try {
+          const envPath = path.join(process.cwd(), '.env');
+          let raw = '';
+          try { raw = fs.readFileSync(envPath, 'utf-8'); } catch { /* 无 .env 则新建 */ }
+          raw = /^LLM_MODEL=.*/m.test(raw)
+            ? raw.replace(/^LLM_MODEL=.*/m, `LLM_MODEL=${next}`)
+            : raw + (raw === '' || raw.endsWith('\n') ? '' : '\n') + `LLM_MODEL=${next}\n`;
+          fs.writeFileSync(envPath, raw);
+          console.log(chalk.gray(`\n✓ 已切换到 ${chalk.white(next)}（已保存，下次启动沿用）\n`));
+        } catch {
+          console.log(chalk.gray(`\n✓ 已切换到 ${chalk.white(next)}（仅本次会话，.env 写入失败）\n`));
+        }
         ask();
         return;
       }
