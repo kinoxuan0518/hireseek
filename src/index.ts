@@ -143,7 +143,21 @@ async function main(): Promise<void> {
   } else if (command === 'run') {
     // 检查是否使用计划模式
     const usePlan = args.includes('--plan') || args.includes('-p');
-    const channelArg = args.find(a => !a.startsWith('-'));
+    // 跳过命令名本身（args[0]='run'），否则自主模式会把 run 当渠道名
+    const channelArg = args.slice(1).find(a => !a.startsWith('-'));
+
+    // 任务运行中可直接敲字插话（Runner 每轮动作前读取介入队列）
+    const { pushIntervention } = await import('./events');
+    const readlineMod = await import('readline');
+    const rlRun = readlineMod.createInterface({ input: process.stdin, output: process.stdout });
+    rlRun.on('line', l => {
+      const t = l.trim();
+      if (t) {
+        pushIntervention(t);
+        console.log(chalk.gray('  ✋ 已收到插话，下个动作前生效'));
+      }
+    });
+    console.log(chalk.gray('💬 任务运行中可直接输入指令插话（如"跳过这个人""只看上海的""停下"），回车发送\n'));
 
     if (!channelArg) {
       // 自主模式：由 active.yaml 决定渠道

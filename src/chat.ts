@@ -1819,6 +1819,7 @@ function buildSystemPrompt(): string {
 4. **长任务每完成一批（约 5 人）主动汇报一次**：已触达名单、跳过原因、剩余权益、下一步。让用户随时知道进度，而不是闷头跑。
 5. **风控红线由代码强制执行**（打招呼 ≥5 秒间隔、每日上限硬终止），你只需在触发时向用户解释发生了什么。
 6. **需要用户做决定时用 ask_user_choice 弹选择器**——选模式、选渠道、确认下一步，都给 2-6 个选项让用户方向键选，不要抛开放式问题或表格让用户打字回答。
+7. **用户可以随时插话**——执行长任务时收到 [用户插话] 消息，立即按新指示调整（跳过某人、换条件、停止某步），调整后继续任务，不要忽略也不要从头再来；收到暂停消息则立刻停手汇报。
 
 ### 风格
 直接、专业、有温度。像一个真正懂招聘、又在乎结果的伙伴在聊天，不是客服，不是助手，是伙伴。
@@ -2096,6 +2097,10 @@ export async function startChat(): Promise<void> {
   let generating: AbortController | null = null;
   let lastSigint = 0;
   let exiting = false;
+  // 长任务插嘴/暂停状态
+  let toolLoopActive = false;
+  let interruptRequested = false;
+  const pendingInterventions: string[] = [];
 
   const gracefulExit = async (): Promise<void> => {
     if (exiting) return;
@@ -2113,6 +2118,12 @@ export async function startChat(): Promise<void> {
   rl.on('SIGINT', () => {
     if (generating) {
       generating.abort(); // 打断当前生成，回到输入框
+      return;
+    }
+    if (toolLoopActive) {
+      // 工具执行中（如浏览器动作等待）→ 请求暂停，当前动作完成后停下
+      interruptRequested = true;
+      console.log(chalk.yellow('\n⏸ 正在暂停任务（当前动作完成后停下）...'));
       return;
     }
     const now = Date.now();
@@ -2468,12 +2479,19 @@ export async function startChat(): Promise<void> {
         messages.push(...result.messages);
       }
 
-      try {
-        console.log('');
+      // 长任务期间用户可以直接敲字插话（无需等任务结束）
+      const onIntervene = (line: string): void => {
+        const t = line.trim();
+        if (!t) return;
+        pendingInterventions.push(t);
+        console.log(chalk.gray('  ✋ 已收到插话，当前动作完成后立即生效'));
+      };
+
+      /** 一个完整回合：流式生成 + 工具循环（含暂停/插话处理） */
+      const runTurn = async (): Promise<void> => {
         let msg = await streamRound();
         messages.push(msg);
 
-        // 处理工具调用（每轮工具结果回传后继续流式生成）
         while (msg.tool_calls && msg.tool_calls.length > 0) {
           const toolResults: OpenAI.ChatCompletionToolMessageParam[] = [];
 
@@ -2486,8 +2504,43 @@ export async function startChat(): Promise<void> {
 
           messages.push(...toolResults);
 
+          // Ctrl+C 暂停：停下任务，简短汇报后把控制权还给用户
+          if (interruptRequested) {
+            interruptRequested = false;
+            messages.push({
+              role: 'user',
+              content: '[系统] 用户暂停了任务。立即停止当前流程（不要再调用工具），用 2-3 句话汇报目前进度（已完成什么/进行到哪），然后等待用户指示。',
+            });
+            msg = await streamRound();
+            messages.push(msg);
+            break;
+          }
+
+          // 用户插话：注入对话，模型下一轮立即响应
+          if (pendingInterventions.length > 0) {
+            const note = pendingInterventions.splice(0)
+              .map(s => `[用户插话] ${s}`).join('\n');
+            messages.push({ role: 'user', content: note });
+          }
+
           msg = await streamRound();
           messages.push(msg);
+        }
+      };
+
+      try {
+        console.log('');
+        toolLoopActive = true;
+        rl.on('line', onIntervene);
+
+        await runTurn();
+
+        // 最终回答期间敲入的插话不能丢——作为新回合继续处理
+        while (pendingInterventions.length > 0) {
+          const note = pendingInterventions.splice(0)
+            .map(s => `[用户插话] ${s}`).join('\n');
+          messages.push({ role: 'user', content: note });
+          await runTurn();
         }
 
       } catch (err: any) {
@@ -2496,6 +2549,11 @@ export async function startChat(): Promise<void> {
         } else {
           console.error(chalk.red(`\n出错了: ${err.message}\n`));
         }
+      } finally {
+        rl.off('line', onIntervene);
+        toolLoopActive = false;
+        interruptRequested = false;
+        pendingInterventions.length = 0;
       }
 
       ask();
