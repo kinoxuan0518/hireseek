@@ -2065,7 +2065,7 @@ export async function startChat(): Promise<void> {
   console.log(
     `${chalk.cyan.bold('🔱 HireSeek')} ${chalk.gray(`${model} · ${job?.title ?? '未配置职位'}`)}`,
   );
-  console.log(chalk.gray(`   /help 命令 · /skills 技能 · Ctrl+C 两次退出`));
+  console.log(chalk.gray(`   /help 命令 · /skills 技能 · Esc 打断 · Ctrl+C 两次退出`));
 
   const isFirstTime = !job || job.title === 'AI 算法工程师';
   if (isFirstTime) {
@@ -2141,6 +2141,27 @@ export async function startChat(): Promise<void> {
     if (!exiting) void gracefulExit();
   });
 
+  // Esc 单键中断（CC 同款）：生成中=打断；任务中=暂停；空闲=清空输入行
+  process.stdin.on('keypress', (_s: unknown, key: { name?: string } | undefined) => {
+    if (key?.name !== 'escape') return;
+    if (generating) {
+      generating.abort();
+      return;
+    }
+    if (toolLoopActive) {
+      interruptRequested = true;
+      console.log(chalk.yellow('\n⏸ 正在暂停任务（当前动作完成后停下）...'));
+      return;
+    }
+    // 空闲：清空已敲的半行输入
+    const r = rl as unknown as { line: string; cursor: number; _refreshLine?: () => void };
+    if (r.line) {
+      r.line = '';
+      r.cursor = 0;
+      r._refreshLine?.();
+    }
+  });
+
   const EXIT_WORDS = new Set(['exit', 'quit', 'q', '退出', '/exit', '/quit', '/q']);
 
   const printHelp = (): void => {
@@ -2154,7 +2175,7 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /skills             列出全部可用技能'),
       chalk.gray('  /export [标题]      导出会话      /sessions  查看会话'),
       chalk.gray('  /<技能名> [参数]    直接触发技能，如 /rbt、/找候选人'),
-      chalk.gray('  Ctrl+C              打断正在生成的回复'),
+      chalk.gray('  Esc                 打断生成 / 暂停任务 / 清空输入（Ctrl+C 同效）'),
       '',
     ].join('\n'));
   };
