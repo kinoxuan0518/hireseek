@@ -23,13 +23,13 @@ const MAX_ELEMENTS = 120;
 
 // ── 风控规则（代码层硬约束，不依赖模型遵守 prompt）──────────────────────
 /** 打招呼类按钮的最小点击间隔（毫秒） */
-const GREETING_MIN_INTERVAL_MS = 5000;
+export const GREETING_MIN_INTERVAL_MS = 5000;
 /** 打招呼类按钮文案特征 */
-const GREETING_PATTERN = /打招呼|立即沟通|继续沟通|和Ta聊聊|聊一聊/;
+export const GREETING_PATTERN = /打招呼|立即沟通|继续沟通|和Ta聊聊|聊一聊/;
 /** 每日上限弹窗特征 → 立即硬终止 */
-const DAILY_LIMIT_PATTERN = /今日主动沟通数已达上限|需付费购买|今日沟通已达上限|超出今日限制/;
+export const DAILY_LIMIT_PATTERN = /今日主动沟通数已达上限|需付费购买|今日沟通已达上限|超出今日限制/;
 /** 频率告警特征 → 软退避 10-30 秒 */
-const FREQUENCY_PATTERN = /开聊太频繁|操作太频繁|操作过于频繁|请稍后再试/;
+export const FREQUENCY_PATTERN = /开聊太频繁|操作太频繁|操作过于频繁|请稍后再试/;
 
 // ── 浏览器工具定义（OpenAI function calling 格式）──────────────────────
 const BROWSER_TOOL: OpenAI.ChatCompletionTool = {
@@ -105,7 +105,7 @@ const DOM_GUIDE = `
 跳过人数: <数字>
 `.trim();
 
-interface BrowserAction {
+export interface BrowserAction {
   action: 'snapshot' | 'click' | 'type' | 'press' | 'scroll' | 'goto' | 'back' | 'wait';
   ref?: number;
   text?: string;
@@ -118,7 +118,7 @@ interface BrowserAction {
  * 提取页面文本快照：标记可交互元素 + 收集正文。
  * 在浏览器上下文中执行，给元素写入 data-hs-ref 属性供后续定位。
  */
-async function takeDomSnapshot(page: Page): Promise<string> {
+export async function takeDomSnapshot(page: Page): Promise<string> {
   // tsx/esbuild 的 keepNames 会向 evaluate 回调注入 __name 辅助调用，浏览器端需兜底定义
   await page.evaluate('window.__name = window.__name || ((fn) => fn)');
   const data = await page.evaluate(
@@ -190,12 +190,12 @@ async function takeDomSnapshot(page: Page): Promise<string> {
 }
 
 /** 跨动作的风控状态（每次 runSkill 创建一份） */
-interface RiskGuard {
+export interface RiskGuard {
   lastGreetingAt: number;
 }
 
 /** 执行单个浏览器动作 */
-async function executeDomAction(page: Page, input: BrowserAction, guard: RiskGuard): Promise<void> {
+export async function executeDomAction(page: Page, input: BrowserAction, guard: RiskGuard): Promise<void> {
   const refLocator = (ref: number) => page.locator(`[data-hs-ref="${ref}"]`).first();
 
   switch (input.action) {

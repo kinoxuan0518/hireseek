@@ -1,0 +1,4 @@
+tell application "Google Chrome"
+	set resultText to execute tab 2 of window 1 javascript "var iframe=document.querySelector('iframe'); var doc=iframe.contentDocument || iframe.contentWindow.document; var options=doc.querySelectorAll('.option'); var results=''; for(var i=0;i<options.length;i++) { var t=options[i].innerText.trim(); if(t.indexOf('在校')>=0||t.indexOf('25年')>=0||t.indexOf('26年毕业')>=0||t.indexOf('1年以内')>=0||t.indexOf('1-3年')>=0||t.indexOf('26年后')>=0||t.indexOf('本科')>=0||t.indexOf('硕士')>=0||t.indexOf('博士')>=0||t.indexOf('大模型')>=0||t.indexOf('Agent')>=0||t.indexOf('人工智能')>=0) { results=results+t+'|'+options[i].className+'\\n' } } String(results)"
+	return resultText
+end tell
