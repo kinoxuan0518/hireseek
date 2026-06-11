@@ -67,6 +67,10 @@ async function proactiveCheck(): Promise<void> {
 
 // ── 启动调度器 ────────────────────────────────────────────
 export function startScheduler(): void {
+  // 记录 pid，供 hireseek sched 检测 daemon 存活
+  const { writeDaemonPid, humanizeCron } = require('./schedule-manager') as typeof import('./schedule-manager');
+  writeDaemonPid();
+
   const jobs = [
     { cron: config.schedule.boss,     channel: 'boss' as Channel,     label: 'BOSS直聘'   },
     { cron: config.schedule.maimai,   channel: 'maimai' as Channel,   label: '脉脉'       },
@@ -74,11 +78,19 @@ export function startScheduler(): void {
   ];
 
   for (const job of jobs) {
+    if (job.cron === 'off') {
+      console.log(`  ${job.label.padEnd(20)} → 已关闭`);
+      continue;
+    }
+    if (!cron.validate(job.cron)) {
+      console.error(`  ${job.label.padEnd(20)} → ⚠️ cron 表达式无效，跳过: "${job.cron}"`);
+      continue;
+    }
     cron.schedule(job.cron, () => {
       console.log(`\n[Scheduler] ⏰ 触发: ${job.label}`);
       safeRun(job.channel);
     });
-    console.log(`  ${job.label.padEnd(20)} → ${job.cron}`);
+    console.log(`  ${job.label.padEnd(20)} → ${humanizeCron(job.cron)}（${job.cron}）`);
   }
 
   // 每小时做一次主动检查
@@ -89,16 +101,20 @@ export function startScheduler(): void {
   console.log(`  ${'主动检查'.padEnd(20)} → 每小时`);
 
   // 每周进化：基于一周真实数据复盘并改写话术/筛选规则，报告推飞书
-  cron.schedule(config.schedule.evolve, async () => {
-    console.log('[Scheduler] 🧬 每周进化复盘...');
-    try {
-      const { evolve } = await import('./evolution');
-      await evolve({ notify: true });
-    } catch (e) {
-      console.error('[Scheduler] 进化出错:', e instanceof Error ? e.message : e);
-    }
-  });
-  console.log(`  ${'每周进化'.padEnd(20)} → ${config.schedule.evolve}`);
+  if (config.schedule.evolve !== 'off' && cron.validate(config.schedule.evolve)) {
+    cron.schedule(config.schedule.evolve, async () => {
+      console.log('[Scheduler] 🧬 每周进化复盘...');
+      try {
+        const { evolve } = await import('./evolution');
+        await evolve({ notify: true });
+      } catch (e) {
+        console.error('[Scheduler] 进化出错:', e instanceof Error ? e.message : e);
+      }
+    });
+    console.log(`  ${'每周进化'.padEnd(20)} → ${humanizeCron(config.schedule.evolve)}（${config.schedule.evolve}）`);
+  } else {
+    console.log(`  ${'每周进化'.padEnd(20)} → 已关闭`);
+  }
 
   // 启动后立即跑一次，别等到整点
   setTimeout(() => proactiveCheck().catch(() => {}), 5000);
