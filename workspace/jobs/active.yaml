@@ -1,5 +1,5 @@
 # 当前激活的招聘职位
-title: AI 工程师
+title: Agent工程师
 department: 技术
 
 requirements:
@@ -13,8 +13,8 @@ requirements:
     - 简历模糊、夸大其词
 
 salary:
-  min: 20000
-  max: 40000
+  min: 30000
+  max: 50000
   unit: 月薪（税前）
 
 channels:

@@ -2077,6 +2077,41 @@ export async function startChat(): Promise<void> {
     ].join('\n'));
   };
 
+  // ── 多行输入：粘贴自动合并 + 反斜杠续行 ───────────────────────────────
+  /**
+   * 粘贴一整段 JD 时终端会把每行作为独立 line 事件瞬间连发。
+   * 收到首行后开 50ms 窗口收集后续行——人类打字间隔远大于 50ms，不会误合并。
+   */
+  const mergePastedLines = (first: string): Promise<string> =>
+    new Promise(resolve => {
+      const lines = [first];
+      let timer: NodeJS.Timeout;
+      const done = (): void => {
+        rl.off('line', onLine);
+        if (lines.length > 1) {
+          console.log(chalk.gray(`  📋 已合并 ${lines.length} 行粘贴内容`));
+        }
+        resolve(lines.join('\n'));
+      };
+      const onLine = (l: string): void => {
+        lines.push(l);
+        clearTimeout(timer);
+        timer = setTimeout(done, 50);
+      };
+      rl.on('line', onLine);
+      timer = setTimeout(done, 50);
+    });
+
+  /** 反斜杠结尾 → 续行输入（… 提示符） */
+  const readFullInput = async (first: string): Promise<string> => {
+    let text = (await mergePastedLines(first)).trim();
+    while (text.endsWith('\\')) {
+      const more = await new Promise<string>(res => rl.question(chalk.gray('… '), res));
+      text = `${text.slice(0, -1)}\n${await mergePastedLines(more)}`.trim();
+    }
+    return text;
+  };
+
   /** 工具调用的人话显示：HR 看到的是动作含义，不是函数名 */
   const toolLabel = (name: string, args: Record<string, unknown>): string => {
     const short = (v: unknown, n = 40) => String(v ?? '').slice(0, n);
@@ -2158,12 +2193,12 @@ export async function startChat(): Promise<void> {
       if (process.stdout.isTTY) process.stdout.write('\x1b[J');
       menuShown = false;
 
-      const text = input.trim();
+      const text = await readFullInput(input);
       if (!text) { ask(); return; }
 
-      // 写入跨会话历史（命令和对话都记）
+      // 写入跨会话历史（多行压平成单行，↑ 调出时仍可直接复用）
       try {
-        fs.appendFileSync(historyFile, text + '\n');
+        fs.appendFileSync(historyFile, text.replace(/\n/g, ' ') + '\n');
       } catch { /* 历史写入失败不影响对话 */ }
 
       // 退出命令
