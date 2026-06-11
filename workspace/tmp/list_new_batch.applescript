@@ -1,0 +1,4 @@
+tell application "Google Chrome"
+	set resultText to execute tab 2 of window 1 javascript "var iframe=document.querySelector('iframe'); var doc=iframe.contentDocument||iframe.contentWindow.document; var cards=doc.querySelectorAll('li'); var result=''; for(var ci=0;ci<cards.length;ci++){var nameEl=cards[ci].querySelector('.name'); if(!nameEl){continue} var name=nameEl.innerText.trim(); var btns=cards[ci].querySelectorAll('[class*=btn]'); var btnText=''; for(var bi=0;bi<btns.length;bi++){var t=btns[bi].innerText.trim(); if(t=='打招呼'||t=='继续沟通'||t=='已沟通'){btnText=t;break}} if(btnText==''){btnText='other'} result=result+name+':'+btnText+'\\n'} String(result)"
+	return resultText
+end tell

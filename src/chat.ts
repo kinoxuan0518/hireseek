@@ -114,6 +114,58 @@ const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'browser_connect',
+      description:
+        '连接浏览器（优先接管用户已登录的 Chrome）。操作 BOSS直聘/脉脉等页面前必须先调用一次。' +
+        '可传 url_hint 按关键词选标签页（如 "zhipin"、"maimai"）。返回连接状态和当前页面。',
+      parameters: {
+        type: 'object',
+        properties: {
+          url_hint: { type: 'string', description: '标签页 URL/标题关键词，如 zhipin、maimai' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_snapshot',
+      description:
+        '获取当前页面的文本快照：URL、标题、可交互元素清单（[ref=N] 标注）、正文摘要。' +
+        '点击/输入前先用它确认元素 ref。页面跳转后旧 ref 失效，需重新快照。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_act',
+      description:
+        '执行一个浏览器动作并返回最新快照。动作：click（点元素，需 ref）、type（输入文字，需 ref+text）、' +
+        'press（按键如 Enter）、scroll（滚动）、goto（跳转 URL）、back、wait（等待毫秒）。' +
+        '内置风控：打招呼自动节流 ≥5 秒、每日上限自动硬终止、频率告警自动提示退避。' +
+        '操控浏览器一律用此工具，禁止用 run_shell 写 AppleScript。',
+      parameters: {
+        type: 'object',
+        required: ['action'],
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['click', 'type', 'press', 'scroll', 'goto', 'back', 'wait'],
+            description: '动作类型',
+          },
+          ref: { type: 'number', description: '目标元素 ref（快照中 [ref=N] 的 N），click/type 必填' },
+          text: { type: 'string', description: 'type 的输入内容，或 press 的按键名' },
+          url: { type: 'string', description: 'goto 的目标 URL' },
+          direction: { type: 'string', enum: ['up', 'down'], description: 'scroll 方向' },
+          amount: { type: 'number', description: 'scroll 像素或 wait 毫秒' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'run_sourcing',
       description: '在指定招聘渠道执行 sourcing 任务。不指定渠道时自动根据职位配置决定。',
       parameters: {
@@ -944,6 +996,28 @@ async function executeTool(name: string, args: any): Promise<string> {
       return await evolve({ dryRun: mode === 'dry', notify: mode === 'run' });
     }
 
+    case 'browser_connect': {
+      const { connectBrowser } = await import('./chat-browser');
+      return await connectBrowser(args.url_hint ? String(args.url_hint) : undefined);
+    }
+
+    case 'browser_snapshot': {
+      const { snapshot } = await import('./chat-browser');
+      return await snapshot();
+    }
+
+    case 'browser_act': {
+      const { act } = await import('./chat-browser');
+      return await act({
+        action: args.action,
+        ref: args.ref as number | undefined,
+        text: args.text as string | undefined,
+        url: args.url as string | undefined,
+        direction: args.direction as 'up' | 'down' | undefined,
+        amount: args.amount as number | undefined,
+      });
+    }
+
     case 'use_recruiting_skill': {
       const { listClaudeSkills, getClaudeSkill, skillToPrompt } = await import('./skills/claude-skills');
 
@@ -1669,6 +1743,14 @@ function buildSystemPrompt(): string {
 3. 用户认可方向后，再具体请求所需的 key 或权限
 4. 不要一上来就问"你有 xxx key 吗"——先证明值得要
 
+### HR 体验铁律（用户是 HR，不是工程师）
+
+1. **永远不要让用户做技术操作**——关弹窗、按 Esc、跑命令、改文件都不行。遇到卡点自己换至少 3 种方法重试（换选择器、按 Escape 键、刷新页面重来），全部失败才汇报，并只说业务影响。
+2. **浏览器操作一律用 browser_connect / browser_snapshot / browser_act 工具**，一次调用一个动作。严禁用 run_shell 写 AppleScript 或 JS 文件去操控浏览器——那条路又慢又容易错。
+3. **汇报说招聘语言**：说"已打招呼 5 人（常迈/熊文韬…），今日权益剩 196 次"，不说 SPA / DOM / ref / AppleScript / bodyLen 这类词。技术报错先翻译成业务影响再说，不贴原始错误。
+4. **长任务每完成一批（约 5 人）主动汇报一次**：已触达名单、跳过原因、剩余权益、下一步。让用户随时知道进度，而不是闷头跑。
+5. **风控红线由代码强制执行**（打招呼 ≥5 秒间隔、每日上限硬终止），你只需在触发时向用户解释发生了什么。
+
 ### 风格
 直接、专业、有温度。像一个真正懂招聘、又在乎结果的伙伴在聊天，不是客服，不是助手，是伙伴。
 `.trim();
@@ -1936,6 +2018,42 @@ export async function startChat(): Promise<void> {
     ].join('\n'));
   };
 
+  /** 工具调用的人话显示：HR 看到的是动作含义，不是函数名 */
+  const toolLabel = (name: string, args: Record<string, unknown>): string => {
+    const short = (v: unknown, n = 40) => String(v ?? '').slice(0, n);
+    switch (name) {
+      case 'browser_connect':  return '🌐 连接浏览器';
+      case 'browser_snapshot': return '🌐 读取页面';
+      case 'browser_act': {
+        const a = String(args.action ?? '');
+        if (a === 'click')  return `🌐 点击 [${args.ref}]`;
+        if (a === 'type')   return `🌐 输入「${short(args.text, 20)}」`;
+        if (a === 'goto')   return `🌐 打开 ${short(args.url, 50)}`;
+        if (a === 'press')  return `🌐 按键 ${args.text ?? 'Enter'}`;
+        if (a === 'scroll') return `🌐 滚动页面`;
+        if (a === 'wait')   return `🌐 等待加载`;
+        return `🌐 ${a}`;
+      }
+      case 'use_recruiting_skill':
+        return args.list ? '📋 查看技能清单' : `📋 调用技能「${args.skill_name ?? ''}」`;
+      case 'run_sourcing':     return `🔍 启动寻源${args.channel ? `（${args.channel}）` : ''}`;
+      case 'scan_inbox':       return '📥 扫描收件箱';
+      case 'get_funnel':       return '📊 查看招聘漏斗';
+      case 'update_candidate': return `✏️ 更新候选人 ${short(args.name, 12)}`;
+      case 'list_candidates':  return '👥 查看候选人列表';
+      case 'search_candidate': return `👥 查找候选人 ${short(args.name ?? args.keyword, 12)}`;
+      case 'feishu_recruiting_stats': return '📊 读取飞书招聘数据';
+      case 'web_search':       return `🔎 搜索「${short(args.query, 24)}」`;
+      case 'read_pdf':         return `📄 读取简历 ${short(args.path ?? args.file_path, 36)}`;
+      case 'run_shell':        return `🖥 ${short(args.command, 48)}`;
+      case 'write_file':       return `📝 写入 ${short(args.path ?? args.filename, 36)}`;
+      case 'read_file':        return `📖 读取 ${short(args.path ?? args.filename, 36)}`;
+      case 'remember':         return '🧠 记下偏好';
+      case 'recall_memory':    return '🧠 回忆上下文';
+      default:                 return `⚙ ${name}`;
+    }
+  };
+
   /** 一轮流式请求：边生成边输出，返回完整 message（含工具调用） */
   const streamRound = async (): Promise<OpenAI.Chat.Completions.ChatCompletionMessage> => {
     generating = new AbortController();
@@ -2003,11 +2121,13 @@ export async function startChat(): Promise<void> {
       if (text === '/status') {
         const activeJob = loadActiveJob();
         const { listClaudeSkills } = await import('./skills/claude-skills');
+        const { browserStatus } = await import('./chat-browser');
         console.log([
           '',
           chalk.bold('状态：'),
           chalk.gray(`  模型      ${model}（${config.llm.provider}）`),
           chalk.gray(`  职位      ${activeJob?.title ?? '未配置'}`),
+          chalk.gray(`  浏览器    ${browserStatus()}`),
           chalk.gray(`  数据库    ${db.name}`),
           chalk.gray(`  技能      ${listClaudeSkills().length} 个已接管`),
           chalk.gray(`  上下文    ${messages.length} 条消息`),
@@ -2098,8 +2218,8 @@ export async function startChat(): Promise<void> {
           const toolResults: OpenAI.ChatCompletionToolMessageParam[] = [];
 
           for (const call of msg.tool_calls) {
-            console.log(chalk.gray(`  ⚙ ${call.function.name}`));
-            const args   = JSON.parse(call.function.arguments || '{}');
+            const args = JSON.parse(call.function.arguments || '{}');
+            console.log(chalk.gray(`  ${toolLabel(call.function.name, args)}`));
             const result = await executeTool(call.function.name, args);
             toolResults.push({ role: 'tool', tool_call_id: call.id, content: result });
           }
