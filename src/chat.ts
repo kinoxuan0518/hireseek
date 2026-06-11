@@ -1917,10 +1917,76 @@ export async function startChat(): Promise<void> {
     { role: 'system', content: buildSystemPrompt() },
   ];
 
+  // ── CC 风格输入体验：斜杠菜单 / Tab 补全 / 跨会话历史 ─────────────────
+  const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
+    { cmd: '/help', desc: '全部命令' },
+    { cmd: '/status', desc: '模型 / 职位 / 浏览器状态' },
+    { cmd: '/skills', desc: '技能列表' },
+    { cmd: '/clear', desc: '清空对话上下文' },
+    { cmd: '/export', desc: '导出会话' },
+    { cmd: '/sessions', desc: '查看历史会话' },
+    { cmd: '/q', desc: '退出' },
+  ];
+
+  let skillEntries: Array<{ cmd: string; desc: string }> = [];
+  try {
+    const { listSkills } = await import('./skill-system');
+    skillEntries = listSkills().map(s => ({
+      cmd: `/${s.name}`,
+      desc: s.description.replace(/\s+/g, ' ').slice(0, 44),
+    }));
+  } catch { /* 技能加载失败不影响输入 */ }
+
+  const allEntries = (): Array<{ cmd: string; desc: string }> => [...SLASH_COMMANDS, ...skillEntries];
+
+  // 跨会话历史（↑↓ 回溯），存在数据库同目录
+  const historyFile = path.join(path.dirname(config.db.path), 'chat_history.txt');
+  let savedHistory: string[] = [];
+  try {
+    fs.mkdirSync(path.dirname(historyFile), { recursive: true });
+    savedHistory = fs.readFileSync(historyFile, 'utf-8')
+      .split('\n').filter(Boolean).slice(-200).reverse();
+  } catch { /* 无历史文件则从空开始 */ }
+
+  const completer = (line: string): [string[], string] => {
+    if (!line.startsWith('/')) return [[], line];
+    const hits = allEntries().map(e => e.cmd).filter(c => c.startsWith(line));
+    return [hits, line];
+  };
+
   const rl = readline.createInterface({
     input:  process.stdin,
     output: process.stdout,
+    completer,
+    history: savedHistory,
+    historySize: 200,
   });
+
+  // 实时斜杠菜单：输入 / 时在光标下方浮现匹配项（Tab 补全选中）
+  let menuShown = false;
+  const renderSlashMenu = (): void => {
+    if (!process.stdout.isTTY) return;
+    const line = (rl as unknown as { line?: string }).line ?? '';
+
+    if (menuShown) {
+      // 清掉旧菜单：保存光标 → 下一行起清到屏底 → 恢复光标
+      process.stdout.write('\x1b7\n\x1b[J\x1b8');
+      menuShown = false;
+    }
+
+    if (!line.startsWith('/') || line.includes(' ')) return;
+    const hits = allEntries().filter(e => e.cmd.toLowerCase().startsWith(line.toLowerCase())).slice(0, 5);
+    if (hits.length === 0) return;
+
+    process.stdout.write('\x1b7\n\x1b[J');
+    for (const h of hits) {
+      process.stdout.write(chalk.gray(`  ${h.cmd.padEnd(20)} ${h.desc}\n`));
+    }
+    process.stdout.write(chalk.dim('  ⇥ Tab 补全\n'));
+    process.stdout.write('\x1b8');
+    menuShown = true;
+  };
+  process.stdin.on('keypress', () => setImmediate(renderSlashMenu));
 
   // ── 极简启动（CC 风格：安静，信息在需要时出现）──────────────────────
   const job = loadActiveJob();
@@ -2085,9 +2151,20 @@ export async function startChat(): Promise<void> {
 
   const ask = (): void => {
     if (exiting) return;
-    rl.question(`${promptHeader()}\n${chalk.green('❯ ')}`, async (input) => {
+    // 分隔线独立打印：prompt 保持单行，↑↓ 历史回溯时重绘才不会乱
+    console.log(promptHeader());
+    rl.question(chalk.green('❯ '), async (input) => {
+      // 清掉斜杠菜单残留
+      if (process.stdout.isTTY) process.stdout.write('\x1b[J');
+      menuShown = false;
+
       const text = input.trim();
       if (!text) { ask(); return; }
+
+      // 写入跨会话历史（命令和对话都记）
+      try {
+        fs.appendFileSync(historyFile, text + '\n');
+      } catch { /* 历史写入失败不影响对话 */ }
 
       // 退出命令
       if (EXIT_WORDS.has(text.toLowerCase())) {
@@ -2173,12 +2250,27 @@ export async function startChat(): Promise<void> {
       }
 
       // 检查是否是技能调用
-      const { parseSkillInvocation, executeSkill } = await import('./skill-system');
+      const { parseSkillInvocation, executeSkill, loadSkill: loadChatSkill } = await import('./skill-system');
       const skillInvocation = parseSkillInvocation(text);
 
       let userMessage = text;
 
       if (skillInvocation.isSkill) {
+        // 未知斜杠命令本地拦截：给就近推荐，不浪费一次模型调用
+        if (!loadChatSkill(skillInvocation.skillName)) {
+          const near = allEntries()
+            .filter(e => e.cmd.toLowerCase().includes(skillInvocation.skillName.toLowerCase().slice(0, 4)))
+            .slice(0, 5);
+          console.log(chalk.yellow(`\n未找到命令 /${skillInvocation.skillName}`));
+          if (near.length > 0) {
+            console.log(chalk.gray('你是不是想找：'));
+            for (const n of near) console.log(chalk.gray(`  ${n.cmd.padEnd(20)} ${n.desc}`));
+          } else {
+            console.log(chalk.gray('输入 / 后按 Tab 查看全部命令，或 /skills 查看技能列表'));
+          }
+          ask();
+          return;
+        }
         // 执行技能，将技能提示词作为用户消息
         const skillPrompt = executeSkill(skillInvocation.skillName, skillInvocation.args);
         userMessage = skillPrompt;
