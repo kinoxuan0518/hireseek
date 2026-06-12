@@ -1864,6 +1864,15 @@ function buildSystemPrompt(): string {
 直接、专业、有温度。像一个真正懂招聘、又在乎结果的伙伴在聊天，不是客服，不是助手，是伙伴。
 `.trim();
 
+  // 工作状态 STATE（与心跳循环共享的工作记忆：在推进什么、下一步、待确认）
+  let stateCtx = '';
+  try {
+    const { readState } = require('./heartbeat') as typeof import('./heartbeat');
+    stateCtx = `## 当前工作状态（STATE，与心跳循环共享）\n\n${readState()}\n\n对话中得知新的进展、决定或用户授权时，主动建议更新 STATE（用户可用 /state 查看）。`;
+  } catch {
+    // STATE 不可用时跳过
+  }
+
   // 招聘技能目录（来自 ~/.claude/skills 及插件）
   let skillsCtx = '';
   try {
@@ -1876,7 +1885,7 @@ function buildSystemPrompt(): string {
     // 技能目录不可用时跳过
   }
 
-  return [soul, wisdom, jobCtx, memory, convMem, autoMemory, skillsCtx, chatGuide].filter(Boolean).join('\n\n---\n\n');
+  return [soul, wisdom, jobCtx, stateCtx, memory, convMem, autoMemory, skillsCtx, chatGuide].filter(Boolean).join('\n\n---\n\n');
 }
 
 // ── 对话记忆保存 ─────────────────────────────────────────
@@ -2033,6 +2042,7 @@ export async function startChat(): Promise<void> {
     { cmd: '/skills', desc: '技能列表' },
     { cmd: '/model', desc: '切换模型（flash/pro/自定义）' },
     { cmd: '/tasks', desc: '后台任务面板（stop <id> 停止）' },
+    { cmd: '/state', desc: '工作状态（与心跳循环共享）' },
     { cmd: '/clear', desc: '清空对话上下文' },
     { cmd: '/export', desc: '导出会话' },
     { cmd: '/sessions', desc: '查看历史会话' },
@@ -2473,6 +2483,15 @@ export async function startChat(): Promise<void> {
         } catch {
           console.log(chalk.gray(`\n✓ 已切换到 ${chalk.white(next)}（仅本次会话，.env 写入失败）\n`));
         }
+        ask();
+        return;
+      }
+
+      // 工作状态（与心跳循环共享）
+      if (text === '/state') {
+        const { readState, heartbeatHistory } = await import('./heartbeat');
+        console.log('\n📋 ' + readState());
+        console.log(chalk.gray('\n💓 最近心跳：\n' + heartbeatHistory(5) + '\n'));
         ask();
         return;
       }

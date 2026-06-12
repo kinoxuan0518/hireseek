@@ -95,6 +95,8 @@ export const config = {
     followup: process.env.SCHEDULE_FOLLOWUP || '0 14 * * 1-5',
     // 每周五 18:00 自动复盘进化（基于一周真实数据）
     evolve:   process.env.SCHEDULE_EVOLVE   || '0 18 * * 5',
+    // 心跳主动决策循环：工作日白天每 30 分钟醒来一次，自主判断该做什么
+    heartbeat: process.env.SCHEDULE_HEARTBEAT || '*/30 9-18 * * 1-5',
   },
 };
 

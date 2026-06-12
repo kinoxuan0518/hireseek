@@ -40,6 +40,9 @@ const USAGE = `
   hireseek evo dry             只出复盘报告，不落盘
   hireseek evo back            回滚最近一次进化
   hireseek evo log             进化历史与效果对比
+  hireseek beat                手动跑一次心跳决策（主动性循环）
+  hireseek beat dry            只看决策不执行
+  hireseek beat log            心跳历史
   hireseek sched               查看定时计划（人话时间 + 下次/上次执行）
   hireseek sched set <任务> "<cron>"  修改计划，如 sched set boss "0 8 * * 1-5"
   hireseek sched off|on <任务>  关闭/恢复某项计划
@@ -251,6 +254,26 @@ async function main(): Promise<void> {
       console.log(chalk.cyan(`\n🧬 开始进化复盘${dryRun ? '（dry-run）' : ''}...\n`));
       const report = await evolve({ dryRun, notify: !dryRun });
       console.log(report);
+    }
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'beat' || command === 'heartbeat') {
+    const { runHeartbeat, heartbeatHistory, readState } = await import('./heartbeat');
+    const sub = args[1];
+
+    if (sub === 'log') {
+      console.log(chalk.cyan('\n💓 心跳历史\n'));
+      console.log(heartbeatHistory());
+      console.log(chalk.cyan('\n📋 当前 STATE\n'));
+      console.log(readState());
+    } else {
+      const dryRun = sub === 'dry';
+      console.log(chalk.cyan(`\n💓 心跳决策中${dryRun ? '（dry-run）' : ''}...\n`));
+      const r = await runHeartbeat({ dryRun });
+      console.log(`决策：${chalk.bold(r.decision.action)}${r.decision.detail ? ` → ${r.decision.detail.slice(0, 120)}` : ''}`);
+      console.log(`理由：${r.decision.reason}`);
+      console.log(`结果：${r.outcome}\n`);
     }
     db.close();
     process.exit(0);

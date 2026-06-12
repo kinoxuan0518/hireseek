@@ -14,17 +14,18 @@ import { db } from './db';
 
 export interface ScheduleTask {
   /** 任务标识（env 后缀小写） */
-  name: 'boss' | 'maimai' | 'followup' | 'evolve';
+  name: 'boss' | 'maimai' | 'followup' | 'evolve' | 'heartbeat';
   label: string;
   envKey: string;
   defaultCron: string;
 }
 
 export const SCHEDULE_TASKS: ScheduleTask[] = [
-  { name: 'boss',     label: 'BOSS直聘寻源', envKey: 'SCHEDULE_BOSS',     defaultCron: '0 9 * * 1-5' },
-  { name: 'maimai',   label: '脉脉寻源',     envKey: 'SCHEDULE_MAIMAI',   defaultCron: '0 10 * * 1-5' },
-  { name: 'followup', label: '跟进未回复',   envKey: 'SCHEDULE_FOLLOWUP', defaultCron: '0 14 * * 1-5' },
-  { name: 'evolve',   label: '每周进化复盘', envKey: 'SCHEDULE_EVOLVE',   defaultCron: '0 18 * * 5' },
+  { name: 'boss',      label: 'BOSS直聘寻源', envKey: 'SCHEDULE_BOSS',      defaultCron: '0 9 * * 1-5' },
+  { name: 'maimai',    label: '脉脉寻源',     envKey: 'SCHEDULE_MAIMAI',    defaultCron: '0 10 * * 1-5' },
+  { name: 'followup',  label: '跟进未回复',   envKey: 'SCHEDULE_FOLLOWUP',  defaultCron: '0 14 * * 1-5' },
+  { name: 'evolve',    label: '每周进化复盘', envKey: 'SCHEDULE_EVOLVE',    defaultCron: '0 18 * * 5' },
+  { name: 'heartbeat', label: '心跳决策',     envKey: 'SCHEDULE_HEARTBEAT', defaultCron: '*/30 9-18 * * 1-5' },
 ];
 
 export function currentCron(task: ScheduleTask): string {
@@ -52,11 +53,21 @@ function dowLabel(dow: string): string {
 /** 常见 cron 模式转人话；复杂表达式原样返回 */
 export function humanizeCron(expr: string): string {
   if (expr === 'off') return '已关闭';
-  const m = expr.trim().match(/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+(\S+)$/);
-  if (!m) return expr;
-  const [, min, hour, dow] = m;
-  const time = `${hour.padStart(2, '0')}:${min.padStart(2, '0')}`;
-  return `${dowLabel(dow)} ${time}`;
+
+  const fixed = expr.trim().match(/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+(\S+)$/);
+  if (fixed) {
+    const [, min, hour, dow] = fixed;
+    return `${dowLabel(dow)} ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`;
+  }
+
+  // 间隔型：*/30 9-18 * * 1-5 → 工作日 9-18点 每30分钟
+  const interval = expr.trim().match(/^\*\/(\d{1,2})\s+(\d{1,2})-(\d{1,2})\s+\*\s+\*\s+(\S+)$/);
+  if (interval) {
+    const [, every, h1, h2, dow] = interval;
+    return `${dowLabel(dow)} ${h1}-${h2}点 每${every}分钟`;
+  }
+
+  return expr;
 }
 
 /** 计算下次执行时间（仅支持 分 时 * * 周 的固定模式，其余返回 null） */
@@ -89,6 +100,12 @@ export function nextRun(expr: string): Date | null {
 
 function lastRunOf(task: ScheduleTask): string {
   try {
+    if (task.name === 'heartbeat') {
+      const row = db.prepare(
+        `SELECT action, created_at FROM heartbeat_log ORDER BY id DESC LIMIT 1`,
+      ).get() as { action: string; created_at: string } | undefined;
+      return row ? `${row.created_at.slice(5, 16)}（${row.action}）` : '从未';
+    }
     if (task.name === 'evolve') {
       const row = db.prepare(
         `SELECT created_at FROM evolution_log ORDER BY id DESC LIMIT 1`,

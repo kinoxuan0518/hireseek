@@ -93,12 +93,31 @@ export function startScheduler(): void {
     console.log(`  ${job.label.padEnd(20)} → ${humanizeCron(job.cron)}（${job.cron}）`);
   }
 
-  // 每小时做一次主动检查
-  cron.schedule('0 * * * *', () => {
-    console.log('[Scheduler] 🔍 主动检查...');
-    proactiveCheck().catch(e => console.error('[Scheduler] 检查出错:', e.message));
-  });
-  console.log(`  ${'主动检查'.padEnd(20)} → 每小时`);
+  // 心跳主动决策循环（daemon 哲学）：醒来 → 读 STATE+信号 → 自主决定当下最有价值的事
+  if (config.schedule.heartbeat !== 'off' && cron.validate(config.schedule.heartbeat)) {
+    cron.schedule(config.schedule.heartbeat, async () => {
+      console.log('[Scheduler] 💓 心跳决策...');
+      try {
+        const { runHeartbeat } = await import('./heartbeat');
+        const r = await runHeartbeat();
+        console.log(`[Heartbeat] ${r.decision.action}：${r.outcome}`);
+      } catch (e) {
+        console.error('[Heartbeat] 出错:', e instanceof Error ? e.message : e);
+      }
+    });
+    console.log(`  ${'心跳决策'.padEnd(20)} → ${humanizeCron(config.schedule.heartbeat)}（${config.schedule.heartbeat}）`);
+  } else {
+    console.log(`  ${'心跳决策'.padEnd(20)} → 已关闭`);
+  }
+
+  // 兜底主动检查（心跳关闭时仍保留基础提醒）
+  if (config.schedule.heartbeat === 'off') {
+    cron.schedule('0 * * * *', () => {
+      console.log('[Scheduler] 🔍 主动检查...');
+      proactiveCheck().catch(e => console.error('[Scheduler] 检查出错:', e.message));
+    });
+    console.log(`  ${'主动检查'.padEnd(20)} → 每小时`);
+  }
 
   // 每周进化：基于一周真实数据复盘并改写话术/筛选规则，报告推飞书
   if (config.schedule.evolve !== 'off' && cron.validate(config.schedule.evolve)) {
