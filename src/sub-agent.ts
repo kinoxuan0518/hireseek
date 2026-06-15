@@ -49,7 +49,7 @@ const ALLOWED_TOOLS = new Set([
   'browser_connect', 'browser_snapshot', 'browser_act',
   'run_shell', 'read_file', 'write_file', 'glob', 'grep',
   'web_search', 'read_pdf',
-  'list_candidates', 'search_candidate', 'update_candidate', 'get_funnel',
+  'list_candidates', 'search_candidate', 'search_candidates', 'log_candidate_note', 'update_candidate', 'get_funnel',
   'feishu_recruiting_stats', 'use_recruiting_skill', 'manage_schedule',
 ]);
 

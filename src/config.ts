@@ -76,6 +76,15 @@ export const config = {
       appToken: process.env.FEISHU_BITABLE_APP_TOKEN || '',
       tableId:  process.env.FEISHU_BITABLE_TABLE_ID || '',
     },
+    // 双向 Bot：长连接事件订阅（无需公网回调），对话即指挥 HireSeek
+    bot: {
+      enabled: process.env.FEISHU_BOT_ENABLED === 'true',
+      // 限定只响应这些用户（open_id，逗号分隔）；留空=不限制
+      allowUsers: (process.env.FEISHU_BOT_ALLOW_USERS || '')
+        .split(',').map(s => s.trim()).filter(Boolean),
+      // 心跳/后台任务/调度通知主动推送到此 chat_id（留空=不主动推送）
+      notifyChatId: process.env.FEISHU_BOT_NOTIFY_CHAT_ID || '',
+    },
   },
   browser: {
     headless: process.env.BROWSER_HEADLESS === 'true',

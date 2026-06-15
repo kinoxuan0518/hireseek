@@ -46,7 +46,11 @@ const USAGE = `
   hireseek sched               查看定时计划（人话时间 + 下次/上次执行）
   hireseek sched set <任务> "<cron>"  修改计划，如 sched set boss "0 8 * * 1-5"
   hireseek sched off|on <任务>  关闭/恢复某项计划
-  hireseek start               启动定时守护进程
+  hireseek start               启动定时守护进程（前台）
+  hireseek daemon run          常驻守护进程：调度 + 飞书 Bot（前台运行）
+  hireseek daemon install      安装为开机自启服务（launchd，崩溃自拉起）
+  hireseek daemon uninstall    卸载开机自启服务
+  hireseek daemon status       查看守护进程运行状态
 
 渠道: boss | maimai | linkedin | followup
 状态: replied | interviewed | offered | joined | rejected | dropped
@@ -308,6 +312,29 @@ async function main(): Promise<void> {
       db.close();
       process.exit(0);
     });
+
+  } else if (command === 'daemon') {
+    const sub = args[1] || 'run';
+    const d = await import('./daemon');
+    if (sub === 'run') {
+      await d.runDaemon();           // 常驻，不退出
+    } else if (sub === 'install') {
+      d.installDaemon();
+      db.close();
+      process.exit(0);
+    } else if (sub === 'uninstall') {
+      d.uninstallDaemon();
+      db.close();
+      process.exit(0);
+    } else if (sub === 'status') {
+      d.daemonStatus();
+      db.close();
+      process.exit(0);
+    } else {
+      console.log(chalk.yellow('\n用法: hireseek daemon [run | install | uninstall | status]\n'));
+      db.close();
+      process.exit(0);
+    }
 
   } else {
     console.log(USAGE);

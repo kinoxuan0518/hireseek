@@ -13,8 +13,17 @@ export async function notify(title: string, body: string): Promise<void> {
   const titleEsc = title.replace(/"/g, '\\"');
   exec(`osascript -e 'display notification "${escaped}" with title "${titleEsc}" sound name "Ping"'`);
 
-  // 飞书（如果配置了 webhook）
-  if (config.feishu.webhookUrl) {
+  // 飞书双向 Bot 主动推送（守护进程内运行时，优先走 Bot，能在飞书里直接对话跟进）
+  let pushedViaBot = false;
+  if (config.feishu.bot.enabled && config.feishu.bot.notifyChatId) {
+    try {
+      const { pushToBot } = await import('./channels/feishu-bot');
+      pushedViaBot = await pushToBot(`${title}\n${body}`);
+    } catch { /* Bot 未启动则回退 webhook */ }
+  }
+
+  // 飞书 webhook（未走 Bot 且配置了 webhook 时）
+  if (!pushedViaBot && config.feishu.webhookUrl) {
     await feishuSend(`${title}\n${body}`).catch(() => {});
   }
 

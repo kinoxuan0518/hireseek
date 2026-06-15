@@ -94,6 +94,13 @@ function gatherSignals(): string {
   `).get(jobId) as { n: number };
   if (recent.n === 0) signals.push('⚠️ 最近 3 天没有新触达，漏斗顶部断流');
 
+  // 人才记忆库规模（积累的人脉资产）
+  try {
+    const { memoryOps } = require('./db') as typeof import('./db');
+    const m = memoryOps.stats();
+    signals.push(`人才库累计 ${m.total} 人，其中 ${m.withNotes} 人有沟通笔记`);
+  } catch { /* 人才库统计失败忽略 */ }
+
   // 今日心跳已执行的重动作数
   const acted = db.prepare(`
     SELECT COUNT(*) AS n FROM heartbeat_log

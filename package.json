@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@larksuiteoapi/node-sdk": "^1.66.1",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@types/glob": "^8.1.0",
     "@types/js-yaml": "^4.0.9",

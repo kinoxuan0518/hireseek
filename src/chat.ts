@@ -649,6 +649,40 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'search_candidates',
+      description: '人才记忆库全文检索：用自然语言/关键词在所有候选人（姓名、公司、学校、沟通笔记）里找人，' +
+        '比如"之前聊过的做供应链的人""在宁德时代待过的候选人""提到想看新机会的人"。' +
+        '用于回忆历史接触过的候选人，而不是新寻源。',
+      parameters: {
+        type: 'object',
+        required: ['query'],
+        properties: {
+          query: { type: 'string', description: '检索词，可多个关键词用空格分隔，如"供应链 数字化"' },
+          limit: { type: 'number', description: '返回数量上限，默认 15' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'log_candidate_note',
+      description: '把对某候选人的沟通要点、印象、跟进结论沉淀进人才记忆库，' +
+        '以后可被 search_candidates 检索到。聊到候选人的实质信息时主动记一笔，' +
+        '比如"张三-期望 40K，看重团队技术氛围，月底前给答复"。',
+      parameters: {
+        type: 'object',
+        required: ['name', 'note'],
+        properties: {
+          name: { type: 'string', description: '候选人姓名（用于定位库中已有候选人）' },
+          note: { type: 'string', description: '要记下的要点，一两句话讲清楚' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'git_status',
       description: '查看当前 git 仓库的状态：当前分支、已修改文件、未跟踪文件等。',
       parameters: { type: 'object', properties: {} },
@@ -1442,6 +1476,34 @@ export async function executeTool(name: string, args: any): Promise<string> {
       ).join('\n');
     }
 
+    case 'search_candidates': {
+      const { memoryOps } = await import('./db');
+      const rows = memoryOps.search(String(args.query ?? ''), Number(args.limit) || 15);
+      if (rows.length === 0) return `人才库里没找到和「${args.query}」相关的候选人。`;
+      const lines = rows.map((c) => {
+        const notes = c.notes ? `\n    笔记：${c.notes.slice(0, 120)}` : '';
+        return `· ${c.name}（${c.company || '未知公司'}${c.school ? '，' + c.school : ''}，${c.channel}）` +
+          ` - ${c.status}，联系于 ${c.contacted_at?.slice(0, 10) ?? '未知'}${notes}`;
+      });
+      return `人才库命中 ${rows.length} 人：\n${lines.join('\n')}`;
+    }
+
+    case 'log_candidate_note': {
+      const { memoryOps } = await import('./db');
+      const name = String(args.name ?? '').trim();
+      const note = String(args.note ?? '').trim();
+      if (!name || !note) return '需要候选人姓名和笔记内容。';
+      const found = candidateOps.findByName.all(`%${name}%`) as any[];
+      if (found.length === 0) {
+        // 库里没有这个人：用姓名生成一个临时指纹挂笔记，后续仍可被检索
+        memoryOps.addNote(`note:${name}`, name, note);
+        return `已记下关于「${name}」的笔记（此人暂不在候选人库中，已单独存档）。`;
+      }
+      const c = found[0];
+      memoryOps.addNote(c.fingerprint, c.name, note);
+      return `已把这条要点记进「${c.name}」的人才档案，以后能被检索到。`;
+    }
+
     case 'git_status': {
       const { getGitStatus, isGitRepo } = await import('./git-helper');
 
@@ -1807,7 +1869,7 @@ export async function executeTool(name: string, args: any): Promise<string> {
 }
 
 // ── 构建系统提示 ─────────────────────────────────────────
-function buildSystemPrompt(): string {
+export function buildSystemPrompt(): string {
   const soul     = loadWorkspaceFile('SOUL.md');
   const wisdom   = loadWorkspaceFile('references/founders-wisdom.md');
   const job      = loadActiveJob();
@@ -2311,6 +2373,8 @@ export async function startChat(): Promise<void> {
       case 'update_candidate': return `✏️ 更新候选人 ${short(args.name, 12)}`;
       case 'list_candidates':  return '👥 查看候选人列表';
       case 'search_candidate': return `👥 查找候选人 ${short(args.name ?? args.keyword, 12)}`;
+      case 'search_candidates': return `🧠 检索人才库「${short(args.query, 18)}」`;
+      case 'log_candidate_note': return `🧠 记录候选人笔记 ${short(args.name, 12)}`;
       case 'feishu_recruiting_stats': return '📊 读取飞书招聘数据';
       case 'web_search':       return `🔎 搜索「${short(args.query, 24)}」`;
       case 'read_pdf':         return `📄 读取简历 ${short(args.path ?? args.file_path, 36)}`;

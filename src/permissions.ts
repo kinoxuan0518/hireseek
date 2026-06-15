@@ -236,6 +236,19 @@ async function askUserPermission(request: ToolCallRequest): Promise<{
 }
 
 /**
+ * 无头模式（daemon / 飞书 Bot）：没有 TTY，无法弹窗等用户敲键。
+ * 此时危险工具若没有已保存的 allow 规则，一律拒绝（fail-safe），
+ * 由 agent 在回复里说明"这步需要在本地终端确认"。
+ */
+let headlessMode = false;
+export function setHeadless(on: boolean): void {
+  headlessMode = on;
+}
+export function isHeadless(): boolean {
+  return headlessMode;
+}
+
+/**
  * 主权限检查函数
  */
 export async function checkPermission(request: ToolCallRequest): Promise<boolean> {
@@ -255,6 +268,12 @@ export async function checkPermission(request: ToolCallRequest): Promise<boolean
 
   if (savedPermission === 'deny') {
     console.log(chalk.red(`\n✗ 工具 ${toolName} 已被拒绝（根据已保存规则）\n`));
+    return false;
+  }
+
+  // 2.5 无头模式：无法弹窗，默认拒绝危险工具（除非上面命中 allow 规则）
+  if (headlessMode) {
+    console.log(chalk.yellow(`[无头] 危险工具 ${toolName} 在守护/Bot 模式下被拒绝（需本地终端确认）`));
     return false;
   }
 

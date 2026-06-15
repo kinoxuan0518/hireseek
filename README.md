@@ -45,6 +45,44 @@ DeepSeek → browser(click, ref=42) → Playwright 精确定位执行 → 新快
 - 或自然语言："帮我处理一下BOSS的消息" → agent 自动匹配技能并执行
 - 技能的 references/ scripts/ 路径自动解析
 
+## 三大究极进化（v3 "常驻 · 在线 · 有记性"）
+
+v2 让 HireSeek 能干活，v3 让它**住下来、在线、记得住人**——不开终端也活着。
+
+### 1. 飞书双向 Bot（对话即指挥）
+
+```
+飞书里发一句话 → 长连接推事件 → 复用 chat 全套工具跑无头 agent → 回复发回飞书
+```
+
+- 用**长连接（WebSocket）事件订阅**，无需公网回调、无需内网穿透，本机直连即可
+- 手机飞书上一句"今天 BOSS 进展怎么样""把做供应链的人列出来""派个后台任务调研张三"，HireSeek 就在守护进程里执行并回话
+- 每个会话独立上下文，支持用户白名单、群聊 @ 响应、`清空` 重置
+- 心跳/调度/后台任务的主动通知优先经此 Bot 推送（可在飞书里直接追问跟进）
+- 开启：自建应用订阅 `im.message.receive_v1`（长连接模式）+ 授 `im:message`/`im:message:send_as_bot`，设 `FEISHU_BOT_ENABLED=true`
+
+### 2. 常驻守护进程（launchd 托管）
+
+```bash
+hireseek daemon install    # 装成开机自启服务，崩溃自拉起
+hireseek daemon status     # 看运行状态 + 最近日志
+hireseek daemon run        # 前台跑（调度 + 飞书 Bot 一个进程）
+hireseek daemon uninstall  # 卸载
+```
+
+一个进程整合**定时调度 + 心跳主动循环 + 飞书 Bot**，用 macOS launchd 托管：随登录自启、崩溃自拉起、日志落 `~/.hireseek/daemon.log`。HireSeek 从"开终端才活着"变成"一直在"。
+
+### 3. 人才记忆库（FTS5 全文检索）
+
+```
+每次沟通沉淀笔记 → 字符级分词索引 → "之前聊过的做供应链的人" 秒级召回
+```
+
+- 新工具 `log_candidate_note`：把对候选人的沟通要点、印象、跟进结论沉淀进库
+- 新工具 `search_candidates`：用**自然语言/关键词**在全部候选人（姓名/公司/学校/笔记）里找人
+- SQLite **FTS5** 索引 + **CJK 字符级 unigram 分词**，中文子串也能命中（不止前缀）；FTS5 不可用时自动降级 LIKE
+- 接触过的人不再是死数据，而是越用越厚的**人脉资产**；心跳信号也接入人才库规模
+
 ## 快速开始
 
 ```bash
@@ -99,8 +137,11 @@ hireseek/
 | `LLM_PROVIDER` | `deepseek` | 可选 deepseek / claude / openai / minimax / custom |
 | `HIRESEEK_DB_PATH` | `~/.hireseek/hireseek.db` | 数据库路径（自动兼容旧 ~/.hireclaw） |
 | `FEISHU_WEBHOOK_URL` | — | 飞书执行报告推送 |
-| `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | — | 飞书自建应用（多维表格读取，进化闭环） |
+| `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | — | 飞书自建应用（多维表格读取 + 双向 Bot） |
 | `FEISHU_BITABLE_APP_TOKEN` / `FEISHU_BITABLE_TABLE_ID` | — | 招聘结果多维表格 |
+| `FEISHU_BOT_ENABLED` | `false` | 设 `true` 开启飞书双向 Bot（长连接，对话即指挥） |
+| `FEISHU_BOT_ALLOW_USERS` | — | 限定可使用 Bot 的用户 open_id（逗号分隔，留空=不限） |
+| `FEISHU_BOT_NOTIFY_CHAT_ID` | — | 心跳/调度/后台任务通知主动推送到的 chat_id |
 | `SCHEDULE_BOSS` 等 | 工作日 9/10/14 点 | cron 调度表达式 |
 
 ## 代码层风控（不依赖模型自觉）
