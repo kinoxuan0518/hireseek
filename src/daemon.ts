@@ -61,13 +61,25 @@ export async function runDaemon(): Promise<void> {
 
   console.log(chalk.green('\n✓ 守护进程就绪，常驻运行中\n'));
 
-  // 优雅退出
-  const shutdown = () => {
-    console.log(chalk.gray('\n[HireSeek] 守护进程退出'));
-    process.exit(0);
+  // 4. 生命体征：上线即报平安，之后每分钟写一次"我还活着"的时间戳
+  const { markAlive, markOffline, reportVitals } = await import('./vitals');
+  markAlive();
+  setInterval(() => markAlive(), 60 * 1000);
+  // 上线主动汇报一次（让你立刻知道它起来了、今天打算干什么）
+  reportVitals('上线了').catch(() => {});
+
+  // 优雅退出：先告诉你"我下线了"，再抹掉存活标记
+  const shutdown = (sig: string) => {
+    console.log(chalk.gray(`\n[HireSeek] 守护进程退出（${sig}）`));
+    reportVitals('下线了').catch(() => {}).finally(() => {
+      markOffline();
+      process.exit(0);
+    });
+    // 兜底：1.5s 内通知没发出去也强制退出
+    setTimeout(() => { markOffline(); process.exit(0); }, 1500);
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   // 永不主动退出（cron + 长连接持有事件循环；兜底再加一个 keep-alive）
   setInterval(() => {}, 1 << 30);
@@ -94,6 +106,7 @@ function buildPlist(): string {
     'FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_WEBHOOK_URL',
     'FEISHU_BOT_ENABLED', 'FEISHU_BOT_ALLOW_USERS', 'FEISHU_BOT_NOTIFY_CHAT_ID',
     'FEISHU_BITABLE_APP_TOKEN', 'FEISHU_BITABLE_TABLE_ID',
+    'SCHEDULE_CHECKIN', 'SCHEDULE_WRAPUP', 'HIRESEEK_CONSOLE_PORT', 'HIRESEEK_CONSOLE_OPEN',
   ];
   const envEntries = envKeys
     .filter(k => process.env[k])

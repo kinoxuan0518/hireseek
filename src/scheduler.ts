@@ -101,6 +101,14 @@ export function startScheduler(): void {
         const { runHeartbeat } = await import('./heartbeat');
         const r = await runHeartbeat();
         console.log(`[Heartbeat] ${r.decision.action}：${r.outcome}`);
+
+        // 生命体征：每次心跳都刷新"报平安"，并记下最近动作
+        const { markAlive, reportVitals } = await import('./vitals');
+        markAlive({ lastAction: `${r.decision.action} — ${r.outcome}`.slice(0, 80) });
+        // 真正执行了"重动作"（跑渠道/派调研）才主动汇报，空闲心跳不打扰
+        if (r.executed && r.decision.action !== 'idle' && r.decision.action !== 'update_state') {
+          await reportVitals('刚做了一件事');
+        }
       } catch (e) {
         console.error('[Heartbeat] 出错:', e instanceof Error ? e.message : e);
       }
@@ -133,6 +141,22 @@ export function startScheduler(): void {
     console.log(`  ${'每周进化'.padEnd(20)} → ${humanizeCron(config.schedule.evolve)}（${config.schedule.evolve}）`);
   } else {
     console.log(`  ${'每周进化'.padEnd(20)} → 已关闭`);
+  }
+
+  // 晨间签到 / 傍晚收工：固定两条主动汇报，形成"它每天都在"的节律安全感
+  const checkin = process.env.SCHEDULE_CHECKIN || '0 9 * * 1-5';
+  const wrapup  = process.env.SCHEDULE_WRAPUP  || '0 19 * * 1-5';
+  if (cron.validate(checkin)) {
+    cron.schedule(checkin, async () => {
+      try { (await import('./vitals')).reportVitals('上班签到').catch(() => {}); } catch { /* 忽略 */ }
+    });
+    console.log(`  ${'上班签到'.padEnd(20)} → ${humanizeCron(checkin)}（${checkin}）`);
+  }
+  if (cron.validate(wrapup)) {
+    cron.schedule(wrapup, async () => {
+      try { (await import('./vitals')).reportVitals('今日收工').catch(() => {}); } catch { /* 忽略 */ }
+    });
+    console.log(`  ${'今日收工'.padEnd(20)} → ${humanizeCron(wrapup)}（${wrapup}）`);
   }
 
   // 启动后立即跑一次，别等到整点

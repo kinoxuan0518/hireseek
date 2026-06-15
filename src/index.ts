@@ -27,6 +27,7 @@ const USAGE = `
 用法:
   hireseek                     对话模式（默认）
   hireseek setup               初始化向导：一步步配置好一切
+  hireseek alive               查岗：一句话报告它在不在、做了什么、下一步（--push 推送一条）
   hireseek console             网页指挥台：打开浏览器就能看见它、打字指挥它
   hireseek dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
   hireseek run                 自主模式：自动决定今天跑哪些渠道
@@ -153,6 +154,17 @@ async function main(): Promise<void> {
     const { startWebConsole } = await import('./web-console');
     startWebConsole({ openBrowser: true });
     process.on('SIGINT', () => { db.close(); process.exit(0); });
+
+  } else if (command === 'alive' || command === 'vitals') {
+    // 查岗：一句话回答"它在不在、做了什么、下一步"。--push 同时主动推一条到飞书/通知
+    const { collectVitals, formatVitals, reportVitals } = await import('./vitals');
+    console.log('\n' + formatVitals(collectVitals()) + '\n');
+    if (args.includes('--push')) {
+      await reportVitals('查岗');
+      console.log(chalk.gray('（已推送一条到你的飞书/系统通知）\n'));
+    }
+    db.close();
+    process.exit(0);
 
   } else if (command === 'run') {
     // 检查是否使用计划模式

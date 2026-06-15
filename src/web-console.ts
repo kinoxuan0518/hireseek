@@ -19,6 +19,7 @@ import { db } from './db';
 import { loadActiveJob } from './skills/loader';
 import { setHeadless } from './permissions';
 import { createSession, runAgentTurn, type AgentSession } from './agent-session';
+import { collectVitals } from './vitals';
 
 const PORT = parseInt(process.env.HIRESEEK_CONSOLE_PORT || '7799', 10);
 
@@ -60,8 +61,15 @@ function collectStatus(): Record<string, unknown> {
     if (r) lastBeat = { action: r.action, reason: (r.reason ?? '').slice(0, 120), at: r.created_at.slice(5, 16) };
   } catch { /* 尚未有心跳表 */ }
 
+  // 生命体征：真实的"在线吗/守护多久/最后报平安/下一步"，而非写死 online:true
+  const vitals = collectVitals();
+
   return {
-    online: true,
+    online: vitals.online,
+    guarding: vitals.guarding,
+    staleness: vitals.staleness,
+    uptime: vitals.uptime,
+    next: vitals.next,
     job: job?.title ?? '（未设置职位）',
     today: today.n,
     goal,
@@ -157,6 +165,12 @@ export function startWebConsole(opts: { openBrowser?: boolean } = {}): void {
   // 指挥台运行在无人值守环境，危险工具默认拒绝（与飞书 Bot 同策略）
   setHeadless(true);
 
+  // 指挥台本身也报平安：单独跑 `hireseek console` 时，生命体征能反映"我在（可达）"
+  void import('./vitals').then(({ markAlive }) => {
+    markAlive();
+    setInterval(() => markAlive(), 60 * 1000);
+  });
+
   server = http.createServer(router);
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
@@ -190,6 +204,7 @@ const HTML = `<!DOCTYPE html>
   .brand h1 { font-size:17px; letter-spacing:.5px; }
   .dot { width:9px; height:9px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px var(--ok); }
   .dot.off { background:#555; box-shadow:none; }
+  .dot.warn { background:#d29922; box-shadow:0 0 8px #d29922; }
   .sub { font-size:12px; color:var(--muted); }
   .card { background:#0e1116; border:1px solid var(--line); border-radius:10px; padding:13px 14px; }
   .card .k { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; }
@@ -228,7 +243,8 @@ const HTML = `<!DOCTYPE html>
 <body>
 <aside>
   <div class="brand"><span class="dot" id="dot"></span><h1>HireSeek 指挥台</h1></div>
-  <div class="sub" id="jobline">加载中…</div>
+  <div class="sub" id="liveline">加载中…</div>
+  <div class="sub" id="jobline"></div>
 
   <div class="card">
     <div class="k">今日触达</div>
@@ -319,8 +335,12 @@ input.addEventListener('input', ()=>{ input.style.height='auto'; input.style.hei
 async function refresh(){
   try{
     const s = await (await fetch('/api/status')).json();
-    document.getElementById('dot').className = 'dot' + (s.online?'':' off');
-    document.getElementById('jobline').textContent = '在岗：' + s.job;
+    const dot = document.getElementById('dot');
+    const live = document.getElementById('liveline');
+    if (s.guarding) { dot.className='dot'; live.textContent = '在线守护中 · 已守护 ' + (s.uptime||'—') + '（报平安 ' + (s.staleness||'刚刚') + '）'; }
+    else if (s.online) { dot.className='dot warn'; live.textContent = '我在，但未常驻守护 · 装 daemon 才会自动跑定时任务'; }
+    else { dot.className='dot off'; live.textContent = '未在守护'; }
+    document.getElementById('jobline').textContent = '在岗：' + s.job + (s.next ? ' · 下一步 '+s.next.label : '');
     document.getElementById('today').textContent = s.today;
     document.getElementById('goal').textContent = s.goal;
     document.getElementById('total').textContent = s.totalCandidates;
