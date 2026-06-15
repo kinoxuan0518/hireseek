@@ -27,6 +27,7 @@ const USAGE = `
 用法:
   hireseek                     对话模式（默认）
   hireseek setup               初始化向导：一步步配置好一切
+  hireseek console             网页指挥台：打开浏览器就能看见它、打字指挥它
   hireseek dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
   hireseek run                 自主模式：自动决定今天跑哪些渠道
   hireseek run --plan          计划模式：先分析生成计划，用户确认后执行
@@ -47,7 +48,7 @@ const USAGE = `
   hireseek sched set <任务> "<cron>"  修改计划，如 sched set boss "0 8 * * 1-5"
   hireseek sched off|on <任务>  关闭/恢复某项计划
   hireseek start               启动定时守护进程（前台）
-  hireseek daemon run          常驻守护进程：调度 + 飞书 Bot（前台运行）
+  hireseek daemon run          常驻守护进程：调度 + 网页指挥台 + 飞书 Bot（前台运行）
   hireseek daemon install      安装为开机自启服务（launchd，崩溃自拉起）
   hireseek daemon uninstall    卸载开机自启服务
   hireseek daemon status       查看守护进程运行状态
@@ -145,6 +146,12 @@ async function main(): Promise<void> {
 
   } else if (command === 'dashboard' || command === 'ui') {
     startDashboard();
+    process.on('SIGINT', () => { db.close(); process.exit(0); });
+
+  } else if (command === 'console' || command === 'panel') {
+    // 网页指挥台：打开浏览器就能看见它、指挥它（不需要守护进程）
+    const { startWebConsole } = await import('./web-console');
+    startWebConsole({ openBrowser: true });
     process.on('SIGINT', () => { db.close(); process.exit(0); });
 
   } else if (command === 'run') {

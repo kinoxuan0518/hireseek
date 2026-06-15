@@ -90,15 +90,29 @@ pnpm install && pnpm build
 
 export DEEPSEEK_API_KEY="sk-..."
 
-# 对话模式（推荐入口）
+# 对话模式（终端入口）
 npx tsx src/index.ts chat
+
+# 网页指挥台（推荐：打开浏览器就能看见它、打字指挥它）
+npx tsx src/index.ts console        # → http://localhost:7799
 
 # 直接执行渠道 sourcing
 npx tsx src/index.ts run boss
 
-# 定时调度（工作日自动跑）
-npx tsx src/index.ts schedule
+# 常驻守护进程：装一次，它就一直活着（调度 + 网页指挥台 + 飞书 Bot）
+npx tsx src/index.ts daemon install   # 开机自启、崩溃自拉起；装完自动打开指挥台
+npx tsx src/index.ts daemon status    # 看它是否在跑
 ```
+
+## 它"住在哪里"——三种看得见的形态
+
+守护进程本身是隐形的后台进程。让它对你"可见、可指挥"的有三处脸面，按门槛从低到高：
+
+1. **网页指挥台**（零配置）：浏览器打开 `localhost:7799`，左边状态卡（今天触达多少 / 招聘漏斗 / 心跳最近在想什么），右边聊天框直接打字指挥它，过程里实时显示"它正在做什么"。手机连同一 WiFi 也能访问本机 IP。
+2. **飞书双向 Bot**（配飞书应用）：把它加进飞书通讯录，手机上发一句"今天进展怎么样"就能指挥，它跑完主动回你。设 `FEISHU_BOT_ENABLED=true`。
+3. **macOS 通知**：它主动找你时弹一下（跟进提醒、任务完成）。
+
+网页指挥台与飞书 Bot 共用同一套 agent 大脑（`src/agent-session.ts`），终端 chat 也是同源——三个入口、一个 HireSeek。
 
 ## 架构
 

@@ -36,7 +36,17 @@ export async function runDaemon(): Promise<void> {
   console.log(chalk.cyan('\n⏰ 定时调度：'));
   startScheduler();
 
-  // 2. 飞书双向 Bot（可选）
+  // 2. 网页指挥台 —— 守护进程的"脸"：零配置、零终端就能看见它、指挥它
+  console.log(chalk.cyan('\n🖥  网页指挥台：'));
+  try {
+    const { startWebConsole } = await import('./web-console');
+    // 守护进程常驻后台，不抢用户焦点，默认不自动弹浏览器（首次安装时由 install 引导）
+    startWebConsole({ openBrowser: process.env.HIRESEEK_CONSOLE_OPEN === 'true' });
+  } catch (err) {
+    console.error(chalk.red('   指挥台启动失败：'), err instanceof Error ? err.message : err);
+  }
+
+  // 3. 飞书双向 Bot（可选）
   if (config.feishu.bot.enabled) {
     console.log(chalk.cyan('\n💬 飞书 Bot：'));
     try {
@@ -162,8 +172,12 @@ export function installDaemon(): void {
   console.log(chalk.gray(`   plist：${PLIST_PATH}`));
   console.log(chalk.gray(`   日志：${LOG_PATH}`));
   console.log(chalk.gray('   现在它会随登录自启、崩溃自拉起。'));
+  console.log(chalk.cyan('\n   👉 打开指挥台就能看见它、指挥它：http://localhost:7799'));
   console.log(chalk.gray('   查看状态：hireseek daemon status'));
   console.log(chalk.gray(`   看日志：tail -f ${LOG_PATH}\n`));
+
+  // 安装完顺手打开指挥台，让用户立刻"看见它活着"
+  setTimeout(() => { try { execSync('open http://localhost:7799'); } catch { /* 无浏览器忽略 */ } }, 1500);
 }
 
 export function uninstallDaemon(): void {

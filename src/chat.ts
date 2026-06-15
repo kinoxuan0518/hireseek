@@ -1015,6 +1015,55 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   },
 ];
 
+// ── 工具调用的人话显示 ───────────────────────────────────
+/** 把工具名+参数翻译成 HR 看得懂的动作含义（终端、网页、飞书共用）。 */
+export function describeToolCall(name: string, args: Record<string, unknown>): string {
+  const short = (v: unknown, n = 40) => String(v ?? '').slice(0, n);
+  switch (name) {
+    case 'browser_connect':  return '🌐 连接浏览器';
+    case 'browser_snapshot': return '🌐 读取页面';
+    case 'browser_act': {
+      const a = String(args.action ?? '');
+      if (a === 'click')  return `🌐 点击 [${args.ref}]`;
+      if (a === 'type')   return `🌐 输入「${short(args.text, 20)}」`;
+      if (a === 'goto')   return `🌐 打开 ${short(args.url, 50)}`;
+      if (a === 'press')  return `🌐 按键 ${args.text ?? 'Enter'}`;
+      if (a === 'scroll') return `🌐 滚动页面`;
+      if (a === 'wait')   return `🌐 等待加载`;
+      return `🌐 ${a}`;
+    }
+    case 'ask_user_choice':  return `🔘 ${short(args.question, 30)}`;
+    case 'spawn_task':       return `🧵 派发后台任务「${short(args.label, 16)}」`;
+    case 'check_tasks':      return '🧵 查看后台任务';
+    case 'manage_schedule': {
+      const a = String(args.action ?? 'list');
+      if (a === 'list') return '⏰ 查看定时计划';
+      if (a === 'disable') return `⏰ 关闭计划「${args.task}」`;
+      if (a === 'enable') return `⏰ 恢复计划「${args.task}」`;
+      return `⏰ 调整计划「${args.task}」`;
+    }
+    case 'use_recruiting_skill':
+      return args.list ? '📋 查看技能清单' : `📋 调用技能「${args.skill_name ?? ''}」`;
+    case 'run_sourcing':     return `🔍 启动寻源${args.channel ? `（${args.channel}）` : ''}`;
+    case 'scan_inbox':       return '📥 扫描收件箱';
+    case 'get_funnel':       return '📊 查看招聘漏斗';
+    case 'update_candidate': return `✏️ 更新候选人 ${short(args.name, 12)}`;
+    case 'list_candidates':  return '👥 查看候选人列表';
+    case 'search_candidate': return `👥 查找候选人 ${short(args.name ?? args.keyword, 12)}`;
+    case 'search_candidates': return `🧠 检索人才库「${short(args.query, 18)}」`;
+    case 'log_candidate_note': return `🧠 记录候选人笔记 ${short(args.name, 12)}`;
+    case 'feishu_recruiting_stats': return '📊 读取飞书招聘数据';
+    case 'web_search':       return `🔎 搜索「${short(args.query, 24)}」`;
+    case 'read_pdf':         return `📄 读取简历 ${short(args.path ?? args.file_path, 36)}`;
+    case 'run_shell':        return `🖥 ${short(args.command, 48)}`;
+    case 'write_file':       return `📝 写入 ${short(args.path ?? args.filename, 36)}`;
+    case 'read_file':        return `📖 读取 ${short(args.path ?? args.filename, 36)}`;
+    case 'remember':         return '🧠 记下偏好';
+    case 'recall_memory':    return '🧠 回忆上下文';
+    default:                 return `⚙ ${name}`;
+  }
+}
+
 // ── 工具执行 ─────────────────────────────────────────────
 export async function executeTool(name: string, args: any): Promise<string> {
   // ── 后台任务 ─────────────────────────────────────────
@@ -2340,52 +2389,7 @@ export async function startChat(): Promise<void> {
   };
 
   /** 工具调用的人话显示：HR 看到的是动作含义，不是函数名 */
-  const toolLabel = (name: string, args: Record<string, unknown>): string => {
-    const short = (v: unknown, n = 40) => String(v ?? '').slice(0, n);
-    switch (name) {
-      case 'browser_connect':  return '🌐 连接浏览器';
-      case 'browser_snapshot': return '🌐 读取页面';
-      case 'browser_act': {
-        const a = String(args.action ?? '');
-        if (a === 'click')  return `🌐 点击 [${args.ref}]`;
-        if (a === 'type')   return `🌐 输入「${short(args.text, 20)}」`;
-        if (a === 'goto')   return `🌐 打开 ${short(args.url, 50)}`;
-        if (a === 'press')  return `🌐 按键 ${args.text ?? 'Enter'}`;
-        if (a === 'scroll') return `🌐 滚动页面`;
-        if (a === 'wait')   return `🌐 等待加载`;
-        return `🌐 ${a}`;
-      }
-      case 'ask_user_choice':  return `🔘 ${short(args.question, 30)}`;
-      case 'spawn_task':       return `🧵 派发后台任务「${short(args.label, 16)}」`;
-      case 'check_tasks':      return '🧵 查看后台任务';
-      case 'manage_schedule': {
-        const a = String(args.action ?? 'list');
-        if (a === 'list') return '⏰ 查看定时计划';
-        if (a === 'disable') return `⏰ 关闭计划「${args.task}」`;
-        if (a === 'enable') return `⏰ 恢复计划「${args.task}」`;
-        return `⏰ 调整计划「${args.task}」`;
-      }
-      case 'use_recruiting_skill':
-        return args.list ? '📋 查看技能清单' : `📋 调用技能「${args.skill_name ?? ''}」`;
-      case 'run_sourcing':     return `🔍 启动寻源${args.channel ? `（${args.channel}）` : ''}`;
-      case 'scan_inbox':       return '📥 扫描收件箱';
-      case 'get_funnel':       return '📊 查看招聘漏斗';
-      case 'update_candidate': return `✏️ 更新候选人 ${short(args.name, 12)}`;
-      case 'list_candidates':  return '👥 查看候选人列表';
-      case 'search_candidate': return `👥 查找候选人 ${short(args.name ?? args.keyword, 12)}`;
-      case 'search_candidates': return `🧠 检索人才库「${short(args.query, 18)}」`;
-      case 'log_candidate_note': return `🧠 记录候选人笔记 ${short(args.name, 12)}`;
-      case 'feishu_recruiting_stats': return '📊 读取飞书招聘数据';
-      case 'web_search':       return `🔎 搜索「${short(args.query, 24)}」`;
-      case 'read_pdf':         return `📄 读取简历 ${short(args.path ?? args.file_path, 36)}`;
-      case 'run_shell':        return `🖥 ${short(args.command, 48)}`;
-      case 'write_file':       return `📝 写入 ${short(args.path ?? args.filename, 36)}`;
-      case 'read_file':        return `📖 读取 ${short(args.path ?? args.filename, 36)}`;
-      case 'remember':         return '🧠 记下偏好';
-      case 'recall_memory':    return '🧠 回忆上下文';
-      default:                 return `⚙ ${name}`;
-    }
-  };
+  const toolLabel = describeToolCall;
 
   /** 一轮流式请求：边生成边输出，返回完整 message（含工具调用） */
   const streamRound = async (): Promise<OpenAI.Chat.Completions.ChatCompletionMessage> => {

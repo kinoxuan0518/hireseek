@@ -16,65 +16,20 @@
  */
 
 import * as lark from '@larksuiteoapi/node-sdk';
-import OpenAI from 'openai';
 import { config } from '../config';
 import { setHeadless } from '../permissions';
-import { buildSystemPrompt, CHAT_TOOLS, executeTool } from '../chat';
+import { createSession, runAgentTurn, type AgentSession } from '../agent-session';
 
-// ── LLM 客户端解析（与 chat 主循环同源，DeepSeek 优先）─────────────────
-function resolveLLM(): { client: OpenAI; model: string } {
-  const usingDeepseek =
-    Boolean(process.env.DEEPSEEK_API_KEY || config.deepseek.apiKey) &&
-    !process.env.CUSTOM_API_KEY;
+// ── 每个飞书会话维护独立的对话历史（共用 agent-session 大脑）─────────────
+const sessions = new Map<string, AgentSession>();
 
-  const apiKey =
-    process.env.DEEPSEEK_API_KEY ||
-    process.env.CUSTOM_API_KEY ||
-    process.env.ANTHROPIC_API_KEY ||
-    process.env.OPENAI_API_KEY ||
-    config.deepseek.apiKey ||
-    config.custom.apiKey ||
-    config.anthropic.apiKey;
-
-  const baseURL = usingDeepseek
-    ? config.deepseek.baseUrl
-    : process.env.CUSTOM_BASE_URL ||
-      process.env.ANTHROPIC_BASE_URL ||
-      config.custom.baseUrl ||
-      config.anthropic.baseUrl ||
-      undefined;
-
-  const model = process.env.LLM_MODEL || config.llm.model;
-  return { client: new OpenAI({ apiKey, baseURL }), model };
-}
-
-// ── 每个飞书会话维护独立的对话历史 ─────────────────────────────────────
-const MAX_HISTORY = 24;       // 系统提示之外保留的最近消息条数
-const MAX_ROUNDS = 30;        // 单次回复内最多 tool-call 轮数
-
-interface Session {
-  messages: OpenAI.ChatCompletionMessageParam[];
-  busy: boolean;
-}
-const sessions = new Map<string, Session>();
-
-function getSession(chatId: string): Session {
+function getSession(chatId: string): AgentSession {
   let s = sessions.get(chatId);
   if (!s) {
-    s = {
-      messages: [{ role: 'system', content: buildSystemPrompt() }],
-      busy: false,
-    };
+    s = createSession();
     sessions.set(chatId, s);
   }
   return s;
-}
-
-function pruneHistory(s: Session): void {
-  if (s.messages.length <= MAX_HISTORY + 1) return;
-  const system = s.messages[0];
-  const recent = s.messages.slice(-MAX_HISTORY);
-  s.messages = [system, { role: 'user', content: '[较早的对话已折叠]' }, ...recent];
 }
 
 // ── IM 发送 ───────────────────────────────────────────────────────────
@@ -113,44 +68,6 @@ export async function pushToBot(text: string): Promise<boolean> {
   if (!chatId || !config.feishu.bot.enabled) return false;
   await sendText(chatId, text);
   return true;
-}
-
-// ── agent 回合：跑一轮含 tool-call 的对话，产出给用户的文字回复 ──────────
-async function runAgentTurn(session: Session, userText: string): Promise<string> {
-  const { client, model } = resolveLLM();
-  const tools = CHAT_TOOLS;
-
-  session.messages.push({ role: 'user', content: userText });
-  pruneHistory(session);
-
-  for (let round = 0; round < MAX_ROUNDS; round++) {
-    const res = await client.chat.completions.create({
-      model,
-      messages: session.messages,
-      tools,
-      tool_choice: 'auto',
-      max_tokens: 4096,
-    });
-
-    const msg = res.choices[0].message;
-    session.messages.push(msg);
-
-    if (!msg.tool_calls || msg.tool_calls.length === 0) {
-      return msg.content ?? '（没有可回复的内容）';
-    }
-
-    for (const call of msg.tool_calls) {
-      let output: string;
-      try {
-        output = await executeTool(call.function.name, JSON.parse(call.function.arguments || '{}'));
-      } catch (err) {
-        output = `工具执行失败：${err instanceof Error ? err.message : err}`;
-      }
-      session.messages.push({ role: 'tool', tool_call_id: call.id, content: output });
-    }
-  }
-
-  return `这件事调用了很多步还没收尾（已达 ${MAX_ROUNDS} 轮上限），我先停一下。要不要把任务拆细一点再让我继续？`;
 }
 
 // ── 消息事件去重（飞书可能重投同一事件）─────────────────────────────────
