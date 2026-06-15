@@ -79,6 +79,7 @@ export interface Vitals {
   lastAction: string | null;
   lastActionAt: string | null;
   lastBeat: { action: string; reason: string; at: string } | null;
+  lastQC: { verdict: string; avgFit: number | null; at: string } | null;
   next: { label: string; at: string; human: string } | null;
 }
 
@@ -135,6 +136,11 @@ export function collectVitals(): Vitals {
     if (r) lastBeat = { action: r.action, reason: (r.reason ?? '').slice(0, 120), at: r.created_at.slice(5, 16) };
   } catch { /* 尚无心跳表 */ }
 
+  let lastQC: Vitals['lastQC'] = null;
+  try {
+    lastQC = (require('./verifier') as typeof import('./verifier')).lastVerification();
+  } catch { /* 验证器未加载/无质检 */ }
+
   return {
     online,
     guarding,
@@ -147,6 +153,7 @@ export function collectVitals(): Vitals {
     lastAction: alive?.lastAction ?? null,
     lastActionAt: alive?.lastActionAt ? ago(alive.lastActionAt) : null,
     lastBeat,
+    lastQC,
     next: soonestNext(),
   };
 }
@@ -168,6 +175,10 @@ export function formatVitals(v: Vitals, trigger?: string): string {
 
   lines.push(`📋 在岗：${v.job}`);
   lines.push(`📊 今天触达 ${v.todayContacted}/${v.goal} 人`);
+  if (v.lastQC) {
+    const icon = v.lastQC.verdict === 'fail' ? '🔴' : v.lastQC.verdict === 'warn' ? '🟡' : '🟢';
+    lines.push(`${icon} 触达质检：${v.lastQC.avgFit != null ? `平均匹配 ${v.lastQC.avgFit} 分` : v.lastQC.verdict}（${v.lastQC.at}）`);
+  }
 
   if (v.lastAction) lines.push(`🔧 最近动作：${v.lastAction}（${v.lastActionAt}）`);
   else if (v.lastBeat) lines.push(`💓 最近心跳：${v.lastBeat.action}（${v.lastBeat.at}）`);

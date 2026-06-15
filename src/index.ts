@@ -27,6 +27,7 @@ const USAGE = `
 用法:
   hireseek                     对话模式（默认）
   hireseek setup               初始化向导：一步步配置好一切
+  hireseek verify              独立质检：换 v4-pro 反向审计今日触达有没有为凑数注水（--push 推送）
   hireseek alive               查岗：一句话报告它在不在、做了什么、下一步（--push 推送一条）
   hireseek console             网页指挥台：打开浏览器就能看见它、打字指挥它
   hireseek dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
@@ -154,6 +155,20 @@ async function main(): Promise<void> {
     const { startWebConsole } = await import('./web-console');
     startWebConsole({ openBrowser: true });
     process.on('SIGINT', () => { db.close(); process.exit(0); });
+
+  } else if (command === 'verify' || command === 'qc') {
+    // 独立质检：换 v4-pro 反向审计今日触达有没有为凑数注水（--push 推送结论）
+    const { verifyRun, formatVerification } = await import('./verifier');
+    console.log(chalk.gray('🔍 独立验证器（deepseek-v4-pro）正在反向质检今日触达…\n'));
+    const v = await verifyRun();
+    console.log(formatVerification(v) + '\n');
+    if (args.includes('--push') && v.verdict !== 'skip') {
+      const { notify } = await import('./notifier');
+      await notify('HireSeek 触达质检', formatVerification(v));
+      console.log(chalk.gray('（已推送一条到你的飞书/系统通知）\n'));
+    }
+    db.close();
+    process.exit(0);
 
   } else if (command === 'alive' || command === 'vitals') {
     // 查岗：一句话回答"它在不在、做了什么、下一步"。--push 同时主动推一条到飞书/通知

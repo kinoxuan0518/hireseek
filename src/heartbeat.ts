@@ -269,7 +269,22 @@ async function execute(d: HeartbeatDecision): Promise<string> {
     case 'run_channel': {
       const { runChannel } = await import('./orchestrator');
       await runChannel(d.detail as 'boss' | 'maimai' | 'followup');
-      return `渠道任务 ${d.detail} 已执行完成`;
+
+      // 做的和验的分开：跑完立刻派独立验证器（换 v4-pro）反向质检本轮触达
+      let verifyNote = '';
+      try {
+        const { verifyRun, formatVerification } = await import('./verifier');
+        const v = await verifyRun();
+        verifyNote = v.verdict === 'skip' ? '' : `；质检：${v.summary}`;
+        // 质检不通过/有隐患 → 主动报给用户（凑数注水正是把触达数当目标的副作用）
+        if (v.verdict === 'fail' || v.verdict === 'warn') {
+          const { notify } = await import('./notifier');
+          await notify('HireSeek 触达质检告警', formatVerification(v));
+        }
+      } catch (err) {
+        verifyNote = `；质检未完成（${err instanceof Error ? err.message : err}）`;
+      }
+      return `渠道任务 ${d.detail} 已执行完成${verifyNote}`;
     }
     case 'spawn_research': {
       const { spawnSubAgent } = await import('./sub-agent');
