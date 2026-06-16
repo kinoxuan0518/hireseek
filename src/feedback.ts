@@ -228,3 +228,62 @@ export function goalBoard(jobId?: string): GoalBoard {
   ];
   return { passed: p, failed: f, passRate, contactedTotal: contacted, calibration, text: lines.join('\n') };
 }
+
+// ── 供给计分板：心跳的"方向盘"——离过面目标还差多少合格供给 ────────────────
+//
+// 目标不是触达数(Goodhart)，而是"合格供给"：经验证器判为达标(fit≥60)的候选人。
+// 心跳据此决策：合格供给不足→寻源；池子见底(刷了很多触达却涨不出合格)→降级换策略；
+// 判断失效(校准 lift≤0)→先去校准"合适"的定义，而不是更快地找错人。
+export interface SupplyBoard {
+  passed: number;
+  inPipeline: number;        // 已触达/已回复、还在等下游结果的人（已推出的供给）
+  contactedToday: number;    // 今日触达（过程量）
+  verifiedToday: number;     // 今日已被验证器打过分的（覆盖度）
+  qualifiedToday: number;    // 今日验证器判达标(fit≥60)的——真·合格供给
+  qualityTarget: number;     // 每日合格供给目标（= daily_goal.quality）
+  poolDrySignal: boolean;    // 触达远多于合格供给 → 疑似池子见底
+  calibrationBroken: boolean;// 校准 lift≤0 且样本够 → "合适"判断失效，需重校
+  calibration: Calibration;
+  text: string;
+}
+
+export function supplyBoard(jobId: string, qualityTarget: number): SupplyBoard {
+  const passed = (db.prepare(`SELECT COUNT(*) n FROM interview_outcomes WHERE job_id=? AND result='passed'`)
+    .get(jobId) as { n: number }).n;
+  const inPipeline = (db.prepare(
+    `SELECT COUNT(*) n FROM candidates WHERE job_id=? AND status IN ('contacted','replied')`,
+  ).get(jobId) as { n: number }).n;
+  const contactedToday = (db.prepare(
+    `SELECT COUNT(*) n FROM candidates WHERE job_id=? AND date(contacted_at)=date('now','localtime')`,
+  ).get(jobId) as { n: number }).n;
+  // 今日已验证 / 其中达标——来自验证器写入的 fit_predictions（真·合格供给）
+  const verifiedToday = (db.prepare(`
+    SELECT COUNT(*) n FROM candidates c
+    JOIN fit_predictions p ON p.fingerprint=c.fingerprint AND p.job_id=c.job_id
+    WHERE c.job_id=? AND date(c.contacted_at)=date('now','localtime')
+  `).get(jobId) as { n: number }).n;
+  const qualifiedToday = (db.prepare(`
+    SELECT COUNT(*) n FROM candidates c
+    JOIN fit_predictions p ON p.fingerprint=c.fingerprint AND p.job_id=c.job_id
+    WHERE c.job_id=? AND date(c.contacted_at)=date('now','localtime') AND p.predicted_fit>=${FIT_THRESHOLD}
+  `).get(jobId) as { n: number }).n;
+
+  const cal = calibrationReport(jobId);
+  // 池子见底：触达不少(≥目标2倍)、合格供给却没凑够，且大多已验证（不是没验导致的低估）
+  const poolDrySignal = contactedToday >= qualityTarget * 2
+    && qualifiedToday < qualityTarget
+    && verifiedToday >= contactedToday * 0.6;
+  const calibrationBroken = cal.lift != null && cal.lift <= 0 && cal.matched >= 5;
+
+  const lines = [
+    `🎯 过面进度：已过面 ${passed} 人${cal.passWhenFit != null ? `（判合适者过面率 ${cal.passWhenFit}%）` : ''}，管线中 ${inPipeline} 人等结果`,
+    `合格供给(今日)：${qualifiedToday}/${qualityTarget} 个达标｜已验证 ${verifiedToday}/${contactedToday} 触达（触达是过程量，不是目标）`,
+    poolDrySignal ? '⚠️ 池子见底信号：刷了不少触达却凑不出合格供给——该降级（放宽画像/换渠道/问用户），别硬刷' : '',
+    calibrationBroken ? '⚠️ 判断失效：校准显示我对「合适」没区分度——最该做的是搞清过面者共性重校，而非找更多' : '',
+  ].filter(Boolean);
+
+  return {
+    passed, inPipeline, contactedToday, verifiedToday, qualifiedToday, qualityTarget,
+    poolDrySignal, calibrationBroken, calibration: cal, text: lines.join('\n'),
+  };
+}

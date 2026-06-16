@@ -60,12 +60,18 @@ function gatherSignals(): string {
   const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
   const signals: string[] = [];
 
-  // 今日触达 vs 目标
-  const today = db.prepare(
-    `SELECT COUNT(*) AS n FROM candidates WHERE date(contacted_at) = date('now', 'localtime')`,
-  ).get() as { n: number };
-  const goal = job?.daily_goal?.contact ?? 30;
-  signals.push(`今日触达 ${today.n}/${goal} 人`);
+  // 方向盘：合格供给 vs 过面目标（不是触达数）——心跳的首要决策依据
+  try {
+    const { supplyBoard } = require('./feedback') as typeof import('./feedback');
+    const qualityTarget = job?.daily_goal?.quality ?? 5;
+    signals.push(supplyBoard(jobId, qualityTarget).text);
+  } catch {
+    // 反馈模块不可用时退回原始触达计数
+    const today = db.prepare(
+      `SELECT COUNT(*) AS n FROM candidates WHERE date(contacted_at) = date('now', 'localtime')`,
+    ).get() as { n: number };
+    signals.push(`今日触达 ${today.n} 人（合格供给信号不可用）`);
+  }
 
   // 今天是否跑过任务
   const ranToday = db.prepare(
@@ -138,13 +144,22 @@ const HEARTBEAT_SYSTEM = `
 - update_state：只更新 STATE（梳理状态，无外部动作）
 - idle：什么都不做。reason 说明判断依据
 
-## 决策原则
+## 决策原则（目标是"合格供给与过面"，不是触达数）
 
-1. 缺什么补什么：今日触达没达标且在工作时间 → 优先 run_channel
-2. 别重复：今天已跑过且达标的渠道不再跑；同样的通知一天只发一次（看 STATE）
-3. 数据驱动：超 7 天未回复的人多 → 建议跟进；漏斗断流 → 优先寻源
-4. 越权的事不做：你不能直接改话术/规则（只能 evolve_dry），不能替用户做承诺
-5. 不确定就 notify_user 把选择权给用户，而不是擅自行动
+你的北极星是**找到能过面的人**，不是刷满触达数。触达只是过程量。按这个顺序判断：
+
+1. **判断失效优先校准**：信号显示"判断失效/校准没区分度"时，最有价值的不是找更多人——
+   那只会更快地找错。优先 notify_user 或 spawn_research 去搞清"过面者的共性"，把"合适"
+   的定义重校。判断都是错的时候，提高产量毫无意义。
+2. **合格供给不足才寻源**：今日合格供给（验证器判达标的人）没到目标、且在工作时间 → run_channel。
+   放心找——验证器会挡住凑数注水，所以你的任务是"找够合格的人"，不是"刷够触达数"。
+3. **池子见底就降级，别硬刷**：信号显示"池子见底"（刷了很多触达却凑不出合格供给）时，
+   不要继续 run_channel 注水。改用 notify_user 告诉用户"这个画像在当前渠道供给见底了，
+   要不要放宽某条硬性要求 / 加个渠道"，把选择权交回去。宁缺毋滥。
+4. **管线别断流**：超 7 天未回复的人多 → 建议跟进（followup）；漏斗断流且供给没满 → 寻源。
+5. **别重复**：今天已跑过且合格供给已够的渠道不再跑；同样的通知一天只发一次（看 STATE）。
+6. **越权不做**：不能直接改话术/规则（只能 evolve_dry），不能替用户做承诺。
+7. 不确定就 notify_user 把选择权给用户，而不是擅自行动。
 
 ## 输出（严格 JSON）
 
@@ -204,12 +219,29 @@ function guard(d: HeartbeatDecision): string | null {
     if (!['boss', 'maimai', 'followup'].includes(d.detail)) {
       return `无效渠道：${d.detail}`;
     }
+    // 目标是"合格供给"而非触达数：合格够了就停（追求过面，不凑数）
     const job = loadActiveJob();
-    const goal = job?.daily_goal?.contact ?? 30;
-    const today = db.prepare(
-      `SELECT COUNT(*) AS n FROM candidates WHERE date(contacted_at) = date('now', 'localtime')`,
-    ).get() as { n: number };
-    if (today.n >= goal) return `今日触达 ${today.n} 已达目标 ${goal}，不再寻源`;
+    const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+    const qualityTarget = job?.daily_goal?.quality ?? 5;
+    try {
+      const { supplyBoard } = require('./feedback') as typeof import('./feedback');
+      const sb = supplyBoard(jobId, qualityTarget);
+      if (sb.qualifiedToday >= qualityTarget) {
+        return `今日合格供给 ${sb.qualifiedToday} 已达过面供给目标 ${qualityTarget}，不再寻源（追求合格而非凑触达数）`;
+      }
+      // 安全上限：触达远超目标却凑不出合格供给 → 池子见底，应降级换策略而非继续刷
+      const rawCeiling = Math.max(job?.daily_goal?.contact ?? 30, qualityTarget * 8);
+      if (sb.contactedToday >= rawCeiling) {
+        return `今日触达 ${sb.contactedToday} 已达安全上限 ${rawCeiling}，但合格供给仅 ${sb.qualifiedToday}/${qualityTarget}——池子见底，请降级（放宽画像/换渠道/问用户）而非继续刷`;
+      }
+    } catch {
+      // 供给信号不可用：退回原始触达上限，防止 runaway
+      const fallbackCap = job?.daily_goal?.contact ?? 30;
+      const today = db.prepare(
+        `SELECT COUNT(*) AS n FROM candidates WHERE date(contacted_at) = date('now', 'localtime')`,
+      ).get() as { n: number };
+      if (today.n >= fallbackCap) return `今日触达 ${today.n} 已达上限 ${fallbackCap}（合格供给信号不可用）`;
+    }
   }
 
   if (d.action === 'run_channel' || d.action === 'spawn_research') {
