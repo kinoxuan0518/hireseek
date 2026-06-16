@@ -35,7 +35,7 @@ db.exec(`
     action     TEXT NOT NULL,
     reason     TEXT,
     detail     TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
   );
 `);
 
@@ -59,7 +59,6 @@ function gatherSignals(): string {
   const job = loadActiveJob();
   const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
   const signals: string[] = [];
-  const hour = new Date().getHours();
 
   // 今日触达 vs 目标
   const today = db.prepare(
@@ -270,19 +269,39 @@ async function execute(d: HeartbeatDecision): Promise<string> {
       const { runChannel } = await import('./orchestrator');
       await runChannel(d.detail as 'boss' | 'maimai' | 'followup');
 
-      // 做的和验的分开：跑完立刻派独立验证器（换 v4-pro）反向质检本轮触达
+      // runChannel 内部吞掉异常并把失败写进 task_runs；据真实状态报结果，别恒报"已完成"
+      const lastRun = db.prepare(
+        `SELECT status, error FROM task_runs WHERE channel = ? ORDER BY id DESC LIMIT 1`,
+      ).get(d.detail) as { status: string; error: string | null } | undefined;
+      if (lastRun && lastRun.status !== 'completed') {
+        return `渠道任务 ${d.detail} 未成功（状态：${lastRun.status}${lastRun.error ? `，${lastRun.error.slice(0, 80)}` : ''}）——本轮不做质检`;
+      }
+
+      // 做的和验的分开：跑完同时上两道验证轴
       let verifyNote = '';
+      // ① 结果轴：独立验证器（换 v4-pro）反向质检本轮触达人选质量
       try {
         const { verifyRun, formatVerification } = await import('./verifier');
         const v = await verifyRun();
-        verifyNote = v.verdict === 'skip' ? '' : `；质检：${v.summary}`;
-        // 质检不通过/有隐患 → 主动报给用户（凑数注水正是把触达数当目标的副作用）
+        verifyNote += v.verdict === 'skip' ? '' : `；质检：${v.summary}`;
         if (v.verdict === 'fail' || v.verdict === 'warn') {
           const { notify } = await import('./notifier');
           await notify('HireSeek 触达质检告警', formatVerification(v));
         }
       } catch (err) {
-        verifyNote = `；质检未完成（${err instanceof Error ? err.message : err}）`;
+        verifyNote += `；质检未完成（${err instanceof Error ? err.message : err}）`;
+      }
+      // ② 过程轴：流程合规验证器审计本轮执行轨迹（用没用筛选项、乱开网页等）
+      try {
+        const { complianceCheck, formatCompliance } = await import('./compliance');
+        const c = await complianceCheck();
+        verifyNote += c.verdict === 'skip' ? '' : `；合规：${c.summary.split('\n')[0]}`;
+        if (c.verdict === 'fail' || c.verdict === 'warn') {
+          const { notify } = await import('./notifier');
+          await notify('HireSeek 流程合规告警', formatCompliance(c));
+        }
+      } catch (err) {
+        verifyNote += `；合规审计未完成（${err instanceof Error ? err.message : err}）`;
       }
       return `渠道任务 ${d.detail} 已执行完成${verifyNote}`;
     }

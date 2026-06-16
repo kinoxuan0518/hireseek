@@ -44,6 +44,14 @@ export const config = {
     /** 复杂推理场景（评估、策略）用更强的 v4-pro；v4-flash 思考模式是低成本替代 */
     reasonerModel: process.env.DEEPSEEK_REASONER_MODEL || 'deepseek-v4-pro',
   },
+  // 验证器（结果质检 / 流程合规）专用模型——"做的和验的分开"的关键：
+  // 默认用 DeepSeek 更强档位 v4-pro；但允许指向**异构厂商**（如 Claude），
+  // 让验证器与执行器的失败模式去相关，才是真正"换了一个脑子"而非只换档。
+  verifier: {
+    apiKey:  process.env.VERIFIER_API_KEY  || process.env.DEEPSEEK_API_KEY || '',
+    baseUrl: process.env.VERIFIER_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+    model:   process.env.VERIFIER_MODEL    || process.env.DEEPSEEK_REASONER_MODEL || 'deepseek-v4-pro',
+  },
   anthropic: {
     apiKey:  process.env.ANTHROPIC_API_KEY || '',
     baseUrl: process.env.ANTHROPIC_BASE_URL || '',

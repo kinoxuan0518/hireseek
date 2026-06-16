@@ -5,6 +5,7 @@
  */
 
 import type OpenAI from 'openai';
+import { repairToolMessageHistory } from './message-integrity';
 
 export interface CompressionOptions {
   maxTokens: number;          // 最大 token 数（触发压缩阈值）
@@ -164,16 +165,17 @@ export function compressConversation(
     },
     ...recentMessages,
   ];
+  const repaired = repairToolMessageHistory(compressed);
 
   // 6. 验证压缩效果
   const originalTokens = estimateTokens(messages);
-  const compressedTokens = estimateTokens(compressed);
+  const compressedTokens = estimateTokens(repaired.messages);
 
   console.log(
     `[Compression] ${originalTokens} tokens → ${compressedTokens} tokens (${Math.round((1 - compressedTokens / originalTokens) * 100)}% 减少)`
   );
 
-  return compressed;
+  return repaired.messages;
 }
 
 /**

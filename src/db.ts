@@ -14,6 +14,9 @@ export const db = new Database(config.db.path);
 
 // WAL 模式，提升并发读写性能
 db.pragma('journal_mode = WAL');
+// 跨进程并发写兜底：daemon（常驻）与 CLI 子命令（verify/feedback/goal）会并发写同一库，
+// 锁等待放宽到 10s，避免短事务因瞬时锁直接抛 SQLITE_BUSY 丢写
+db.pragma('busy_timeout = 10000');
 
 // 初始化 Schema
 db.exec(`

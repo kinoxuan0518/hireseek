@@ -44,6 +44,7 @@ const DEFAULT_SAMPLE = 8;        // 单次抽检上限（控成本）
 export type Verdict = 'pass' | 'warn' | 'fail' | 'skip';
 
 export interface SampleJudgment {
+  fingerprint: string;
   name: string;
   doerScore: number | null;
   fit: number;
@@ -64,6 +65,7 @@ export interface VerificationResult {
 }
 
 interface CandRow {
+  fingerprint: string;
   name: string; school: string | null; company: string | null;
   channel: string; score: number | null; contacted_at: string;
 }
@@ -71,7 +73,7 @@ interface CandRow {
 // ── 取本次要审计的候选人（今日已触达、随机抽样）─────────────────────────
 function pickCandidates(jobId: string, limit: number): CandRow[] {
   return db.prepare(`
-    SELECT name, school, company, channel, score, contacted_at
+    SELECT fingerprint, name, school, company, channel, score, contacted_at
     FROM candidates
     WHERE job_id = ? AND date(contacted_at) = date('now','localtime')
     ORDER BY RANDOM() LIMIT ?
@@ -108,14 +110,19 @@ function parseJudgments(text: string, cands: CandRow[]): SampleJudgment[] {
   const m = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) ?? text.match(/(\[[\s\S]*\])/);
   if (!m) throw new Error(`质检输出无法解析：${text.slice(0, 200)}`);
   const arr = JSON.parse(m[1].trim()) as Array<{ name?: string; fit?: number; reason?: string; padding?: boolean }>;
+  // 优先按 name 对齐（模型可能漏判/重排），对不上再退回下标，避免 A 的理由记到 B 头上
+  const byName = new Map<string, { name?: string; fit?: number; reason?: string; padding?: boolean }>();
+  for (const a of arr) if (a?.name) byName.set(String(a.name).trim(), a);
   return cands.map((c, i) => {
-    const j = arr[i] ?? {};
+    const j = byName.get(c.name.trim()) ?? arr[i] ?? {};
+    const aligned = j === byName.get(c.name.trim());
     const fit = Math.max(0, Math.min(100, Math.round(Number(j.fit ?? 0))));
     return {
+      fingerprint: c.fingerprint,
       name: c.name,
       doerScore: c.score,
       fit,
-      reason: String(j.reason ?? '').slice(0, 120),
+      reason: (String(j.reason ?? '').slice(0, 120)) + (aligned ? '' : '（⚠️未按名对齐，结论需复核）'),
       padding: Boolean(j.padding),
     };
   });
@@ -128,6 +135,18 @@ export async function verifyRun(opts: { sampleSize?: number } = {}): Promise<Ver
   const cands = pickCandidates(jobId, opts.sampleSize ?? DEFAULT_SAMPLE);
 
   if (cands.length === 0) {
+    // 区分"今天确实没跑"与"跑了却没有候选人入库"（落库断链=本该有数据，必须报异常而非假绿灯）
+    const ranToday = (db.prepare(
+      `SELECT COALESCE(SUM(contacted_count),0) AS n FROM task_runs WHERE date(started_at)=date('now','localtime') AND status='completed'`,
+    ).get() as { n: number }).n;
+    if (ranToday > 0) {
+      return {
+        verdict: 'warn', scope: 'today', sampled: 0, avgFit: null,
+        lowFitCount: 0, overGenerousCount: 0, gaming: false,
+        summary: `⚠️ 落库断链：今天 task_runs 记录触达了 ${ranToday} 人，但候选人库里一个都查不到——质检无数据可审，等于在裸奔。请检查 do-er 是否在总结里吐了"已触达候选人清单"、orchestrator 是否落库。`,
+        judgments: [],
+      };
+    }
     return {
       verdict: 'skip', scope: 'today', sampled: 0, avgFit: null,
       lowFitCount: 0, overGenerousCount: 0, gaming: false,
@@ -135,10 +154,10 @@ export async function verifyRun(opts: { sampleSize?: number } = {}): Promise<Ver
     };
   }
 
-  // 换一个更强、且不同于执行用 flash 的脑子来做对抗性重判
-  const client = new OpenAI({ apiKey: config.deepseek.apiKey, baseURL: config.deepseek.baseUrl });
+  // 换一个更强、且（可配）异构于执行器的脑子来做对抗性重判
+  const client = new OpenAI({ apiKey: config.verifier.apiKey, baseURL: config.verifier.baseUrl });
   const res = await client.chat.completions.create({
-    model: config.deepseek.reasonerModel,
+    model: config.verifier.model,
     messages: [
       { role: 'system', content: VERIFIER_SYSTEM },
       { role: 'user', content: buildUserPrompt(job, cands) },
@@ -148,6 +167,14 @@ export async function verifyRun(opts: { sampleSize?: number } = {}): Promise<Ver
   });
 
   const judgments = parseJudgments(res.choices[0]?.message?.content ?? '', cands);
+
+  // 登记每条预测（按 fingerprint），将来与真实过面结果对照，校准"合适"的定义
+  try {
+    const { recordFitPrediction } = await import('./feedback');
+    for (const j of judgments) {
+      recordFitPrediction({ fingerprint: j.fingerprint, name: j.name, jobId, predictedFit: j.fit, doerScore: j.doerScore });
+    }
+  } catch { /* 预测登记失败不影响质检结论 */ }
 
   // ── 聚合 + 代码层 Goodhart 启发式 ────────────────────────────────────
   const avgFit = Math.round(judgments.reduce((s, j) => s + j.fit, 0) / judgments.length);

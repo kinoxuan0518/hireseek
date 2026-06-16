@@ -10,7 +10,42 @@ import { getAccountId, hasStorageState } from './accounts';
 import { generatePlan, confirmPlan } from './planner';
 import { detectErrors } from './error-detector';
 import { retryWithBackoff, saveCheckpoint, loadCheckpoint, removeCheckpoint, waitForUserIntervention } from './retry-handler';
-import type { Channel } from './types';
+import type { Channel, SkillResult } from './types';
+
+/**
+ * 一轮跑完后统一落库：① 结构化候选人(do-er 自评分进库，verifier/漏斗才有数据)
+ * ② 执行轨迹(供流程合规验证器)。两条 run 路径(顺序 runChannel / 并行
+ * runChannelWithPage)都必须调用，否则验证器空转。整体 try/catch，绝不影响主流程。
+ */
+function persistRunResult(runId: number, jobId: string, channel: Channel, result: SkillResult): void {
+  // ① 候选人落库：fingerprint = 姓名|公司|渠道（与 types.ts 约定一致）
+  try {
+    const list = result.contactedList ?? [];
+    const now = dayjs().toISOString();
+    for (const c of list) {
+      if (!c.name) continue;
+      // better-sqlite3 命名参数需要 null（不接受 undefined），故缺失字段显式给 null
+      candidateOps.upsert.run({
+        fingerprint: `${c.name}|${c.company ?? ''}|${channel}`,
+        name: c.name,
+        school: null,
+        company: c.company ?? null,
+        channel,
+        job_id: jobId,
+        status: 'contacted',
+        score: c.score ?? null,
+        contacted_at: now,
+      } as unknown as Parameters<typeof candidateOps.upsert.run>[0]);
+    }
+  } catch (err) {
+    emitLog(`⚠️ 候选人落库失败（不影响任务）：${err instanceof Error ? err.message : err}`);
+  }
+  // ② 执行轨迹落库
+  try {
+    const { saveRunTrace } = require('./compliance') as typeof import('./compliance');
+    saveRunTrace(runId, jobId, channel, result.trace ?? []);
+  } catch { /* 轨迹落库失败不影响主流程 */ }
+}
 
 const TASK_PROMPT = (channelLabel: string) => `
 请开始执行 ${channelLabel} 的招聘 sourcing 任务。
@@ -103,6 +138,9 @@ export async function runChannel(
       skipped_count: result.skipped,
       error: null,
     });
+
+    // 统一落库：结构化候选人（verifier 数据来源）+ 执行轨迹（合规审计来源）
+    persistRunResult(runId, jobId, channel, result);
 
     // 生成反思并存储
     try {
@@ -455,6 +493,9 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
       skipped_count: result.skipped,
       error: null,
     });
+
+    // 统一落库：结构化候选人 + 执行轨迹（并行路径同样必须落，否则验证器空转）
+    persistRunResult(runId, jobId, channel, result);
 
     // 删除检查点（任务已完成）
     removeCheckpoint(jobId, channel, checkpointAccountId);

@@ -13,7 +13,7 @@
 import OpenAI from 'openai';
 import { Page } from 'playwright';
 import { emitLog, popIntervention } from '../events';
-import { parseSkillSummary } from './interface';
+import { parseSkillSummary, parseContactedCandidates } from './interface';
 import type { LLMRunner } from './interface';
 import type { SkillResult } from '../types';
 
@@ -103,6 +103,9 @@ const DOM_GUIDE = `
 输出总结时必须包含：
 触达人数: <数字>
 跳过人数: <数字>
+已触达候选人清单（每个已打招呼的人一行，格式严格为：姓名 | 公司 | 自评分(0-100) | 一句话匹配理由）：
+- 张三 | 字节跳动 | 82 | 2年Agent平台经验，与岗位高度匹配
+（没有触达任何人就写"已触达候选人清单：无"）
 `.trim();
 
 export interface BrowserAction {
@@ -302,7 +305,7 @@ export class DomRunner implements LLMRunner {
       { role: 'user', content: `${task}\n\n## 当前页面快照\n${initSnapshot}` },
     ];
 
-    const result: SkillResult = { contacted: 0, skipped: 0, candidates: [], summary: '' };
+    const result: SkillResult = { contacted: 0, skipped: 0, candidates: [], summary: '', trace: [] };
     const guard: RiskGuard = { lastGreetingAt: 0 };
     let hardStopped = false;
 
@@ -340,6 +343,7 @@ export class DomRunner implements LLMRunner {
         const parsed = parseSkillSummary(finalText);
         result.contacted = parsed.contacted;
         result.skipped = parsed.skipped;
+        result.contactedList = parseContactedCandidates(finalText);
         onProgress?.('✓ 完成');
         break;
       }
@@ -365,10 +369,12 @@ export class DomRunner implements LLMRunner {
         emitLog(actionLog);
 
         let snapshot: string;
+        let stepOk = true;
         try {
           await executeDomAction(page, input, guard);
           snapshot = await takeDomSnapshot(page);
         } catch (err: unknown) {
+          stepOk = false;
           const message = err instanceof Error ? err.message : String(err);
           // page 被关闭时重新获取
           if (message.includes('closed') || message.includes('Target')) {
@@ -379,6 +385,17 @@ export class DomRunner implements LLMRunner {
             snapshot = `[动作执行失败] ${message}\n请根据下方快照调整策略。\n\n${await takeDomSnapshot(page).catch(() => '[快照获取失败]')}`;
           }
         }
+
+        // 加性记录执行轨迹，供流程合规验证器事后审计；绝不影响主流程
+        try {
+          result.trace!.push({
+            seq: result.trace!.length + 1,
+            action: input.action,
+            target: input.url ?? (input.ref != null ? `ref=${input.ref}` : undefined),
+            detail: input.text ? String(input.text).slice(0, 60) : undefined,
+            ok: stepOk,
+          });
+        } catch { /* 轨迹记录失败绝不影响 sourcing */ }
 
         // 风控检测：基于页面快照文本（代码层判定，不依赖模型识别）
         if (DAILY_LIMIT_PATTERN.test(snapshot)) {

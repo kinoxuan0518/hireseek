@@ -9,6 +9,7 @@ import { execSync } from 'child_process';
 import crypto from 'crypto';
 import type OpenAI from 'openai';
 import { config } from './config';
+import { repairToolMessageHistory } from './message-integrity';
 
 export interface RemoteSessionOptions {
   title?: string;
@@ -21,7 +22,9 @@ export interface RemoteSession {
   title: string;
   url: string;
   createdAt: string;
+  updatedAt?: string;
   messageCount: number;
+  conversationMessageCount?: number;
 }
 
 const SESSIONS_DIR = path.join(config.workspace.dir, 'sessions');
@@ -40,6 +43,42 @@ function ensureSessionsDir(): void {
  */
 function generateSessionId(): string {
   return crypto.randomBytes(8).toString('hex');
+}
+
+function writeSessionFiles(
+  sessionId: string,
+  options: RemoteSessionOptions,
+  createdAt = new Date().toISOString(),
+): RemoteSession {
+  ensureSessionsDir();
+
+  const title = options.title || `对话-${new Date().toLocaleDateString('zh-CN')}`;
+  const updatedAt = new Date().toISOString();
+  const repaired = repairToolMessageHistory(options.messages);
+  const messages = repaired.messages;
+
+  const markdownPath = path.join(SESSIONS_DIR, `${sessionId}.md`);
+  const markdownContent = messagesToMarkdown(messages, title);
+  fs.writeFileSync(markdownPath, markdownContent, 'utf-8');
+
+  const jsonPath = path.join(SESSIONS_DIR, `${sessionId}.json`);
+  const jsonContent = JSON.stringify({
+    title,
+    createdAt,
+    updatedAt,
+    messageCount: messages.length,
+    messages,
+  }, null, 2);
+  fs.writeFileSync(jsonPath, jsonContent, 'utf-8');
+
+  return {
+    id: sessionId,
+    title,
+    url: `file://${markdownPath}`,
+    createdAt,
+    updatedAt,
+    messageCount: messages.length,
+  };
 }
 
 /**
@@ -98,28 +137,23 @@ function messagesToJSON(
  * 导出会话到本地文件
  */
 export function exportSession(options: RemoteSessionOptions): RemoteSession {
-  ensureSessionsDir();
-
   const sessionId = generateSessionId();
-  const title = options.title || `对话-${new Date().toLocaleDateString('zh-CN')}`;
+  return writeSessionFiles(sessionId, options);
+}
 
-  // 保存为 Markdown
-  const markdownPath = path.join(SESSIONS_DIR, `${sessionId}.md`);
-  const markdownContent = messagesToMarkdown(options.messages, title);
-  fs.writeFileSync(markdownPath, markdownContent, 'utf-8');
-
-  // 保存为 JSON（便于后续导入）
+/**
+ * 覆盖保存一个固定 ID 的会话快照，用于自动恢复
+ */
+export function saveSessionSnapshot(sessionId: string, options: RemoteSessionOptions): RemoteSession {
   const jsonPath = path.join(SESSIONS_DIR, `${sessionId}.json`);
-  const jsonContent = messagesToJSON(options.messages, title);
-  fs.writeFileSync(jsonPath, jsonContent, 'utf-8');
-
-  return {
-    id: sessionId,
-    title,
-    url: `file://${markdownPath}`,
-    createdAt: new Date().toISOString(),
-    messageCount: options.messages.length,
-  };
+  let createdAt = new Date().toISOString();
+  if (fs.existsSync(jsonPath)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+      if (typeof existing.createdAt === 'string') createdAt = existing.createdAt;
+    } catch { /* 损坏快照直接覆盖 */ }
+  }
+  return writeSessionFiles(sessionId, options, createdAt);
 }
 
 /**
@@ -183,13 +217,16 @@ export function listSessions(): RemoteSession[] {
       const filepath = path.join(SESSIONS_DIR, file);
       const content = fs.readFileSync(filepath, 'utf-8');
       const data = JSON.parse(content);
+      const messages = Array.isArray(data.messages) ? data.messages : [];
 
       sessions.push({
         id: file.replace('.json', ''),
         title: data.title,
         url: `file://${filepath.replace('.json', '.md')}`,
         createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
         messageCount: data.messageCount,
+        conversationMessageCount: messages.filter((m: any) => m?.role !== 'system').length,
       });
     } catch {
       // 跳过无效文件
@@ -197,7 +234,7 @@ export function listSessions(): RemoteSession[] {
   }
 
   return sessions.sort((a, b) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime()
   );
 }
 
@@ -217,10 +254,12 @@ export function loadSession(sessionId: string): {
   try {
     const content = fs.readFileSync(jsonPath, 'utf-8');
     const data = JSON.parse(content);
+    const rawMessages = Array.isArray(data.messages) ? data.messages : [];
+    const repaired = repairToolMessageHistory(rawMessages);
 
     return {
       title: data.title,
-      messages: data.messages,
+      messages: repaired.messages,
     };
   } catch {
     return null;
@@ -301,11 +340,11 @@ export function formatSessionList(sessions: RemoteSession[]): string {
   let output = '会话列表：\n\n';
 
   sessions.forEach((session, index) => {
-    const date = new Date(session.createdAt).toLocaleString('zh-CN');
+    const date = new Date(session.updatedAt ?? session.createdAt).toLocaleString('zh-CN');
     output += `${index + 1}. ${session.title}\n`;
     output += `   ID: ${session.id}\n`;
-    output += `   时间: ${date}\n`;
-    output += `   消息: ${session.messageCount} 条\n`;
+    output += `   更新时间: ${date}\n`;
+    output += `   对话: ${session.conversationMessageCount ?? session.messageCount} 条 / 总消息: ${session.messageCount} 条\n`;
     output += `   文件: ${session.url}\n\n`;
   });
 

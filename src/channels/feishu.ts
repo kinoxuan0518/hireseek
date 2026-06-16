@@ -32,7 +32,8 @@ const FEISHU_API = 'https://open.feishu.cn/open-apis';
 let tokenCache: { token: string; expiresAt: number } | null = null;
 
 async function getTenantAccessToken(): Promise<string> {
-  const { appId, appSecret } = config.feishu;
+  const appId   = process.env.FEISHU_APP_ID   || config.feishu.appId;
+  const appSecret = process.env.FEISHU_APP_SECRET || config.feishu.appSecret;
   if (!appId || !appSecret) {
     throw new Error('未配置 FEISHU_APP_ID / FEISHU_APP_SECRET');
   }
@@ -63,7 +64,9 @@ export interface BitableRecord {
 
 /** 分页拉取多维表格全部记录（上限 maxRecords 条） */
 export async function fetchRecruitingRecords(maxRecords = 500): Promise<BitableRecord[]> {
-  const { appToken, tableId } = config.feishu.bitable;
+  // 优先读 process.env（运行时 update_config 会更新它），其次读 config（模块加载时 dotenv 注入）
+  const appToken = process.env.FEISHU_BITABLE_APP_TOKEN || config.feishu.bitable.appToken;
+  const tableId  = process.env.FEISHU_BITABLE_TABLE_ID   || config.feishu.bitable.tableId;
   if (!appToken || !tableId) {
     throw new Error('未配置 FEISHU_BITABLE_APP_TOKEN / FEISHU_BITABLE_TABLE_ID');
   }

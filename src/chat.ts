@@ -16,6 +16,8 @@ import { buildMemoryContext, buildConversationMemory } from './memory';
 import { candidateOps, conversationOps, db } from './db';
 import { runChannel, runJob, scanInbox } from './orchestrator';
 import { webSearch } from './search';
+import { setAskUserReadline } from './ask-user';
+import { repairToolMessageHistoryInPlace } from './message-integrity';
 import type { Channel } from './types';
 
 /**
@@ -683,6 +685,33 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'record_interview_outcome',
+      description: '记录某候选人的面试结果（过面/挂面）。当用户提到面试结论时主动调用，' +
+        '比如"张三面试过了""李四终面挂了""王五通过了二面"。这是 HireSeek 最重要的反馈信号——' +
+        '面试通过才是结果目标，这条结果会回流去校准它对「合适」的判断。',
+      parameters: {
+        type: 'object',
+        required: ['name', 'result'],
+        properties: {
+          name: { type: 'string', description: '候选人姓名' },
+          result: { type: 'string', enum: ['passed', 'failed'], description: 'passed=过面，failed=挂面' },
+          note: { type: 'string', description: '可选：哪一轮、面试官反馈等' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'goal_board',
+      description: '查看结果目标计分板：面试通过数、过面率，以及"我判合适的人实际过面率 vs 判不合适的过面率"' +
+        '这条校准对照。用户问"目标进展""我们招得怎么样""你判断得准不准"时调用。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'git_status',
       description: '查看当前 git 仓库的状态：当前分支、已修改文件、未跟踪文件等。',
       parameters: { type: 'object', properties: {} },
@@ -1052,6 +1081,8 @@ export function describeToolCall(name: string, args: Record<string, unknown>): s
     case 'search_candidate': return `👥 查找候选人 ${short(args.name ?? args.keyword, 12)}`;
     case 'search_candidates': return `🧠 检索人才库「${short(args.query, 18)}」`;
     case 'log_candidate_note': return `🧠 记录候选人笔记 ${short(args.name, 12)}`;
+    case 'record_interview_outcome': return `🎯 记录面试结果 ${short(args.name, 12)}（${args.result === 'failed' ? '挂面' : '过面'}）`;
+    case 'goal_board': return '🎯 查看结果目标计分板';
     case 'feishu_recruiting_stats': return '📊 读取飞书招聘数据';
     case 'web_search':       return `🔎 搜索「${short(args.query, 24)}」`;
     case 'read_pdf':         return `📄 读取简历 ${short(args.path ?? args.file_path, 36)}`;
@@ -1551,6 +1582,20 @@ export async function executeTool(name: string, args: any): Promise<string> {
       const c = found[0];
       memoryOps.addNote(c.fingerprint, c.name, note);
       return `已把这条要点记进「${c.name}」的人才档案，以后能被检索到。`;
+    }
+
+    case 'record_interview_outcome': {
+      const { recordInterviewOutcome } = await import('./feedback');
+      const name = String(args.name ?? '').trim();
+      const result = args.result === 'failed' ? 'failed' : 'passed';
+      if (!name) return '需要候选人姓名。';
+      const r = recordInterviewOutcome({ name, result, note: args.note ? String(args.note) : undefined });
+      return r.message;
+    }
+
+    case 'goal_board': {
+      const { goalBoard } = await import('./feedback');
+      return goalBoard().text;
     }
 
     case 'git_status': {
@@ -2145,6 +2190,33 @@ export async function startChat(): Promise<void> {
   const messages: OpenAI.ChatCompletionMessageParam[] = [
     { role: 'system', content: buildSystemPrompt() },
   ];
+  const conversationMessages = (items: OpenAI.ChatCompletionMessageParam[] = messages): OpenAI.ChatCompletionMessageParam[] =>
+    items.filter(m => m.role !== 'system');
+  const messageText = (msg: OpenAI.ChatCompletionMessageParam): string => {
+    const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+    return content.replace(/\s+/g, ' ').slice(0, 180);
+  };
+  const formatContextPreview = (items: OpenAI.ChatCompletionMessageParam[]): string => {
+    const recent = conversationMessages(items).slice(-6);
+    if (recent.length === 0) return chalk.gray('   没有可显示的用户/AI对话内容。');
+    return recent.map(m => {
+      const label = m.role === 'user' ? '用户' : m.role === 'assistant' ? 'HireSeek' : '工具';
+      return chalk.gray(`   ${label}: ${messageText(m)}`);
+    }).join('\n');
+  };
+  let activeSessionId = `auto-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  let activeSessionTitle = `自动保存-${new Date().toLocaleString('zh-CN')}`;
+  const saveCurrentSession = (): void => {
+    if (conversationMessages().length === 0) return;
+    try {
+      repairToolMessageHistoryInPlace(messages);
+      const { saveSessionSnapshot } = require('./remote-session') as typeof import('./remote-session');
+      saveSessionSnapshot(activeSessionId, {
+        title: activeSessionTitle,
+        messages,
+      });
+    } catch { /* 自动保存失败不打断对话 */ }
+  };
 
   // ── CC 风格输入体验：斜杠菜单 / Tab 补全 / 跨会话历史 ─────────────────
   const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
@@ -2157,6 +2229,7 @@ export async function startChat(): Promise<void> {
     { cmd: '/clear', desc: '清空对话上下文' },
     { cmd: '/export', desc: '导出会话' },
     { cmd: '/sessions', desc: '查看历史会话' },
+    { cmd: '/resume', desc: '恢复历史会话' },
     { cmd: '/q', desc: '退出' },
   ];
 
@@ -2193,32 +2266,50 @@ export async function startChat(): Promise<void> {
     history: savedHistory,
     historySize: 200,
   });
-
-  // 实时斜杠菜单：输入 / 时在光标下方浮现匹配项（Tab 补全选中）
-  let menuShown = false;
-  const renderSlashMenu = (): void => {
-    if (!process.stdout.isTTY) return;
-    const line = (rl as unknown as { line?: string }).line ?? '';
-
-    if (menuShown) {
-      // 清掉旧菜单：保存光标 → 下一行起清到屏底 → 恢复光标
-      process.stdout.write('\x1b7\n\x1b[J\x1b8');
-      menuShown = false;
-    }
-
-    if (!line.startsWith('/') || line.includes(' ')) return;
-    const hits = allEntries().filter(e => e.cmd.toLowerCase().startsWith(line.toLowerCase())).slice(0, 5);
-    if (hits.length === 0) return;
-
-    process.stdout.write('\x1b7\n\x1b[J');
-    for (const h of hits) {
-      process.stdout.write(chalk.gray(`  ${h.cmd.padEnd(20)} ${h.desc}\n`));
-    }
-    process.stdout.write(chalk.dim('  ⇥ Tab 补全\n'));
-    process.stdout.write('\x1b8');
-    menuShown = true;
+  setAskUserReadline(rl);
+  type ReadlineInternals = readline.Interface & {
+    line?: string;
+    cursor?: number;
+    _refreshLine?: () => void;
   };
-  process.stdin.on('keypress', () => setImmediate(renderSlashMenu));
+  const setInputLine = (line: string): void => {
+    const r = rl as ReadlineInternals;
+    r.line = line;
+    r.cursor = line.length;
+    r._refreshLine?.();
+  };
+  const submitInputLine = (): void => {
+    rl.write(null, { name: 'return' });
+  };
+  let mainInputActive = false;
+  let slashSelectorActive = false;
+  const openSlashSelector = async (): Promise<void> => {
+    if (slashSelectorActive || !mainInputActive || exiting || generating || toolLoopActive) return;
+    const r = rl as ReadlineInternals;
+    if ((r.line ?? '') !== '/') return;
+
+    slashSelectorActive = true;
+    try {
+      const { selectOption } = await import('./select');
+      const entries = allEntries();
+      const picked = await selectOption(
+        '选择命令',
+        entries.map(e => ({ label: e.cmd, hint: e.desc })),
+        { echo: false },
+      );
+      if (picked == null) {
+        setInputLine('');
+        return;
+      }
+      setInputLine(entries[picked].cmd);
+      submitInputLine();
+    } finally {
+      slashSelectorActive = false;
+    }
+  };
+
+  // "/" 的完整命令面板由 selectOption 负责。不要在输入行下方画浮动菜单：
+  // 输入行靠近终端底部时，浮动菜单会触发滚屏，旧菜单内容无法稳定清除。
 
   // ── 极简启动（CC 风格：安静，信息在需要时出现）──────────────────────
   const job = loadActiveJob();
@@ -2226,7 +2317,7 @@ export async function startChat(): Promise<void> {
   console.log(
     `${chalk.cyan.bold('🔱 HireSeek')} ${chalk.gray(`${model} · ${job?.title ?? '未配置职位'}`)}`,
   );
-  console.log(chalk.gray(`   /help 命令 · /skills 技能 · Esc 打断 · Ctrl+C 两次退出`));
+  console.log(chalk.gray(`   /help 命令 · /skills 技能 · 工具执行中可插话 · Esc 打断`));
 
   const isFirstTime = !job || job.title === 'AI 算法工程师';
   if (isFirstTime) {
@@ -2261,16 +2352,61 @@ export async function startChat(): Promise<void> {
   // 长任务插嘴/暂停状态
   let toolLoopActive = false;
   let interruptRequested = false;
+  let interventionInputActive = false;
+  let toolOwnsStdin = false;
   const pendingInterventions: string[] = [];
+  let preservedInterventionDraft = '';
+  const interventionPrompt = chalk.yellow('↳ 插话 Enter发送 · Esc暂停 ❯ ');
+  const refreshInterventionInput = (): void => {
+    if (!interventionInputActive || !process.stdout.isTTY) return;
+    (rl as ReadlineInternals)._refreshLine?.();
+  };
+  const startInterventionInput = (): void => {
+    if (interventionInputActive || exiting) return;
+    interventionInputActive = true;
+    rl.setPrompt(interventionPrompt);
+    console.log(chalk.gray('\n  插话输入已开启：这行可以正常编辑，Enter 发送，Esc 暂停任务。'));
+    rl.prompt(true);
+  };
+  const stopInterventionInput = (): void => {
+    if (!interventionInputActive) return;
+    interventionInputActive = false;
+    rl.setPrompt('');
+    const r = rl as ReadlineInternals;
+    const draft = r.line ?? '';
+    if (draft.trim()) preservedInterventionDraft = draft;
+    r.line = '';
+    r.cursor = 0;
+    if (process.stdout.isTTY) process.stdout.write('\r\x1b[K');
+  };
+  const withInterventionConsole = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const originalLog = console.log;
+    console.log = (...args: unknown[]): void => {
+      if (interventionInputActive && process.stdout.isTTY) {
+        process.stdout.write('\r\x1b[K');
+        originalLog(...args);
+        refreshInterventionInput();
+        return;
+      }
+      originalLog(...args);
+    };
+    try {
+      return await fn();
+    } finally {
+      console.log = originalLog;
+    }
+  };
 
   const gracefulExit = async (): Promise<void> => {
     if (exiting) return;
     exiting = true;
     console.log(chalk.gray('\n\n正在保存本次对话记忆...'));
+    saveCurrentSession();
     try {
       await saveConversationMemory(client, model, messages);
     } catch { /* 保存失败不阻断退出 */ }
     console.log(chalk.gray('再见！🔱\n'));
+    setAskUserReadline(null);
     rl.close();
     process.exit(0);
   };
@@ -2315,7 +2451,12 @@ export async function startChat(): Promise<void> {
 
   // Esc 单键中断（CC 同款）：生成中=打断；任务中=暂停；空闲=清空输入行
   process.stdin.on('keypress', (_s: unknown, key: { name?: string } | undefined) => {
-    if (key?.name !== 'escape') return;
+    if (key?.name !== 'escape') {
+      if (!slashSelectorActive) {
+        setImmediate(() => void openSlashSelector());
+      }
+      return;
+    }
     if (generating) {
       generating.abort();
       return;
@@ -2347,8 +2488,10 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /tasks              后台任务面板（/tasks stop <id> 停止）'),
       chalk.gray('  /skills             列出全部可用技能'),
       chalk.gray('  /export [标题]      导出会话      /sessions  查看会话'),
+      chalk.gray('  /resume [ID/序号]   恢复历史会话，空参数时弹出列表'),
       chalk.gray('  /<技能名> [参数]    直接触发技能，如 /rbt、/找候选人'),
       chalk.gray('  Esc                 打断生成 / 暂停任务 / 清空输入（Ctrl+C 同效）'),
+      chalk.gray('  工具执行中           显示独立插话输入框，可编辑后 Enter 发送'),
       '',
     ].join('\n'));
   };
@@ -2393,6 +2536,13 @@ export async function startChat(): Promise<void> {
 
   /** 一轮流式请求：边生成边输出，返回完整 message（含工具调用） */
   const streamRound = async (): Promise<OpenAI.Chat.Completions.ChatCompletionMessage> => {
+    const repairStats = repairToolMessageHistoryInPlace(messages);
+    if (repairStats.changed) {
+      console.log(chalk.gray(
+        `\n[历史修复] 补齐 ${repairStats.insertedToolResults} 条工具结果，移除 ${repairStats.droppedToolMessages} 条孤立工具消息\n`,
+      ));
+    }
+
     generating = new AbortController();
     let firstChunk = true;
     process.stdout.write(chalk.gray('✻ 思考中'));
@@ -2439,18 +2589,18 @@ export async function startChat(): Promise<void> {
 
     // 分隔线独立打印：prompt 保持单行，↑↓ 历史回溯时重绘才不会乱
     console.log(promptHeader());
+    const draftToRestore = preservedInterventionDraft;
+    preservedInterventionDraft = '';
+    mainInputActive = true;
     rl.question(chalk.green('❯ '), async (input) => {
-      // 清掉斜杠菜单残留
-      if (process.stdout.isTTY) process.stdout.write('\x1b[J');
-      menuShown = false;
-
+      mainInputActive = false;
       let text = await readFullInput(input);
       if (!text) { ask(); return; }
 
       // 单独输入 / → 弹出命令选择器（方向键选，不用记命令名）
       if (text === '/') {
         const { selectOption } = await import('./select');
-        const entries = allEntries().slice(0, 10);
+        const entries = allEntries();
         const picked = await selectOption(
           '选择命令',
           entries.map(e => ({ label: e.cmd, hint: e.desc })),
@@ -2480,6 +2630,9 @@ export async function startChat(): Promise<void> {
       // 清空上下文（保留 system prompt）
       if (text === '/clear') {
         messages.length = 1;
+        activeSessionId = `auto-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+        activeSessionTitle = `自动保存-${new Date().toLocaleString('zh-CN')}`;
+        saveCurrentSession();
         console.log(chalk.gray('\n✓ 上下文已清空，重新开始\n'));
         ask();
         return;
@@ -2616,7 +2769,65 @@ export async function startChat(): Promise<void> {
         const sessions = listSessions();
 
         console.log(chalk.cyan('\n' + formatSessionList(sessions) + '\n'));
+        console.log(chalk.gray('使用 /resume <ID或序号> 可以恢复某个会话。\n'));
 
+        ask();
+        return;
+      }
+
+      // 恢复历史会话命令
+      if (text === '/resume' || text.startsWith('/resume ')) {
+        const { listSessions, loadSession } = await import('./remote-session');
+        const sessions = listSessions().filter(s => (s.conversationMessageCount ?? s.messageCount) > 0);
+        if (sessions.length === 0) {
+          console.log(chalk.gray('\n暂无可恢复会话\n'));
+          ask();
+          return;
+        }
+
+        let targetId = text.slice('/resume'.length).trim();
+        if (!targetId) {
+          const { selectOption } = await import('./select');
+          const picked = await selectOption(
+            '恢复哪个会话？',
+            sessions.map((s, i) => ({
+              label: s.title,
+              hint: `${s.id} · 对话 ${s.conversationMessageCount ?? s.messageCount} 条`,
+            })),
+          );
+          if (picked == null) { ask(); return; }
+          targetId = sessions[picked].id;
+        } else if (/^\d+$/.test(targetId)) {
+          const byIndex = sessions[parseInt(targetId, 10) - 1];
+          if (byIndex) targetId = byIndex.id;
+        }
+
+        const loaded = loadSession(targetId);
+        if (!loaded) {
+          console.log(chalk.red(`\n未找到会话：${targetId}\n`));
+          ask();
+          return;
+        }
+
+        messages.length = 0;
+        messages.push(...loaded.messages);
+        if (!messages.some(m => m.role === 'system')) {
+          messages.unshift({ role: 'system', content: buildSystemPrompt() });
+        }
+        const repairStats = repairToolMessageHistoryInPlace(messages);
+        activeSessionId = targetId;
+        activeSessionTitle = loaded.title;
+        saveCurrentSession();
+
+        console.log(chalk.green('\n✓ 已恢复会话'));
+        console.log(chalk.gray(`   ID: ${targetId}`));
+        console.log(chalk.gray(`   标题: ${loaded.title}`));
+        console.log(chalk.gray(`   对话: ${conversationMessages().length} 条 / 总消息: ${messages.length} 条`));
+        if (repairStats.changed) {
+          console.log(chalk.gray(`   已修复历史工具调用: 补齐 ${repairStats.insertedToolResults} 条，移除 ${repairStats.droppedToolMessages} 条`));
+        }
+        console.log(chalk.gray('   最近上下文：'));
+        console.log(formatContextPreview(messages) + '\n');
         ask();
         return;
       }
@@ -2667,10 +2878,15 @@ export async function startChat(): Promise<void> {
 
       // 长任务期间用户可以直接敲字插话（无需等任务结束）
       const onIntervene = (line: string): void => {
+        if (toolOwnsStdin) return;
         const t = line.trim();
-        if (!t) return;
+        if (!t) {
+          if (interventionInputActive) rl.prompt(true);
+          return;
+        }
         pendingInterventions.push(t);
         console.log(chalk.gray('  ✋ 已收到插话，当前动作完成后立即生效'));
+        if (interventionInputActive) rl.prompt(true);
       };
 
       /** 一个完整回合：流式生成 + 工具循环（含暂停/插话处理） */
@@ -2682,10 +2898,33 @@ export async function startChat(): Promise<void> {
           const toolResults: OpenAI.ChatCompletionToolMessageParam[] = [];
 
           for (const call of msg.tool_calls) {
-            const args = JSON.parse(call.function.arguments || '{}');
-            console.log(chalk.gray(`  ${toolLabel(call.function.name, args)}`));
-            const result = await executeTool(call.function.name, args);
-            toolResults.push({ role: 'tool', tool_call_id: call.id, content: result });
+            const interactiveTool = call.function.name === 'ask_user_question';
+            let args: any = {};
+            let result: string | null = null;
+            try {
+              args = JSON.parse(call.function.arguments || '{}');
+            } catch (err) {
+              result = `工具参数解析失败：${err instanceof Error ? err.message : String(err)}`;
+            }
+
+            if (interactiveTool) {
+              stopInterventionInput();
+              toolOwnsStdin = true;
+            } else {
+              startInterventionInput();
+            }
+            try {
+              console.log(chalk.gray(`  ${toolLabel(call.function.name, args)}`));
+              if (result == null) {
+                result = await executeTool(call.function.name, args);
+              }
+            } catch (err) {
+              result = `工具执行失败：${err instanceof Error ? err.message : String(err)}`;
+            } finally {
+              if (interactiveTool) toolOwnsStdin = false;
+              if (result == null) result = '工具执行失败：没有返回结果。';
+              toolResults.push({ role: 'tool', tool_call_id: call.id, content: result });
+            }
           }
 
           messages.push(...toolResults);
@@ -2693,6 +2932,7 @@ export async function startChat(): Promise<void> {
           // Ctrl+C 暂停：停下任务，简短汇报后把控制权还给用户
           if (interruptRequested) {
             interruptRequested = false;
+            stopInterventionInput();
             messages.push({
               role: 'user',
               content: '[系统] 用户暂停了任务。立即停止当前流程（不要再调用工具），用 2-3 句话汇报目前进度（已完成什么/进行到哪），然后等待用户指示。',
@@ -2709,6 +2949,7 @@ export async function startChat(): Promise<void> {
             messages.push({ role: 'user', content: note });
           }
 
+          stopInterventionInput();
           msg = await streamRound();
           messages.push(msg);
         }
@@ -2719,14 +2960,15 @@ export async function startChat(): Promise<void> {
         toolLoopActive = true;
         rl.on('line', onIntervene);
 
-        await runTurn();
+        saveCurrentSession();
+        await withInterventionConsole(runTurn);
 
         // 最终回答期间敲入的插话不能丢——作为新回合继续处理
         while (pendingInterventions.length > 0) {
           const note = pendingInterventions.splice(0)
             .map(s => `[用户插话] ${s}`).join('\n');
           messages.push({ role: 'user', content: note });
-          await runTurn();
+          await withInterventionConsole(runTurn);
         }
 
       } catch (err: any) {
@@ -2736,14 +2978,20 @@ export async function startChat(): Promise<void> {
           console.error(chalk.red(`\n出错了: ${err.message}\n`));
         }
       } finally {
+        stopInterventionInput();
         rl.off('line', onIntervene);
         toolLoopActive = false;
+        toolOwnsStdin = false;
         interruptRequested = false;
         pendingInterventions.length = 0;
+        saveCurrentSession();
       }
 
       ask();
     });
+    if (draftToRestore) {
+      setImmediate(() => setInputLine(draftToRestore));
+    }
   };
 
   ask();

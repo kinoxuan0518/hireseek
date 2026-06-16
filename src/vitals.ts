@@ -80,6 +80,12 @@ export interface Vitals {
   lastActionAt: string | null;
   lastBeat: { action: string; reason: string; at: string } | null;
   lastQC: { verdict: string; avgFit: number | null; at: string } | null;
+  lastCompliance: { verdict: string; violations: number; at: string } | null;
+  goalBoard: {
+    passed: number;
+    passRate: number | null;
+    calibration: { lift: number | null; passWhenFit: number | null; passWhenUnfit: number | null };
+  } | null;
   next: { label: string; at: string; human: string } | null;
 }
 
@@ -123,6 +129,7 @@ export function collectVitals(): Vitals {
   const online = fresh || guarding;        // 有进程在报平安 / 守护进程在跑
 
   const job = loadActiveJob();
+  const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
   const goal = (job as any)?.daily_goal?.contact ?? 30;
   const today = db.prepare(
     `SELECT COUNT(*) AS n FROM candidates WHERE date(contacted_at) = date('now','localtime')`,
@@ -141,6 +148,21 @@ export function collectVitals(): Vitals {
     lastQC = (require('./verifier') as typeof import('./verifier')).lastVerification();
   } catch { /* 验证器未加载/无质检 */ }
 
+  let lastCompliance: Vitals['lastCompliance'] = null;
+  try {
+    lastCompliance = (require('./compliance') as typeof import('./compliance')).lastCompliance();
+  } catch { /* 合规验证器未加载/无审计 */ }
+
+  let goalBoard: Vitals['goalBoard'] = null;
+  try {
+    const g = (require('./feedback') as typeof import('./feedback')).goalBoard(jobId);
+    goalBoard = {
+      passed: g.passed,
+      passRate: g.passRate,
+      calibration: { lift: g.calibration.lift, passWhenFit: g.calibration.passWhenFit, passWhenUnfit: g.calibration.passWhenUnfit },
+    };
+  } catch { /* 反馈模块未加载 */ }
+
   return {
     online,
     guarding,
@@ -154,6 +176,8 @@ export function collectVitals(): Vitals {
     lastActionAt: alive?.lastActionAt ? ago(alive.lastActionAt) : null,
     lastBeat,
     lastQC,
+    lastCompliance,
+    goalBoard,
     next: soonestNext(),
   };
 }
@@ -174,10 +198,24 @@ export function formatVitals(v: Vitals, trigger?: string): string {
   }
 
   lines.push(`📋 在岗：${v.job}`);
-  lines.push(`📊 今天触达 ${v.todayContacted}/${v.goal} 人`);
+  // 结果目标(面试通过)是北极星；触达数只是过程量
+  if (v.goalBoard) {
+    const g = v.goalBoard;
+    lines.push(`🎯 结果目标·面试通过 ${g.passed} 人${g.passRate != null ? `（过面率 ${g.passRate}%）` : ''}`);
+    if (g.calibration.lift != null) {
+      const icon = g.calibration.lift > 0 ? '📈' : '⚠️';
+      lines.push(`${icon} 判断校准：判合适过面率 ${g.calibration.passWhenFit}% vs 判不合适 ${g.calibration.passWhenUnfit}%`);
+    }
+  }
+  lines.push(`📊 过程量·今天触达 ${v.todayContacted}/${v.goal} 人`);
   if (v.lastQC) {
     const icon = v.lastQC.verdict === 'fail' ? '🔴' : v.lastQC.verdict === 'warn' ? '🟡' : '🟢';
     lines.push(`${icon} 触达质检：${v.lastQC.avgFit != null ? `平均匹配 ${v.lastQC.avgFit} 分` : v.lastQC.verdict}（${v.lastQC.at}）`);
+  }
+  if (v.lastCompliance) {
+    const c = v.lastCompliance;
+    const icon = c.verdict === 'fail' ? '🔴' : c.verdict === 'warn' ? '🟡' : '🟢';
+    lines.push(`${icon} 流程合规：${c.violations > 0 ? `${c.violations} 处待看` : '无违规'}（${c.at}）`);
   }
 
   if (v.lastAction) lines.push(`🔧 最近动作：${v.lastAction}（${v.lastActionAt}）`);

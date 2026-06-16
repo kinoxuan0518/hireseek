@@ -51,6 +51,7 @@ const ALLOWED_TOOLS = new Set([
   'web_search', 'read_pdf',
   'list_candidates', 'search_candidate', 'search_candidates', 'log_candidate_note', 'update_candidate', 'get_funnel',
   'feishu_recruiting_stats', 'use_recruiting_skill', 'manage_schedule',
+  'record_interview_outcome', 'goal_board',
 ]);
 
 const MAX_ROUNDS = 40;

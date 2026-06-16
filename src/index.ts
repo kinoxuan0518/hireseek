@@ -27,7 +27,9 @@ const USAGE = `
 用法:
   hireseek                     对话模式（默认）
   hireseek setup               初始化向导：一步步配置好一切
-  hireseek verify              独立质检：换 v4-pro 反向审计今日触达有没有为凑数注水（--push 推送）
+  hireseek goal                结果目标计分板：面试通过数 + "判断准不准"的校准对照
+  hireseek feedback <名> pass|fail [备注]  回流面试结果（最重要的反馈信号，校准"合适"的判断）
+  hireseek verify              双轴独立质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)（--push 推送）
   hireseek alive               查岗：一句话报告它在不在、做了什么、下一步（--push 推送一条）
   hireseek console             网页指挥台：打开浏览器就能看见它、打字指挥它
   hireseek dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
@@ -156,15 +158,45 @@ async function main(): Promise<void> {
     startWebConsole({ openBrowser: true });
     process.on('SIGINT', () => { db.close(); process.exit(0); });
 
+  } else if (command === 'feedback' || command === 'fb') {
+    // 回流面试结果：hireseek feedback <姓名> pass|fail [备注]
+    const name = args[1];
+    const verdict = (args[2] || '').toLowerCase();
+    if (!name || !['pass', 'passed', 'fail', 'failed', '过', '挂'].includes(verdict)) {
+      console.log(chalk.yellow('用法：hireseek feedback <候选人姓名> pass|fail [备注]'));
+      console.log(chalk.gray('  例：hireseek feedback 张三 pass 一面表现很好'));
+      db.close(); process.exit(1);
+    }
+    const result = ['pass', 'passed', '过'].includes(verdict) ? 'passed' : 'failed';
+    const note = args.slice(3).join(' ') || undefined;
+    const { recordInterviewOutcome, goalBoard } = await import('./feedback');
+    const r = recordInterviewOutcome({ name, result: result as 'passed' | 'failed', note });
+    console.log('\n' + r.message + '\n');
+    console.log(chalk.gray('— 当前计分板 —'));
+    console.log(goalBoard().text + '\n');
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'goal') {
+    // 结果目标计分板：面试通过数 + 校准对照（判断准不准）
+    const { goalBoard } = await import('./feedback');
+    console.log(goalBoard().text + '\n');
+    db.close();
+    process.exit(0);
+
   } else if (command === 'verify' || command === 'qc') {
-    // 独立质检：换 v4-pro 反向审计今日触达有没有为凑数注水（--push 推送结论）
+    // 双轴独立质检（换 v4-pro）：结果轴=人选有没有为凑数注水；过程轴=干活方法合不合规
     const { verifyRun, formatVerification } = await import('./verifier');
-    console.log(chalk.gray('🔍 独立验证器（deepseek-v4-pro）正在反向质检今日触达…\n'));
+    const { complianceCheck, formatCompliance } = await import('./compliance');
+    console.log(chalk.gray('🔍 独立验证器（deepseek-v4-pro）正在双轴审计…\n'));
     const v = await verifyRun();
     console.log(formatVerification(v) + '\n');
-    if (args.includes('--push') && v.verdict !== 'skip') {
+    const c = await complianceCheck();
+    console.log(formatCompliance(c) + '\n');
+    if (args.includes('--push') && (v.verdict !== 'skip' || c.verdict !== 'skip')) {
       const { notify } = await import('./notifier');
-      await notify('HireSeek 触达质检', formatVerification(v));
+      const body = [v.verdict !== 'skip' ? formatVerification(v) : '', c.verdict !== 'skip' ? formatCompliance(c) : ''].filter(Boolean).join('\n\n');
+      await notify('HireSeek 双轴质检', body);
       console.log(chalk.gray('（已推送一条到你的飞书/系统通知）\n'));
     }
     db.close();

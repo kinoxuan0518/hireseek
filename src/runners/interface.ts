@@ -33,3 +33,29 @@ export function parseSkillSummary(text: string): { contacted: number; skipped: n
   const skipped   = parseInt(text.match(/跳过人数[：:]\s*(\d+)/)?.[1] ?? '0', 10);
   return { contacted, skipped };
 }
+
+/**
+ * 从总结里解析"已触达候选人清单"——每行 `- 姓名 | 公司 | 自评分 | 理由`。
+ * 容错：缺字段照样收，分数非法记为 undefined；解析不到返回空数组。
+ * 这是 verifier / 漏斗能拿到真实候选人的来源，所以宁可宽松也别丢数据。
+ */
+export function parseContactedCandidates(
+  text: string,
+): Array<{ name: string; company?: string; score?: number; reason?: string }> {
+  const out: Array<{ name: string; company?: string; score?: number; reason?: string }> = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!/^[-*·•]/.test(line) || !line.includes('|')) continue;
+    const parts = line.replace(/^[-*·•]\s*/, '').split('|').map(s => s.trim());
+    const name = parts[0];
+    if (!name || name === '无' || name === '姓名') continue;
+    const scoreNum = parts[2] != null ? parseInt(parts[2].match(/\d+/)?.[0] ?? '', 10) : NaN;
+    out.push({
+      name,
+      company: parts[1] || undefined,
+      score: Number.isFinite(scoreNum) ? Math.max(0, Math.min(100, scoreNum)) : undefined,
+      reason: parts[3] || undefined,
+    });
+  }
+  return out;
+}

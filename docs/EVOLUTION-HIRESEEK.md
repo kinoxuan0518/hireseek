@@ -102,3 +102,34 @@ v2 让 HireSeek 能干活，v3 解决"它只在我开终端时才活着、关了
 - FTS 冒烟：供应链 / 宁德时代 / 李四 / 多词 / 子串 全部命中，笔记渲染干净
 - `daemon run` 后台启动：调度器全部 cron 注册、Bot 优雅跳过（未启用）、主动检查触发，无崩溃
 - `daemon status` 正常输出安装/运行状态
+
+---
+
+# 第四次进化（2026-06-16）：把 Loop Engineering 的"灵魂"装进来
+
+触发：Kino 那篇 Loop Engineering 的思考。骨架（定时/隔离/知识/连接器/子Agent）HireSeek 已有，缺的是"灵魂"——**目标定义 + 做的和验的分开 + 反 Goodhart**。
+
+## 一、网页指挥台 + 生命体征（先解决"看不见它"）
+
+- `src/web-console.ts`（端口 7799）：打开浏览器就能看见它活着、直接打字指挥它（复用 `agent-session` 同一套大脑），随 daemon 自启
+- `src/vitals.ts`：守护进程每分钟写 `alive.json`，`hireseek alive` 跨进程查岗——在不在/做了什么/下一步；上线/收工/重动作主动汇报
+- `src/agent-session.ts`：抽出飞书 Bot 与网页共用的无头 agent 回合
+
+## 二、双轴独立验证器（做的和验的分开）
+
+- **结果轴** `src/verifier.ts`：换独立配置的验证器模型（默认 v4-pro，可经 `VERIFIER_MODEL` 指向异构厂商）反向重判人选质量，抓"为凑数注水"与"自评虚高"；候选人库空但今日有触达 → 报"落库断链"而非假绿灯
+- **过程轴** `src/compliance.ts`：sourcing 浏览器动作落库为执行轨迹（`run_actions`），对照过程规则集审计"用没用筛选项/筛选对不对/乱开网页/高频打招呼"；解析失败判 skip 不下结论
+- 轨迹捕获：`SkillResult.trace`（dom-runner 加性记录）+ orchestrator 两条 run 路径统一 `persistRunResult`（候选人 upsert + 轨迹落库）
+
+## 三、目标锚在"面试通过"——信号回流 + 校准闭环
+
+- `src/feedback.ts`：结果目标=找到能过面的人（反 Goodhart）；`hireseek feedback <名> pass|fail` 一句话回流 ground truth（无需 ATS）
+- 预测（`fit_predictions`）× 真实结果（`interview_outcomes`）按 `(fingerprint, job_id)` 复合键对照 → 算出"判合适的人实际过面率 vs 判不合适的"，校准"合适"的定义在不在变准
+
+## 验证 + 评审
+
+- 自评审：用 Workflow 跑了一轮对抗性评审（4 维度 × 独立核实），确认 17 处问题并全部修复（最关键两条：并行 run 路径漏落轨迹、候选人从不入库致验证器空转）
+- `tsc --noEmit` 全过；packages/core 74 单测全过
+- 合规验证器合成轨迹端到端：9 步不合规轨迹（无筛选/乱开百度/高频打招呼）被准确判 fail 并逐条引证
+- 修复合成测试 8/8 通过：清单解析、候选人落库、诚实-skip、复合键校准、去重
+- 已知边界：执行轨迹尚未回填 ref 语义标签；结果轴随机抽样默认 8 人

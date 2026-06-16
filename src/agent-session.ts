@@ -10,6 +10,7 @@
 import OpenAI from 'openai';
 import { config } from './config';
 import { buildSystemPrompt, CHAT_TOOLS, executeTool, describeToolCall } from './chat';
+import { repairToolMessageHistoryInPlace } from './message-integrity';
 
 const MAX_HISTORY = 24;   // 系统提示之外保留的最近消息条数
 const MAX_ROUNDS  = 30;   // 单次回复内最多 tool-call 轮数
@@ -31,6 +32,7 @@ function pruneHistory(s: AgentSession): void {
   const system = s.messages[0];
   const recent = s.messages.slice(-MAX_HISTORY);
   s.messages = [system, { role: 'user', content: '[较早的对话已折叠]' }, ...recent];
+  repairToolMessageHistoryInPlace(s.messages);
 }
 
 // ── LLM 客户端解析（与 chat 主循环同源，DeepSeek 优先）─────────────────
@@ -77,6 +79,7 @@ export async function runAgentTurn(
   pruneHistory(session);
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
+    repairToolMessageHistoryInPlace(session.messages);
     const res = await client.chat.completions.create({
       model,
       messages: session.messages,

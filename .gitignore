@@ -9,3 +9,6 @@ workspace/accounts/
 workspace/checkpoints/
 workspace/mcp-servers.yaml
 workspace/tmp/
+workspace/sessions/
+.DS_Store
+**/.DS_Store

@@ -5,6 +5,7 @@
 
 import readline from 'readline';
 import chalk from 'chalk';
+import { selectMultipleOptions, selectOption } from './select';
 
 export interface QuestionOption {
   label: string;
@@ -26,6 +27,77 @@ export interface UserAnswers {
   [questionIndex: string]: string | string[];
 }
 
+let sharedReadline: readline.Interface | null = null;
+
+export function setAskUserReadline(rl: readline.Interface | null): void {
+  sharedReadline = rl;
+}
+
+function askLine(prompt: string): Promise<string> {
+  if (sharedReadline) {
+    return new Promise(resolve => sharedReadline!.question(prompt, resolve));
+  }
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise(resolve => {
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
+function optionChoices(question: Question): QuestionOption[] {
+  return [
+    ...question.options,
+    { label: '其他', description: '自定义输入' },
+  ];
+}
+
+async function askWithTextFallback(question: Question, prompt: string): Promise<string | string[]> {
+  const answer = await askLine(prompt);
+
+  if (question.multiSelect) {
+    const selections = answer
+      .split(/[,\uFF0C\u3001&\s]+/)
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => !isNaN(n) && n >= 1 && n <= question.options.length + 1);
+
+    if (selections.length === 0) {
+      console.log(chalk.red('无效选择，请重新选择'));
+      return askSingleQuestion(question, 0, 1);
+    }
+
+    if (selections.includes(question.options.length + 1)) {
+      const customInput = await askLine('请输入自定义内容: ');
+      const results = selections
+        .filter(n => n <= question.options.length)
+        .map(n => question.options[n - 1].label);
+      if (customInput.trim()) results.push(customInput.trim());
+      return results;
+    }
+
+    return selections.map(n => question.options[n - 1].label);
+  }
+
+  const selection = parseInt(answer.trim(), 10);
+  if (isNaN(selection) || selection < 1 || selection > question.options.length + 1) {
+    console.log(chalk.red('无效选择，请重新选择'));
+    return askSingleQuestion(question, 0, 1);
+  }
+
+  if (selection === question.options.length + 1) {
+    const customInput = await askLine('请输入自定义内容: ');
+    return customInput.trim() || '未指定';
+  }
+
+  return question.options[selection - 1].label;
+}
+
 /**
  * 显示单个问题并获取用户选择
  */
@@ -34,91 +106,58 @@ async function askSingleQuestion(
   questionIndex: number,
   totalQuestions: number
 ): Promise<string | string[]> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+  console.log(chalk.cyan(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`));
+  console.log(chalk.cyan(`问题 ${questionIndex + 1}/${totalQuestions}`));
+  console.log(chalk.cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`));
 
-  return new Promise((resolve) => {
-    console.log(chalk.cyan(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`));
-    console.log(chalk.cyan(`问题 ${questionIndex + 1}/${totalQuestions}`));
-    console.log(chalk.cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`));
+  console.log(chalk.gray(`[${question.header}]${question.multiSelect ? ' (可多选)' : ''}`));
 
-    console.log(chalk.bold(question.question));
-    console.log(chalk.gray(`[${question.header}]${question.multiSelect ? ' (可多选)' : ''}\n`));
+  const prompt = question.multiSelect
+    ? `请选择（多选用逗号分隔，如 "1,3"）: `
+    : `请选择 (1-${question.options.length + 1}): `;
 
-    // 显示选项
+  if (!process.stdin.isTTY) {
     question.options.forEach((opt, index) => {
       console.log(chalk.yellow(`${index + 1}. ${opt.label}`));
       console.log(chalk.gray(`   ${opt.description}\n`));
     });
-
-    // 添加 "其他" 选项
     console.log(chalk.yellow(`${question.options.length + 1}. 其他`));
     console.log(chalk.gray(`   自定义输入\n`));
+    return askWithTextFallback(question, prompt);
+  }
 
-    const prompt = question.multiSelect
-      ? `请选择（多选用逗号分隔，如 "1,3"）: `
-      : `请选择 (1-${question.options.length + 1}): `;
+  const choices = optionChoices(question);
+  const selectQuestion = question.question;
+  const options = choices.map(o => ({ label: o.label, hint: o.description }));
 
-    rl.question(prompt, (answer) => {
-      rl.close();
+  if (question.multiSelect) {
+    const picked = await selectMultipleOptions(selectQuestion, options);
+    if (picked == null) {
+      console.log(chalk.red('已取消，请重新选择'));
+      return askSingleQuestion(question, questionIndex, totalQuestions);
+    }
+    const customIndex = choices.length - 1;
+    const results = picked
+      .filter(i => i !== customIndex)
+      .map(i => choices[i].label);
+    if (picked.includes(customIndex)) {
+      const customInput = await askLine('请输入自定义内容: ');
+      if (customInput.trim()) results.push(customInput.trim());
+    }
+    return results.length > 0 ? results : askSingleQuestion(question, questionIndex, totalQuestions);
+  }
 
-      if (question.multiSelect) {
-        // 多选模式
-        const selections = answer
-          .split(',')
-          .map(s => parseInt(s.trim(), 10))
-          .filter(n => !isNaN(n) && n >= 1 && n <= question.options.length + 1);
+  const picked = await selectOption(selectQuestion, options);
+  if (picked == null) {
+    console.log(chalk.red('已取消，请重新选择'));
+    return askSingleQuestion(question, questionIndex, totalQuestions);
+  }
+  if (picked === choices.length - 1) {
+    const customInput = await askLine('请输入自定义内容: ');
+    return customInput.trim() || '未指定';
+  }
 
-        if (selections.length === 0) {
-          console.log(chalk.red('无效选择，请重新选择'));
-          resolve(askSingleQuestion(question, questionIndex, totalQuestions));
-          return;
-        }
-
-        // 检查是否选择了 "其他"
-        if (selections.includes(question.options.length + 1)) {
-          rl.question('请输入自定义内容: ', (customInput) => {
-            const results = selections
-              .filter(n => n <= question.options.length)
-              .map(n => question.options[n - 1].label);
-            if (customInput.trim()) {
-              results.push(customInput.trim());
-            }
-            resolve(results);
-          });
-        } else {
-          const results = selections.map(n => question.options[n - 1].label);
-          resolve(results);
-        }
-      } else {
-        // 单选模式
-        const selection = parseInt(answer.trim(), 10);
-
-        if (isNaN(selection) || selection < 1 || selection > question.options.length + 1) {
-          console.log(chalk.red('无效选择，请重新选择'));
-          resolve(askSingleQuestion(question, questionIndex, totalQuestions));
-          return;
-        }
-
-        // 检查是否选择了 "其他"
-        if (selection === question.options.length + 1) {
-          const customRl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-          });
-
-          customRl.question('请输入自定义内容: ', (customInput) => {
-            customRl.close();
-            resolve(customInput.trim() || '未指定');
-          });
-        } else {
-          resolve(question.options[selection - 1].label);
-        }
-      }
-    });
-  });
+  return choices[picked].label;
 }
 
 /**
