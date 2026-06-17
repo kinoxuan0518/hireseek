@@ -12,3 +12,12 @@ workspace/tmp/
 workspace/sessions/
 .DS_Store
 **/.DS_Store
+
+# 运行时/业务数据（含真实候选人姓名、偏好、工作状态）——不入公开仓库
+workspace/scripts/
+workspace/memory/
+workspace/STATE.md
+workspace/HEARTBEAT.md
+workspace/.permissions.json
+workspace/jobs/active.yaml
+workspace/references/*-research.md
