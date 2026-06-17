@@ -146,6 +146,21 @@ hireseek goal                            # 结果计分板：过面数/过面率
 - 有了真实结果，验证器的预测分（`fit_predictions`）与真实过面结果（`interview_outcomes`）一对照，就能算出：**它判"合适"的人实际过面率多少，判"不合适"的又多少**——它的判断在不在变准，一目了然，而不是又一句好听的话
 - 预测与结果均按 `(fingerprint, job_id)` 复合键对齐，跨岗位不串；同名多人回流会明确提示挂到了哪一位
 
+### 让结果自动回流——飞书招聘 / 多维表格直连（`src/channels/feishu-hire.ts`）
+
+手动一句句回流是兜底；如果你们的面试结果记在飞书里，HireSeek 可以**直接把它拉回来**，并顺带补上"面试官维度"。
+
+```bash
+hireseek hire-sync            # dry-run 预览：会写哪些过面/挂面（不落库）
+hireseek hire-sync --apply    # 确认无误后落库回流 → 喂校准
+```
+
+- **两个来源**（和飞书 Bot 同一个 SDK，零新依赖）：
+  - **飞书招聘 ATS**：`client.hire.interview.list` 拉面试 + 每位面试官的结论，`hire.talent` 把人对回本地候选人——结论自带面试官身份（恰好补掉"无面试官维度"的边界）。需给自建应用开 `hire:interview:readonly`、`hire:talent:readonly` 后发布。
+  - **飞书多维表格**：复用 `fetchRecruitingRecords` 读招聘表的"面试结果"列，零新权限。列名/取值可经 `FEISHU_BITABLE_NAME_FIELD`/`FEISHU_BITABLE_RESULT_FIELD`/`*_PASS_VALUES`/`*_FAIL_VALUES` 适配你们的表。
+- **安全铁律（外部数据不可控）**：默认 **dry-run 先列给你看会写什么**，结论 enum / 列取值都可配，确认无误才 `--apply`；权限缺失会直接告诉你缺哪个 scope（连授权链接都返回）。
+- **自动化**：`SCHEDULE_HIRESYNC`（默认工作日 20:00）每天自动同步——默认 dry-run + 通知，`FEISHU_HIRE_AUTO_APPLY=true` 才自动落库；Bot/指挥台也能说"同步一下飞书面试结果"触发。
+
 ### 把目标变成方向盘——心跳由"合格供给"驱动，不再由触达 quota 驱动
 
 这是最后一环：计分板（看）变方向盘（开）。心跳决策（`heartbeat.ts`）的首要信号不再是"今日触达 X/30"，而是 `feedback.ts` 的 `supplyBoard`——**离过面目标还差多少合格供给**（合格 = 验证器判 fit≥60 的人，而非 do-er 自评、更非触达数）。决策原则按优先级重写：

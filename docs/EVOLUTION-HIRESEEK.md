@@ -155,3 +155,26 @@ v2 让 HireSeek 能干活，v3 解决"它只在我开终端时才活着、关了
 - 自评审：Workflow 3 维（安全/正确/元Goodhart）对抗性核实
 
 至此 Loop Engineering 灵魂全闭环：寻源→判合适→触达→真实过面回流→校准→**学习(定义自己改)**→判得更准。人是终极验证器，但它在把人的判断学进自己的标准。
+
+---
+
+# 第十一次进化（2026-06-16）：飞书招聘直连——结果自动回流，真闭环
+
+承接用户"面试结果都从外获取，搜一下飞书 CLI / 飞书招聘有没有接口，有就直接调用闭环"。
+
+查证（直接问已装的 SDK，证据最硬）：
+- 无官方通用飞书 CLI；但 `@larksuiteoapi/node-sdk`（飞书 Bot 同款）自带完整 `client.hire.*` 招聘接口
+- 关键资源：interview/interviewRecord/evaluation（面试+结论+面试官）、application（投递+阶段）、talent、offer
+
+实现 `src/channels/feishu-hire.ts`（两来源、dry-run 优先、防御式映射）：
+- **飞书招聘 ATS**：`hire.interview.list` 拉面试 + 每位面试官结论，`hire.talent.get` 对回本地候选人 → `recordInterviewOutcome`（带面试官，补掉"无面试官维度"边界）。结论 enum 可经 FEISHU_HIRE_PASS/FAIL_VALUES 配
+- **多维表格兜底**：复用 fetchRecruitingRecords 读"面试结果"列，字段名/取值全可配（FEISHU_BITABLE_NAME/RESULT_FIELD 等）
+- 统一入口 syncInterviewOutcomes：招聘 ATS 优先、表格兜底；CLI `hireseek hire-sync [--apply]`、chat 工具 sync_interview_outcomes、调度 SCHEDULE_HIRESYNC（默认工作日20:00，dry-run+通知，FEISHU_HIRE_AUTO_APPLY=true 才落库）
+
+安全：默认 dry-run 先列"会写什么"，外部 enum/列值不可控全部可配；权限缺失清晰报错（返回所缺 scope + 授权链接）。
+
+实测（真实打到用户飞书应用）：
+- 多维表格路径连通真实表，按列名启发式找"姓名+面试结果"两列，0 命中时清楚报"找了哪些列名、怎么覆盖"
+- 招聘 ATS 路径真实调用，正确捕获权限不足，回传所需 scope（hire:interview:readonly 等）+ 用户应用的授权直链，再优雅回退表格
+- tsc 全过；packages/core 74 单测全过
+- 待用户开 hire scope 并发版后，先 dry-run 看真实结论 enum 锁定映射，即可自动闭环

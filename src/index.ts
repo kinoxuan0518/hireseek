@@ -28,7 +28,8 @@ const USAGE = `
   hireseek                     对话模式（默认）
   hireseek setup               初始化向导：一步步配置好一切
   hireseek goal                结果目标计分板：面试通过数 + "判断准不准"的校准对照
-  hireseek feedback <名> pass|fail [备注]  回流面试结果（最重要的反馈信号，校准"合适"的判断）
+  hireseek feedback <名> pass|fail [备注]  手动回流面试结果（校准"合适"的判断）
+  hireseek hire-sync [--apply]  从飞书招聘/多维表格自动拉面试结果回流（默认 dry-run 预览）
   hireseek verify              双轴独立质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)（--push 推送）
   hireseek alive               查岗：一句话报告它在不在、做了什么、下一步（--push 推送一条）
   hireseek console             网页指挥台：打开浏览器就能看见它、打字指挥它
@@ -182,6 +183,17 @@ async function main(): Promise<void> {
     // 结果目标计分板：面试通过数 + 校准对照（判断准不准）
     const { goalBoard } = await import('./feedback');
     console.log(goalBoard().text + '\n');
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'hire-sync' || command === 'sync') {
+    // 从飞书招聘 ATS / 多维表格自动拉面试结果回流（默认 dry-run 预览，加 --apply 落库）
+    const apply = args.includes('--apply') || args.includes('apply');
+    const { syncInterviewOutcomes } = await import('./channels/feishu-hire');
+    console.log(chalk.gray('📥 正在从飞书拉取面试结果…\n'));
+    const r = await syncInterviewOutcomes({ dryRun: !apply });
+    console.log(r.text + '\n');
+    if (!apply && r.resolved.length > 0) console.log(chalk.gray('确认无误后加 --apply 真正落库。\n'));
     db.close();
     process.exit(0);
 

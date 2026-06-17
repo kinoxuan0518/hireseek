@@ -159,6 +159,23 @@ export function startScheduler(): void {
     console.log(`  ${'今日收工'.padEnd(20)} → ${humanizeCron(wrapup)}（${wrapup}）`);
   }
 
+  // 飞书招聘/多维表格：每天自动拉面试结果回流（给校准喂 ground truth）
+  // 默认 dry-run + 通知（结论映射没确认前不擅自落库）；FEISHU_HIRE_AUTO_APPLY=true 才自动落库
+  const hireSync = process.env.SCHEDULE_HIRESYNC || '0 20 * * 1-5';
+  const hireSrcOn = process.env.FEISHU_HIRE_ENABLED === 'true'
+    || Boolean(process.env.FEISHU_BITABLE_APP_TOKEN || config.feishu.bitable.appToken);
+  if (hireSrcOn && cron.validate(hireSync)) {
+    cron.schedule(hireSync, async () => {
+      try {
+        const autoApply = process.env.FEISHU_HIRE_AUTO_APPLY === 'true';
+        const { syncInterviewOutcomes } = await import('./channels/feishu-hire');
+        const r = await syncInterviewOutcomes({ dryRun: !autoApply });
+        if (r.resolved.length > 0 || r.error) await notify('🔱 HireSeek 面试结果同步', r.text);
+      } catch (e) { console.error('[HireSync] 出错:', e instanceof Error ? e.message : e); }
+    });
+    console.log(`  ${'面试结果同步'.padEnd(20)} → ${humanizeCron(hireSync)}（${hireSync}，${process.env.FEISHU_HIRE_AUTO_APPLY === 'true' ? '自动落库' : 'dry-run+通知'}）`);
+  }
+
   // 启动后立即跑一次，别等到整点
   setTimeout(() => proactiveCheck().catch(() => {}), 5000);
 }
