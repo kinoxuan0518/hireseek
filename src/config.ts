@@ -52,6 +52,14 @@ export const config = {
     baseUrl: process.env.VERIFIER_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
     model:   process.env.VERIFIER_MODEL    || process.env.DEEPSEEK_REASONER_MODEL || 'deepseek-v4-pro',
   },
+  // 重校官（学习闭环：用真实过面结果重写"合适"的定义）专用模型。
+  // 默认回退到 verifier；但强烈建议指向**异构于 verifier** 的模型——否则就是
+  // "同一个脑子分析它自己打的预测、再改它自己依据的标准"，自证风险。
+  recalibrator: {
+    apiKey:  process.env.RECALIBRATOR_API_KEY  || process.env.VERIFIER_API_KEY  || process.env.DEEPSEEK_API_KEY || '',
+    baseUrl: process.env.RECALIBRATOR_BASE_URL || process.env.VERIFIER_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+    model:   process.env.RECALIBRATOR_MODEL    || process.env.VERIFIER_MODEL    || process.env.DEEPSEEK_REASONER_MODEL || 'deepseek-v4-pro',
+  },
   anthropic: {
     apiKey:  process.env.ANTHROPIC_API_KEY || '',
     baseUrl: process.env.ANTHROPIC_BASE_URL || '',

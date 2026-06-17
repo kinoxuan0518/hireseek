@@ -343,7 +343,20 @@ async function execute(d: HeartbeatDecision): Promise<string> {
       return `已派后台任务 #${t.id}`;
     }
     case 'evolve_dry': {
-      const { evolve } = await import('./evolution');
+      const { evolve, learn } = await import('./evolution');
+      // 判断失效（校准没区分度）时，优先跑"合适"定义重校（学习闭环），否则跑常规复盘
+      const jobId = (() => { const j = loadActiveJob(); return j ? j.title.replace(/\s+/g, '_') : 'default'; })();
+      let calBroken = false;
+      try {
+        const { calibrationReport } = await import('./feedback');
+        const c = calibrationReport(jobId);
+        calBroken = c.lift != null && c.lift <= 0 && c.matched >= 5;
+      } catch { /* 校准不可用按常规复盘 */ }
+
+      if (calBroken) {
+        const report = await learn({ dryRun: true, notify: true });
+        return `判断失效→已跑"合适"定义重校（dry-run，报告已推送）：${report.slice(0, 150)}`;
+      }
       const report = await evolve({ dryRun: true, notify: true });
       return `进化复盘完成（dry-run，报告已推送）：${report.slice(0, 150)}`;
     }

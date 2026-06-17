@@ -133,3 +133,25 @@ v2 让 HireSeek 能干活，v3 解决"它只在我开终端时才活着、关了
 - 合规验证器合成轨迹端到端：9 步不合规轨迹（无筛选/乱开百度/高频打招呼）被准确判 fail 并逐条引证
 - 修复合成测试 8/8 通过：清单解析、候选人落库、诚实-skip、复合键校准、去重
 - 已知边界：执行轨迹尚未回填 ref 语义标签；结果轴随机抽样默认 8 人
+
+---
+
+# 第五次进化（2026-06-16 续）：合格供给驱动 + 学习闭环
+
+承接「目标定义」的长聊，把目标真正接进 loop 的决策与学习。
+
+## 心跳由"合格供给"驱动（计分板→方向盘）
+
+- `feedback.ts` 加 `supplyBoard(jobId, qualityTarget)`：合格供给(验证器判 fit≥60，非触达数) / 已验证覆盖 / 管线在途 / 过面进度 / 校准状态，派生"池子见底""判断失效"信号
+- 心跳 gatherSignals 首要信号换成它；决策原则按优先级重写（判断失效优先校准 ＞ 合格供给不足才寻源 ＞ 池子见底就降级不硬刷）；guard 从"触达≥30 停"改成"合格供给≥quality 停"+安全上限
+- 实测 `beat dry`：以"合格供给严重不足(目标5/实际0达标)"决策，而非数触达
+
+## 学习闭环：让"合适"的定义自己长
+
+- `src/evolution/recalibrate.ts` `recalibrateFromOutcomes()`：拉"既被预测又有真实过面结果"的候选人，重点喂误判（判合适却挂面=假阳性、判不合适却过面=假阴性）给 v4-pro，反推过面者/挂面者共性、rubric 哪里欠校准，产出修订版 candidate-evaluation.md。复用 evolution 的 applyProposals（每文件独立 git commit、可回滚）
+- 入口：`evolution/index.ts` 加 `learn(opts)`；CLI `hireseek learn [dry]`；chat 工具 `recalibrate_fit_definition`(默认 dry，apply=true 才落盘，刻意不进 sub-agent 白名单)；heartbeat evolve_dry 在 calibrationBroken 时自动转 learn-dry+notify
+- 铁律：matched 样本 <6 不改写（连模型都不调）；自主路径只 dry+通知，落盘需人确认
+- 实测真实 v4-pro：合成误判(4大厂判合适全挂 + 3小厂Agent判不合适全过)→准确诊断"高估大厂光环、忽略垂直深度"，区分明星AI创业 vs 大厂，产出新 rubric；dry 不动文件
+- 自评审：Workflow 3 维（安全/正确/元Goodhart）对抗性核实
+
+至此 Loop Engineering 灵魂全闭环：寻源→判合适→触达→真实过面回流→校准→**学习(定义自己改)**→判得更准。人是终极验证器，但它在把人的判断学进自己的标准。

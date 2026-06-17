@@ -712,6 +712,21 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'recalibrate_fit_definition',
+      description: '学习闭环：把真实过面/挂面结果回喂，自动重校"合适"的定义（candidate-evaluation.md）。' +
+        '当用户说"重新校准一下""根据面试结果调整筛选标准""你对合适的判断该更新了"，或校准显示判断没区分度时调用。' +
+        '默认 dry-run 仅出修订提案不落盘；apply=true 才真正改写（git 提交可回滚）。无足够数据会如实说明不改。',
+      parameters: {
+        type: 'object',
+        properties: {
+          apply: { type: 'boolean', description: 'true=落盘改写并 git 提交；省略/false=仅预览提案' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'git_status',
       description: '查看当前 git 仓库的状态：当前分支、已修改文件、未跟踪文件等。',
       parameters: { type: 'object', properties: {} },
@@ -1083,6 +1098,7 @@ export function describeToolCall(name: string, args: Record<string, unknown>): s
     case 'log_candidate_note': return `🧠 记录候选人笔记 ${short(args.name, 12)}`;
     case 'record_interview_outcome': return `🎯 记录面试结果 ${short(args.name, 12)}（${args.result === 'failed' ? '挂面' : '过面'}）`;
     case 'goal_board': return '🎯 查看结果目标计分板';
+    case 'recalibrate_fit_definition': return args.apply ? '🧠 重写"合适"的定义（落盘）' : '🧠 重校"合适"的定义（预览）';
     case 'feishu_recruiting_stats': return '📊 读取飞书招聘数据';
     case 'web_search':       return `🔎 搜索「${short(args.query, 24)}」`;
     case 'read_pdf':         return `📄 读取简历 ${short(args.path ?? args.file_path, 36)}`;
@@ -1596,6 +1612,12 @@ export async function executeTool(name: string, args: any): Promise<string> {
     case 'goal_board': {
       const { goalBoard } = await import('./feedback');
       return goalBoard().text;
+    }
+
+    case 'recalibrate_fit_definition': {
+      const { learn } = await import('./evolution');
+      // 默认 dry-run（仅提案）；apply=true 才落盘改写（git 可回滚）
+      return await learn({ dryRun: args.apply !== true, notify: false });
     }
 
     case 'git_status': {

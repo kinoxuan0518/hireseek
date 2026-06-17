@@ -45,6 +45,7 @@ const USAGE = `
   hireseek evo dry             只出复盘报告，不落盘
   hireseek evo back            回滚最近一次进化
   hireseek evo log             进化历史与效果对比
+  hireseek learn               学习闭环：用真实过面结果自动重校"合适"的定义（dry 仅预览）
   hireseek beat                手动跑一次心跳决策（主动性循环）
   hireseek beat dry            只看决策不执行
   hireseek beat log            心跳历史
@@ -325,6 +326,16 @@ async function main(): Promise<void> {
       const report = await evolve({ dryRun, notify: !dryRun });
       console.log(report);
     }
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'learn' || command === 'recalibrate') {
+    // 学习闭环：把真实过面结果回喂，自动重校"合适"的定义（dry 仅预览，否则落盘+git commit）
+    const { learn } = await import('./evolution');
+    const dryRun = args[1] === 'dry' || args.includes('--dry-run');
+    console.log(chalk.cyan(`\n🧠 用真实过面结果重校"合适"的定义${dryRun ? '（dry-run，仅预览）' : ''}...\n`));
+    const report = await learn({ dryRun, notify: !dryRun });
+    console.log(report);
     db.close();
     process.exit(0);
 
