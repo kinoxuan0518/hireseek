@@ -251,7 +251,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'run_sourcing',
-      description: '在指定招聘渠道执行 sourcing 任务。不指定渠道时自动根据职位配置决定。BOSS 默认就地接管当前 Chrome 页面，不自动导航。',
+      description: '在指定招聘渠道执行 sourcing 任务。不指定渠道时自动根据职位配置决定。BOSS 默认就地接管当前 Chrome 页面，不自动导航。需要先预检且禁止真实触达时设置 dry_run=true。',
       parameters: {
         type: 'object',
         properties: {
@@ -263,6 +263,10 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
           from_current: {
             type: 'boolean',
             description: '是否就地接管当前 Chrome 页面，不自动导航。BOSS 默认 true。',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: '预检模式：接管真实页面但禁止打招呼、输入、点击副作用。用于真实执行前验页面/岗位/登录态。',
           },
         },
       },
@@ -1409,6 +1413,7 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
           : channel === 'boss';
         await runChannel(channel, undefined, {
           fromCurrent,
+          dryRun: args.dry_run === true,
           progress: msg => console.log(chalk.gray(`  ${msg}`)),
         });
       } else {

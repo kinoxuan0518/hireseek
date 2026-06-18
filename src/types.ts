@@ -34,6 +34,7 @@ export interface TaskRun {
   id?: number;
   job_id: string;
   channel: Channel;
+  mode?: 'execute' | 'dry_run';
   started_at: string;
   finished_at?: string;
   status: 'running' | 'completed' | 'failed';

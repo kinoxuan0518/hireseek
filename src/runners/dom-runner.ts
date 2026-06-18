@@ -20,6 +20,7 @@ import { repairToolMessageHistoryInPlace } from '../message-integrity';
 import type { BrowserAction, BrowserTarget, RiskGuard } from '../browser-session';
 import { isDomBrowserSession } from '../browser-session';
 import { recordToolCall } from '../agent-core/trace';
+import type { ToolExecutionMode } from '../agent-core/tool-registry';
 
 export type { BrowserAction, RiskGuard } from '../browser-session';
 
@@ -27,6 +28,7 @@ const MAX_TURNS = 150;
 const MAX_BODY_TEXT = 6000;
 const MAX_ELEMENTS = 120;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+type SkillExecutionMode = 'execute' | 'dry_run';
 
 // ── 风控规则（代码层硬约束，不依赖模型遵守 prompt）──────────────────────
 /** 打招呼类按钮的最小点击间隔（毫秒） */
@@ -161,6 +163,32 @@ const DOM_GUIDE = `
 - 张三 | 字节跳动 | 82 | 2年Agent平台经验，与岗位高度匹配
 （没有触达任何人就写"已触达候选人清单：无"）
 `.trim();
+
+const DRY_RUN_GUIDE = `
+## Dry-run / 预检模式
+
+当前处于 dry-run。你只能观察页面和判断下一步，不允许产生外部副作用。
+- 可以使用 browser snapshot / wait / scroll。
+- 禁止 click / type / press / goto / back；这些动作会被工具层拒绝，不会执行。
+- 禁止声称已经打招呼，record_contacted 只能用于 greeting_sent=false 的观察记录。
+- 任务结束时输出：当前页面状态、目标岗位是否匹配、下一步正式执行前需要做什么。
+`.trim();
+
+const DRY_RUN_ALLOWED_BROWSER_ACTIONS = new Set<BrowserAction['action']>(['snapshot', 'wait', 'scroll']);
+
+export function dryRunBlocksBrowserAction(input: BrowserAction): boolean {
+  return !DRY_RUN_ALLOWED_BROWSER_ACTIONS.has(input.action);
+}
+
+export function browserActionMode(input: BrowserAction, executionMode: SkillExecutionMode = 'execute'): ToolExecutionMode {
+  if (executionMode === 'dry_run') return 'dry_run';
+  return input.action === 'snapshot' ? 'read' : 'execute';
+}
+
+export function browserActionHasSideEffect(input: BrowserAction, executionMode: SkillExecutionMode = 'execute'): boolean {
+  if (executionMode === 'dry_run') return dryRunBlocksBrowserAction(input);
+  return input.action !== 'snapshot' && input.action !== 'wait';
+}
 
 /**
  * 提取页面文本快照：标记可交互元素 + 收集正文。
@@ -338,7 +366,10 @@ export class DomRunner implements LLMRunner {
     onProgress?: (msg: string) => void,
     options: RunSkillOptions = {},
   ): Promise<SkillResult> {
-    const system = [DOM_GUIDE, systemPrompt].join('\n\n---\n\n');
+    const executionMode = options.executionMode ?? 'execute';
+    const system = [DOM_GUIDE, executionMode === 'dry_run' ? DRY_RUN_GUIDE : '', systemPrompt]
+      .filter(Boolean)
+      .join('\n\n---\n\n');
     const initSnapshot = isDomBrowserSession(page) ? await page.snapshot() : await takeDomSnapshot(page);
 
     const messages: OpenAI.ChatCompletionMessageParam[] = [
@@ -427,6 +458,9 @@ export class DomRunner implements LLMRunner {
             if (!a.name) {
               recordOk = false;
               toolContent = '登记失败：缺少 name。请重新调用 record_contacted，补上候选人姓名。';
+            } else if (executionMode === 'dry_run' && a.greeting_sent !== false) {
+              recordOk = false;
+              toolContent = '登记失败：当前是 dry-run 预检模式，不能登记为已真实打招呼。请改为 greeting_sent=false 或直接输出预检总结。';
             } else if (a.greeting_sent !== false) {
               const missing = ['evidence', 'personalization_evidence', 'message_intent', 'greeting_text']
                 .filter(key => !String(a[key] ?? '').trim());
@@ -472,7 +506,7 @@ export class DomRunner implements LLMRunner {
             ok: recordOk,
             error: recordOk ? null : toolContent,
             sideEffect: false,
-            mode: 'execute',
+            mode: executionMode === 'dry_run' ? 'dry_run' : 'execute',
           });
           continue;
         }
@@ -514,6 +548,7 @@ export class DomRunner implements LLMRunner {
           input = JSON.parse(toolCall.function.arguments || '{}') as BrowserAction;
         } catch (err) {
           const message = `browser 参数不是合法 JSON：${err instanceof Error ? err.message : String(err)}`;
+          const mode = executionMode === 'dry_run' ? 'dry_run' : 'execute';
           messages.push({ role: 'tool', tool_call_id: toolCall.id, content: message });
           recordToolCall({
             runId: options.runId,
@@ -525,7 +560,7 @@ export class DomRunner implements LLMRunner {
             ok: false,
             error: message,
             sideEffect: true,
-            mode: 'execute',
+            mode,
           });
           continue;
         }
@@ -535,8 +570,8 @@ export class DomRunner implements LLMRunner {
         onProgress?.(actionLog);
         emitLog(actionLog);
 
-        if (options.blockedBrowserActions?.includes(input.action)) {
-          const blocked = `当前模式禁止执行 ${input.action}。请改用允许的页面内动作，或停止工具调用并输出当前状态总结。`;
+        if (executionMode === 'dry_run' && dryRunBlocksBrowserAction(input)) {
+          const blocked = `dry-run 预检模式禁止执行 ${input.action}，已阻止真实浏览器动作。请只用 snapshot/wait/scroll 观察页面，或输出预检总结。`;
           messages.push({
             role: 'tool',
             tool_call_id: toolCall.id,
@@ -552,7 +587,47 @@ export class DomRunner implements LLMRunner {
             ok: false,
             error: blocked,
             sideEffect: true,
-            mode: 'execute',
+            mode: 'dry_run',
+          });
+          try {
+            result.trace!.push({
+              seq: result.trace!.length + 1,
+              action: input.action,
+              target: input.url ?? (input.ref != null ? `ref=${input.ref}` : undefined),
+              detail: 'blocked by dry-run',
+              ok: false,
+              at: new Date().toISOString(),
+              toolName: 'browser',
+              inputSummary: toolCall.function.arguments,
+              outputSummary: blocked,
+              error: blocked,
+              sideEffect: true,
+              mode: 'dry_run',
+            });
+          } catch { /* 轨迹记录失败绝不影响 sourcing */ }
+          continue;
+        }
+
+        if (options.blockedBrowserActions?.includes(input.action)) {
+          const blocked = `当前模式禁止执行 ${input.action}。请改用允许的页面内动作，或停止工具调用并输出当前状态总结。`;
+          const mode = browserActionMode(input, executionMode);
+          const sideEffect = browserActionHasSideEffect(input, executionMode);
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: blocked,
+          });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'browser',
+            input,
+            output: blocked,
+            ok: false,
+            error: blocked,
+            sideEffect,
+            mode,
           });
           try {
             result.trace!.push({
@@ -562,8 +637,8 @@ export class DomRunner implements LLMRunner {
               detail: 'blocked by run mode',
               ok: false,
               toolName: 'browser',
-              sideEffect: true,
-              mode: 'execute',
+              sideEffect,
+              mode,
             });
           } catch { /* 轨迹记录失败绝不影响 sourcing */ }
           continue;
@@ -575,8 +650,8 @@ export class DomRunner implements LLMRunner {
         });
         if (policyDecision && !policyDecision.allowed) {
           const blocked = policyDecision.reason ?? `当前平台协议禁止执行 ${input.action}`;
-          const sideEffect = input.action !== 'snapshot' && input.action !== 'wait';
-          const mode = input.action === 'snapshot' ? 'read' : 'execute';
+          const sideEffect = browserActionHasSideEffect(input, executionMode);
+          const mode = browserActionMode(input, executionMode);
           messages.push({
             role: 'tool',
             tool_call_id: toolCall.id,
@@ -653,8 +728,8 @@ export class DomRunner implements LLMRunner {
             inputSummary: toolCall.function.arguments,
             outputSummary: snapshot.slice(0, 700),
             error: stepError ?? undefined,
-            sideEffect: input.action !== 'snapshot' && input.action !== 'wait',
-            mode: input.action === 'snapshot' ? 'read' : 'execute',
+            sideEffect: browserActionHasSideEffect(input, executionMode),
+            mode: browserActionMode(input, executionMode),
           });
         } catch { /* 轨迹记录失败绝不影响 sourcing */ }
         recordToolCall({
@@ -666,8 +741,8 @@ export class DomRunner implements LLMRunner {
           output: snapshot,
           ok: stepOk,
           error: stepError,
-          sideEffect: input.action !== 'snapshot' && input.action !== 'wait',
-          mode: input.action === 'snapshot' ? 'read' : 'execute',
+          sideEffect: browserActionHasSideEffect(input, executionMode),
+          mode: browserActionMode(input, executionMode),
         });
 
         // 风控检测：基于页面快照文本（代码层判定，不依赖模型识别）

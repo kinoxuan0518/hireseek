@@ -39,6 +39,7 @@ db.exec(`
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id          TEXT NOT NULL,
     channel         TEXT NOT NULL,
+    mode            TEXT NOT NULL DEFAULT 'execute',
     started_at      TEXT NOT NULL,
     finished_at     TEXT,
     status          TEXT NOT NULL DEFAULT 'running',
@@ -156,6 +157,13 @@ try {
   addColumn('message_intent', `ALTER TABLE run_candidates ADD COLUMN message_intent TEXT`);
   addColumn('risk_flags', `ALTER TABLE run_candidates ADD COLUMN risk_flags TEXT`);
   addColumn('fit_tags', `ALTER TABLE run_candidates ADD COLUMN fit_tags TEXT`);
+} catch { /* 迁移失败不阻断启动 */ }
+
+try {
+  const cols = db.prepare(`PRAGMA table_info(task_runs)`).all() as Array<{ name: string }>;
+  if (!cols.some(c => c.name === 'mode')) {
+    db.exec(`ALTER TABLE task_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'execute'`);
+  }
 } catch { /* 迁移失败不阻断启动 */ }
 
 // ── 人才记忆库 FTS5 全文检索（"之前聊过的做供应链的人"）─────────────────
@@ -354,9 +362,9 @@ export const memoryOps = {
 
 // ── 任务记录操作 ──────────────────────────────────────────
 export const taskRunOps = {
-  start: db.prepare<Pick<TaskRun, 'job_id' | 'channel' | 'started_at'>>(`
-    INSERT INTO task_runs (job_id, channel, started_at)
-    VALUES (@job_id, @channel, @started_at)
+  start: db.prepare<Pick<TaskRun, 'job_id' | 'channel' | 'started_at'> & { mode?: 'execute' | 'dry_run' }>(`
+    INSERT INTO task_runs (job_id, channel, mode, started_at)
+    VALUES (@job_id, @channel, COALESCE(@mode, 'execute'), @started_at)
   `),
 
   complete: db.prepare<{

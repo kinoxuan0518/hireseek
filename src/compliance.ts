@@ -159,9 +159,10 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   }
 
   const job = loadActiveJob();
-  const runRow = db.prepare(`SELECT job_id, channel FROM task_runs WHERE id = ?`).get(runId) as { job_id: string; channel: string } | undefined;
+  const runRow = db.prepare(`SELECT job_id, channel, mode FROM task_runs WHERE id = ?`).get(runId) as { job_id: string; channel: string; mode?: string } | undefined;
   const channelRow = db.prepare(`SELECT channel FROM run_actions WHERE run_id = ? LIMIT 1`).get(runId) as { channel: string } | undefined;
   const channel = (runRow?.channel ?? channelRow?.channel ?? 'boss') as Channel;
+  const runMode = runRow?.mode === 'dry_run' ? 'dry_run' : 'execute';
   const jobId = runRow?.job_id ?? (job ? job.title.replace(/\s+/g, '_') : 'default');
 
   // 契约履约检查（manifest 即清单）：boss-greeting.v1 声明 writes 了哪些产物，
@@ -169,7 +170,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   const contractViolations: Violation[] = [];
   try {
     const contractName = contractNameForChannel(channel);
-    const promised = contractWritesForChannel(channel);
+    const promised = runMode === 'dry_run' ? [] : contractWritesForChannel(channel);
     const wrote: Record<string, number> = {
       contacted_candidates: (db.prepare(`SELECT COUNT(*) n FROM run_candidates WHERE run_id = ?`).get(runId) as { n: number }).n,
       run_trace: trace.length,
@@ -184,22 +185,24 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
         });
       }
     }
-    const incompleteOutreach = (db.prepare(`
-      SELECT COUNT(*) n FROM run_candidates
-      WHERE run_id = ?
-        AND (
-          COALESCE(TRIM(evidence), '') = ''
-          OR COALESCE(TRIM(personalization_evidence), '') = ''
-          OR COALESCE(TRIM(message_intent), '') = ''
-          OR COALESCE(TRIM(greeting_text), '') = ''
-        )
-    `).get(runId) as { n: number }).n;
-    if (incompleteOutreach > 0) {
-      contractViolations.push({
-        rule: `触达输出协议 outreach-output.v1 缺少可审计字段`,
-        severity: 'high',
-        evidence: `run #${runId} 有 ${incompleteOutreach} 条 contacted_candidates 缺 evidence/personalization_evidence/message_intent/greeting_text`,
-      });
+    if (runMode !== 'dry_run') {
+      const incompleteOutreach = (db.prepare(`
+        SELECT COUNT(*) n FROM run_candidates
+        WHERE run_id = ?
+          AND (
+            COALESCE(TRIM(evidence), '') = ''
+            OR COALESCE(TRIM(personalization_evidence), '') = ''
+            OR COALESCE(TRIM(message_intent), '') = ''
+            OR COALESCE(TRIM(greeting_text), '') = ''
+          )
+      `).get(runId) as { n: number }).n;
+      if (incompleteOutreach > 0) {
+        contractViolations.push({
+          rule: `触达输出协议 outreach-output.v1 缺少可审计字段`,
+          severity: 'high',
+          evidence: `run #${runId} 有 ${incompleteOutreach} 条 contacted_candidates 缺 evidence/personalization_evidence/message_intent/greeting_text`,
+        });
+      }
     }
   } catch { /* 契约不可用则跳过履约检查 */ }
 

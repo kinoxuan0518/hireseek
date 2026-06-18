@@ -158,16 +158,33 @@ const LOGIN_OR_MISSING_PATTERNS: Partial<Record<Channel, RegExp>> = {
   linkedin: /Sign in|Join LinkedIn|登录/,
 };
 
-function taskPromptForChannel(channel: Channel, label: string, fromCurrent = false): string {
+function taskPromptForChannel(channel: Channel, label: string, fromCurrent = false, dryRun = false): string {
   const protocol = getPlatformProtocol(channel);
-  if (protocol) {
-    return protocol.buildTaskPrompt({ channelLabel: label, fromCurrent });
-  }
-  return fromCurrent ? TASK_PROMPT_HERE(label) : TASK_PROMPT(label);
+  const base = protocol
+    ? protocol.buildTaskPrompt({ channelLabel: label, fromCurrent })
+    : fromCurrent ? TASK_PROMPT_HERE(label) : TASK_PROMPT(label);
+  if (!dryRun) return base;
+  return [
+    base,
+    [
+      '## Dry-run 预检约束',
+      '',
+      '本轮只做真实 Chrome 页面预检，不允许打招呼、不允许点击会发起沟通的按钮、不允许输入触达话术。',
+      '请输出当前页面状态、目标岗位是否匹配、是否能安全开始正式执行，以及正式执行前需要调整什么。',
+    ].join('\n'),
+  ].join('\n\n---\n\n');
 }
 
-function runSkillOptionsForChannel(channel: Channel, runId: number | null, fromCurrent = false): RunSkillOptions {
-  const base: RunSkillOptions = { runId: runId ?? undefined };
+export function runSkillOptionsForChannel(
+  channel: Channel,
+  runId: number | null,
+  fromCurrent = false,
+  dryRun = false,
+): RunSkillOptions {
+  const base: RunSkillOptions = {
+    runId: runId ?? undefined,
+    executionMode: dryRun ? 'dry_run' : 'execute',
+  };
   const protocol = getPlatformProtocol(channel);
   if (protocol?.browserActionPolicy) {
     return {
@@ -256,7 +273,7 @@ async function ensurePlatformSession(target: BrowserTarget, channel: Channel): P
 export async function runChannel(
   channel: Channel,
   jobId?: string,
-  opts: { fromCurrent?: boolean; progress?: (msg: string) => void } = {}
+  opts: { fromCurrent?: boolean; dryRun?: boolean; progress?: (msg: string) => void } = {}
 ): Promise<number> {
   // 默认绑定当前 active job，而不是字面量 'default'。否则心跳/CLI 不传 jobId 时，
   // 候选人落到 job_id='default'，而 verifier 按 active job 查 → 永远查不到（落库错位）。
@@ -264,8 +281,9 @@ export async function runChannel(
   const activeJob = runtime.activeJob;
   if (!jobId) jobId = runtime.activeJobId;
   const label = CHANNEL_LABEL[channel];
-  console.log(`\n[Orchestrator] ▶ 开始 ${label} sourcing`);
-  emitLog(`▶ 开始 ${label} sourcing`);
+  const dryRun = !!opts.dryRun;
+  console.log(`\n[Orchestrator] ▶ 开始 ${label} sourcing${dryRun ? '（dry-run 预检）' : ''}`);
+  emitLog(`▶ 开始 ${label} sourcing${dryRun ? '（dry-run 预检）' : ''}`);
   emitStatus('running');
 
   const startMs = Date.now();
@@ -286,7 +304,7 @@ export async function runChannel(
     }
 
     const startedAt = dayjs().toISOString();
-    const runResult = taskRunOps.start.run({ job_id: jobId, channel, started_at: startedAt });
+    const runResult = taskRunOps.start.run({ job_id: jobId, channel, mode: dryRun ? 'dry_run' : 'execute', started_at: startedAt });
     runId = runResult.lastInsertRowid as number;
 
     // 组装系统提示：SOUL + 职位上下文 + 中层能力 + 记忆 + Skill资产
@@ -306,9 +324,9 @@ export async function runChannel(
     const result = await runner.runSkill(
       page,
       systemPrompt,
-      taskPromptForChannel(channel, label, !!opts.fromCurrent),
+      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun),
       opts.progress ?? ((msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))),
-      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent),
+      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun),
     );
 
     const durationSec = Math.round((Date.now() - startMs) / 1000);
@@ -329,28 +347,32 @@ export async function runChannel(
     // 统一落库：结构化候选人（verifier 数据来源）+ 执行轨迹（合规审计来源）
     persistRunResult(runId, jobId, channel, result);
 
-    // 生成反思并存储
-    try {
-      const reflectionPrompt = buildReflectionPrompt(label, result.contacted, result.skipped, result.summary);
-      const runner = createRunner();
-      const reflectionResult = await runner.runSkill(
-        await getPage(),
-        '你是一个正在学习成长的招聘助手，请认真反思自己的执行过程。',
-        reflectionPrompt,
-      );
-      reflectionOps.save.run({ job_id: jobId, channel, run_id: runId, content: reflectionResult.summary });
-      console.log(`[Orchestrator] 💭 反思已记录`);
-    } catch {
-      // 反思失败不影响主流程
-    }
+    if (!dryRun) {
+      // 生成反思并存储
+      try {
+        const reflectionPrompt = buildReflectionPrompt(label, result.contacted, result.skipped, result.summary);
+        const runner = createRunner();
+        const reflectionResult = await runner.runSkill(
+          await getPage(),
+          '你是一个正在学习成长的招聘助手，请认真反思自己的执行过程。',
+          reflectionPrompt,
+        );
+        reflectionOps.save.run({ job_id: jobId, channel, run_id: runId, content: reflectionResult.summary });
+        console.log(`[Orchestrator] 💭 反思已记录`);
+      } catch {
+        // 反思生成失败不影响主流程
+      }
 
-    await sendReport({
-      channel,
-      contacted: result.contacted,
-      skipped: result.skipped,
-      summary: result.summary,
-      durationSec,
-    });
+      await sendReport({
+        channel,
+        contacted: result.contacted,
+        skipped: result.skipped,
+        summary: result.summary,
+        durationSec,
+      });
+    } else {
+      console.log(`[Orchestrator] dry-run 预检完成：未发送报告、未生成反思、未触达候选人`);
+    }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     console.error(`\n[Orchestrator] ✗ ${label} 失败: ${error}`);
@@ -370,13 +392,15 @@ export async function runChannel(
       error,
     });
 
-    await sendReport({
-      channel,
-      contacted: 0,
-      skipped: 0,
-      summary: `执行失败: ${error}`,
-      durationSec: Math.round((Date.now() - startMs) / 1000),
-    });
+    if (!dryRun) {
+      await sendReport({
+        channel,
+        contacted: 0,
+        skipped: 0,
+        summary: `执行失败: ${error}`,
+        durationSec: Math.round((Date.now() - startMs) / 1000),
+      });
+    }
   }
   return runId; // 供调用方把 verify/compliance 绑定到【本轮】
 }
@@ -583,7 +607,7 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
   // 这里复用 runChannel 的逻辑，但用指定的 page
   const label = CHANNEL_LABEL[channel];
   const startedAt = dayjs().toISOString();
-  const runResult = taskRunOps.start.run({ job_id: jobId, channel, started_at: startedAt });
+  const runResult = taskRunOps.start.run({ job_id: jobId, channel, mode: 'execute', started_at: startedAt });
   const runId = runResult.lastInsertRowid as number;
   const startMs = Date.now();
 

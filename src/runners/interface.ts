@@ -1,5 +1,6 @@
 import type { BrowserAction, BrowserTarget } from '../browser-session';
 import type { SkillResult } from '../types';
+import type { ToolExecutionMode } from '../agent-core/tool-registry';
 
 export interface BrowserActionPolicyDecision {
   allowed: boolean;
@@ -17,6 +18,8 @@ export type BrowserActionPolicy = (
 ) => BrowserActionPolicyDecision;
 
 export interface RunSkillOptions {
+  /** execute=真实执行；dry_run=只观察/预检，禁止外部副作用。 */
+  executionMode?: Extract<ToolExecutionMode, 'execute' | 'dry_run'>;
   blockedBrowserActions?: BrowserAction['action'][];
   /** 中层平台协议可在这里约束浏览器动作；runner 只执行通用策略结果。 */
   browserActionPolicy?: BrowserActionPolicy;

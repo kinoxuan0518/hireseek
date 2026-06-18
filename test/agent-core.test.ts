@@ -91,6 +91,24 @@ describe('agent core lower layer', () => {
     expect(rows[0]).toMatchObject({ run_id: 101, tool_name: 'browser_act', ok: 1, side_effect: 1, mode: 'execute' });
   });
 
+  it('classifies dry-run browser actions without allowing side effects', async () => {
+    const {
+      browserActionHasSideEffect,
+      browserActionMode,
+      dryRunBlocksBrowserAction,
+    } = await import('../src/runners/dom-runner');
+
+    expect(dryRunBlocksBrowserAction({ action: 'click', ref: 1 })).toBe(true);
+    expect(dryRunBlocksBrowserAction({ action: 'type', ref: 1, text: 'hello' })).toBe(true);
+    expect(dryRunBlocksBrowserAction({ action: 'goto', url: 'https://example.com' })).toBe(true);
+    expect(dryRunBlocksBrowserAction({ action: 'snapshot' })).toBe(false);
+    expect(dryRunBlocksBrowserAction({ action: 'scroll', direction: 'down' })).toBe(false);
+
+    expect(browserActionMode({ action: 'click', ref: 1 }, 'dry_run')).toBe('dry_run');
+    expect(browserActionHasSideEffect({ action: 'scroll', direction: 'down' }, 'dry_run')).toBe(false);
+    expect(browserActionHasSideEffect({ action: 'click', ref: 1 }, 'dry_run')).toBe(true);
+  });
+
   it('saves repaired session message history', async () => {
     const { saveAgentSessionMessages, loadAgentSessionMessages } = await import('../src/agent-core/session-store');
     const { db } = await import('../src/db');
@@ -230,6 +248,34 @@ describe('agent core lower layer', () => {
     expect(saved.verdict).toBe('fail');
     expect(saved.violation_count).toBeGreaterThan(0);
     expect(saved.detail).toContain('outreach-output.v1');
+  });
+
+  it('does not treat dry-run task runs as formal outreach contract failures', async () => {
+    const { complianceCheck } = await import('../src/compliance');
+    const { db, taskRunOps } = await import('../src/db');
+
+    const inserted = taskRunOps.start.run({
+      job_id: 'Agent工程师',
+      channel: 'boss',
+      mode: 'dry_run',
+      started_at: new Date().toISOString(),
+    });
+    const runId = Number(inserted.lastInsertRowid);
+    taskRunOps.complete.run({
+      id: runId,
+      finished_at: new Date().toISOString(),
+      status: 'completed',
+      contacted_count: 0,
+      skipped_count: 0,
+      error: null,
+    });
+
+    const row = db.prepare(`SELECT mode FROM task_runs WHERE id = ?`).get(runId) as { mode: string };
+    expect(row.mode).toBe('dry_run');
+
+    const result = await complianceCheck({ runId });
+    expect(result.verdict).toBe('skip');
+    expect(result.violations).toHaveLength(0);
   });
 
   it('formats read-only core status for observability', async () => {
