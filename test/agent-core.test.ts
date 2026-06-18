@@ -130,7 +130,7 @@ describe('agent core lower layer', () => {
   });
 
   it('persists run trace stage markers for compliance coverage', async () => {
-    const { saveRunTrace, summarizeStageCoverage } = await import('../src/compliance');
+    const { inspectStageCoverage, saveRunTrace, summarizeStageCoverage } = await import('../src/compliance');
     const { db } = await import('../src/db');
     const runId = 505;
 
@@ -159,6 +159,43 @@ describe('agent core lower layer', () => {
     expect(coverage).toContain('prefilter');
     expect(coverage).toContain('已观测 browser=1');
     expect(coverage).toContain('single-contact');
+
+    const audit = inspectStageCoverage('boss', runId, [
+      { seq: 1, action: 'click', target: 'ref=11', ok: true, stageId: 'prefilter' },
+    ]);
+    expect(audit.declared).toBe(7);
+    expect(audit.instrumented).toBe(true);
+    expect(audit.stages.find(s => s.id === 'prefilter')?.browserActions).toBe(1);
+    expect(audit.violations).toHaveLength(0);
+  });
+
+  it('mechanically flags contact without prefilter stage evidence', async () => {
+    const { inspectStageCoverage } = await import('../src/compliance');
+    const { recordToolCall } = await import('../src/agent-core/trace');
+    const { db } = await import('../src/db');
+    const runId = 506;
+
+    db.prepare(`DELETE FROM run_actions WHERE run_id = ?`).run(runId);
+    db.prepare(`DELETE FROM agent_tool_calls WHERE run_id = ?`).run(runId);
+
+    recordToolCall({
+      runId,
+      sessionId: 'stage-missing-prefilter',
+      toolCallId: 'tc-contact',
+      toolName: 'record_contacted',
+      input: { name: 'Candidate' },
+      output: 'ok',
+      ok: true,
+      sideEffect: false,
+      mode: 'execute',
+      stageId: 'single-contact',
+    });
+
+    const audit = inspectStageCoverage('boss', runId, [
+      { seq: 1, action: 'click', target: 'ref=88', ok: true, stageId: 'candidate-screen' },
+    ]);
+    expect(audit.stages.find(s => s.id === 'single-contact')?.toolCalls).toBe(1);
+    expect(audit.violations.some(v => v.severity === 'high' && v.rule.includes('筛选前置'))).toBe(true);
   });
 
   it('classifies dry-run browser actions without allowing side effects', async () => {

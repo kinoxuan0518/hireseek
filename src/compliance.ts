@@ -135,6 +135,23 @@ export interface ComplianceResult {
   summary: string;
 }
 
+export interface StageCoverageRow {
+  id: string;
+  name: string;
+  browserActions: number;
+  toolCalls: number;
+  observed: boolean;
+}
+
+export interface StageCoverageAudit {
+  channel: Channel;
+  declared: number;
+  stages: StageCoverageRow[];
+  unknownStageIds: string[];
+  instrumented: boolean;
+  violations: Violation[];
+}
+
 const COMPLIANCE_SYSTEM = `
 你是 HireSeek 的**流程合规审计官**。寻源 agent 已经跑完一轮，下面是它这一轮的
 完整浏览器执行轨迹。你不评判它找的人好不好（那是另一个验证器的事），你只审
@@ -175,9 +192,11 @@ function loadToolStageCounts(runId: number): Map<string, number> {
   return counts;
 }
 
-export function summarizeStageCoverage(channel: Channel, runId: number, trace: TraceStep[]): string {
+export function inspectStageCoverage(channel: Channel, runId: number, trace: TraceStep[], opts: { runMode?: 'execute' | 'dry_run' } = {}): StageCoverageAudit {
   const stages = getPlatformProtocol(channel)?.stageManifest?.() ?? [];
-  if (stages.length === 0) return '此渠道未声明 stage manifest。';
+  if (stages.length === 0) {
+    return { channel, declared: 0, stages: [], unknownStageIds: [], instrumented: false, violations: [] };
+  }
 
   const actionCounts = new Map<string, number>();
   for (const step of trace) {
@@ -188,14 +207,77 @@ export function summarizeStageCoverage(channel: Channel, runId: number, trace: T
   const known = new Set(stages.map(s => s.id));
   const observed = new Set([...actionCounts.keys(), ...toolCounts.keys()]);
   const unknown = [...observed].filter(id => !known.has(id));
-
   const rows = stages.map(stage => {
-    const actions = actionCounts.get(stage.id) ?? 0;
-    const tools = toolCounts.get(stage.id) ?? 0;
-    const status = actions + tools > 0 ? `已观测 browser=${actions}, tool=${tools}` : '未观测';
+    const browserActions = actionCounts.get(stage.id) ?? 0;
+    const toolCalls = toolCounts.get(stage.id) ?? 0;
+    return {
+      id: stage.id,
+      name: stage.name,
+      browserActions,
+      toolCalls,
+      observed: browserActions + toolCalls > 0,
+    };
+  });
+  const observedKnown = new Set(rows.filter(row => row.observed).map(row => row.id));
+  const instrumented = rows.some(row => row.observed) || unknown.length > 0;
+  const violations: Violation[] = [];
+
+  if (opts.runMode !== 'dry_run') {
+    if (unknown.length > 0) {
+      violations.push({
+        rule: `发现未声明的阶段标记`,
+        severity: 'medium',
+        evidence: `run #${runId} 出现未知 stage_id: ${unknown.join('、')}`,
+      });
+    }
+    if (trace.length > 0 && !instrumented) {
+      violations.push({
+        rule: `协议阶段未留痕`,
+        severity: 'medium',
+        evidence: `run #${runId} 有 ${trace.length} 步 run_trace，但没有任何 stage_id，可审计性不足`,
+      });
+    }
+    if (observedKnown.has('single-contact')) {
+      if (!observedKnown.has('session-precheck')) {
+        violations.push({
+          rule: `触达前缺少会话预检阶段证据`,
+          severity: 'medium',
+          evidence: `run #${runId} 已观测 single-contact，但未观测 session-precheck`,
+        });
+      }
+      if (!observedKnown.has('prefilter')) {
+        violations.push({
+          rule: `触达前缺少筛选前置阶段证据`,
+          severity: 'high',
+          evidence: `run #${runId} 已观测 single-contact，但未观测 prefilter`,
+        });
+      }
+      if (!observedKnown.has('candidate-screen')) {
+        violations.push({
+          rule: `触达前缺少候选人证据查看阶段证据`,
+          severity: 'medium',
+          evidence: `run #${runId} 已观测 single-contact，但未观测 candidate-screen`,
+        });
+      }
+    }
+  }
+
+  return { channel, declared: stages.length, stages: rows, unknownStageIds: unknown, instrumented, violations };
+}
+
+export function summarizeStageCoverage(channel: Channel, runId: number, trace: TraceStep[], opts: { runMode?: 'execute' | 'dry_run' } = {}): string {
+  const audit = inspectStageCoverage(channel, runId, trace, opts);
+  if (audit.declared === 0) return '此渠道未声明 stage manifest。';
+
+  const rows = audit.stages.map(stage => {
+    const status = stage.observed ? `已观测 browser=${stage.browserActions}, tool=${stage.toolCalls}` : '未观测';
     return `- ${stage.id} ${stage.name}: ${status}`;
   });
-  if (unknown.length > 0) rows.push(`- 未知阶段标记: ${unknown.join('、')}`);
+  if (audit.unknownStageIds.length > 0) rows.push(`- 未知阶段标记: ${audit.unknownStageIds.join('、')}`);
+  if (audit.violations.length > 0) {
+    rows.push('', '机械阶段检查：');
+    rows.push(...audit.violations.map(v => `- ${v.severity}: ${v.rule}（${v.evidence}）`));
+  }
   return rows.join('\n');
 }
 
@@ -214,6 +296,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   const channel = (runRow?.channel ?? channelRow?.channel ?? 'boss') as Channel;
   const runMode = runRow?.mode === 'dry_run' ? 'dry_run' : 'execute';
   const jobId = runRow?.job_id ?? (job ? job.title.replace(/\s+/g, '_') : 'default');
+  const stageAudit = inspectStageCoverage(channel, runId, trace, { runMode });
 
   // 契约履约检查（manifest 即清单）：boss-greeting.v1 声明 writes 了哪些产物，
   // 就机械核对本轮 run 是否真写了。少写 = 结构性违规（high），不靠 LLM 判。
@@ -257,14 +340,15 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   } catch { /* 契约不可用则跳过履约检查 */ }
 
   if (trace.length === 0) {
-    if (contractViolations.length > 0) {
-      const verdict: Verdict = contractViolations.some(v => v.severity === 'high') ? 'fail' : 'warn';
-      const summary = buildSummary(verdict, contractViolations, 0);
+    const deterministicViolations = [...contractViolations, ...stageAudit.violations];
+    if (deterministicViolations.length > 0) {
+      const verdict: Verdict = deterministicViolations.some(v => v.severity === 'high') ? 'fail' : 'warn';
+      const summary = buildSummary(verdict, deterministicViolations, 0);
       db.prepare(`
         INSERT INTO compliance_checks (run_id, job_id, channel, steps, verdict, violation_count, detail)
         VALUES (?, ?, ?, 0, ?, ?, ?)
-      `).run(runId, jobId, channel, verdict, contractViolations.length, JSON.stringify({ summary, violations: contractViolations }).slice(0, 4000));
-      return { verdict, runId, steps: 0, violations: contractViolations, summary };
+      `).run(runId, jobId, channel, verdict, deterministicViolations.length, JSON.stringify({ summary, violations: deterministicViolations, stageCoverage: stageAudit }).slice(0, 4000));
+      return { verdict, runId, steps: 0, violations: deterministicViolations, summary };
     }
     return { verdict: 'skip', runId, steps: 0, violations: [], summary: '没有可审计的执行轨迹（这一轮可能没产生浏览器动作，或用的是非 DOM runner）。' };
   }
@@ -272,7 +356,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   const userPrompt = [
     `## 岗位画像\n\n${job ? jobToPrompt(job) : '（岗位画像缺失）'}`,
     `## 过程规则\n\n${loadProcessRules(channel)}`,
-    `## 阶段覆盖\n\n${summarizeStageCoverage(channel, runId, trace)}`,
+    `## 阶段覆盖\n\n${summarizeStageCoverage(channel, runId, trace, { runMode })}`,
     `## 本轮执行轨迹（渠道：${channel}，共 ${trace.length} 步）\n\n${summarizeTrace(trace)}`,
     '请对照过程规则审计这条轨迹，输出 JSON。',
   ].join('\n\n');
@@ -296,19 +380,20 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   // 但契约履约是代码判定的，即便 LLM 审计没解析出来，结构性违规仍要照报。
   if (parsed === null || finishReason === 'length') {
     const why = finishReason === 'length' ? '模型输出被截断' : '输出无法解析';
-    const verdict: Verdict = contractViolations.some(v => v.severity === 'high') ? 'fail' : 'skip';
-    const summary = contractViolations.length
-      ? buildSummary(verdict, contractViolations, trace.length) + `\n（过程合规部分未完成：${why}，请重跑）`
+    const deterministicViolations = [...contractViolations, ...stageAudit.violations];
+    const verdict: Verdict = deterministicViolations.some(v => v.severity === 'high') ? 'fail' : deterministicViolations.length > 0 ? 'warn' : 'skip';
+    const summary = deterministicViolations.length
+      ? buildSummary(verdict, deterministicViolations, trace.length) + `\n（过程合规部分未完成：${why}，请重跑）`
       : `🟡 流程合规：本轮审计未完成（${why}），未下结论——请重跑一次质检。`;
     db.prepare(`
       INSERT INTO compliance_checks (run_id, job_id, channel, steps, verdict, violation_count, detail)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(runId, jobId, channel, trace.length, verdict, contractViolations.length, JSON.stringify({ summary, violations: contractViolations }).slice(0, 4000));
-    return { verdict, runId, steps: trace.length, violations: contractViolations, summary };
+    `).run(runId, jobId, channel, trace.length, verdict, deterministicViolations.length, JSON.stringify({ summary, violations: deterministicViolations, stageCoverage: stageAudit }).slice(0, 4000));
+    return { verdict, runId, steps: trace.length, violations: deterministicViolations, summary };
   }
 
   // 合并：契约履约（结构性，代码判）+ 过程合规（软规则，LLM 判）
-  const violations = [...contractViolations, ...parsed];
+  const violations = [...contractViolations, ...stageAudit.violations, ...parsed];
   const high = violations.filter(v => v.severity === 'high').length;
   const verdict: Verdict = high > 0 ? 'fail' : violations.length > 0 ? 'warn' : 'pass';
   const summary = buildSummary(verdict, violations, trace.length);
@@ -317,7 +402,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
     INSERT INTO compliance_checks (run_id, job_id, channel, steps, verdict, violation_count, detail)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(runId, jobId, channel, trace.length, verdict, violations.length,
-    JSON.stringify({ summary, violations }).slice(0, 4000));
+    JSON.stringify({ summary, violations, stageCoverage: stageAudit }).slice(0, 4000));
 
   return { verdict, runId, steps: trace.length, violations, summary };
 }
