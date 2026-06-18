@@ -64,6 +64,10 @@ db.exec(`
     channel               TEXT NOT NULL,
     score                 INTEGER,
     evidence              TEXT,
+    personalization_evidence TEXT,
+    message_intent        TEXT,
+    risk_flags            TEXT,
+    fit_tags              TEXT,
     greeting_text         TEXT,
     profile_url           TEXT,
     contacted_at          TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -142,6 +146,17 @@ try {
   }
 } catch { /* 迁移失败不阻断启动 */ }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_interaction_log_run ON interaction_log(run_id)`);
+
+try {
+  const cols = db.prepare(`PRAGMA table_info(run_candidates)`).all() as Array<{ name: string }>;
+  const addColumn = (name: string, ddl: string) => {
+    if (!cols.some(c => c.name === name)) db.exec(ddl);
+  };
+  addColumn('personalization_evidence', `ALTER TABLE run_candidates ADD COLUMN personalization_evidence TEXT`);
+  addColumn('message_intent', `ALTER TABLE run_candidates ADD COLUMN message_intent TEXT`);
+  addColumn('risk_flags', `ALTER TABLE run_candidates ADD COLUMN risk_flags TEXT`);
+  addColumn('fit_tags', `ALTER TABLE run_candidates ADD COLUMN fit_tags TEXT`);
+} catch { /* 迁移失败不阻断启动 */ }
 
 // ── 人才记忆库 FTS5 全文检索（"之前聊过的做供应链的人"）─────────────────
 // FTS5 在多数 better-sqlite3 构建中默认可用；万一缺失则降级为 LIKE 检索。

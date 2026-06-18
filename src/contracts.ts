@@ -16,6 +16,7 @@ import path from 'path';
 import yaml from 'js-yaml';
 import { config } from './config';
 import type { Channel } from './types';
+import { getPlatformProtocol } from './platform-protocols';
 
 export interface ContractContextDep {
   key: string;
@@ -53,7 +54,13 @@ const FALLBACK_CONTRACTS: Record<string, Contract> = {
       ],
     },
     writes: ['contacted_candidates', 'run_trace', 'interaction_log'],
-    outputs: { contacted_candidates: { schema: 'contacted-candidate.v1' } },
+    outputs: {
+      contacted_candidates: { schema: 'contacted-candidate.v1' },
+      outreach_output: {
+        schema: 'outreach-output.v1',
+        description: '每条真实触达必须带 evidence、personalization_evidence、message_intent、greeting_text，供 verifier/compliance 审计。',
+      },
+    },
     tools: ['browser', 'web_search', 'database'],
     acceptance: [
       '一轮 run 结束后 task_runs 有本轮记录',
@@ -61,6 +68,7 @@ const FALLBACK_CONTRACTS: Record<string, Contract> = {
       'run_actions 有本轮 trace，可按 run_id 取回',
       'verifyRun(runId) 能审到本轮候选人',
       'complianceCheck(runId) 能审到本轮轨迹',
+      '已触达候选人必须带完整 outreach-output.v1 字段',
       'goalBoard 的累计触达不再是 0',
     ],
   },
@@ -107,7 +115,7 @@ export function contractWrites(name: string): string[] {
 }
 
 export function contractNameForChannel(channel: Channel): string | null {
-  return channel === 'boss' ? 'boss-greeting.v1' : null;
+  return getPlatformProtocol(channel)?.contractName ?? null;
 }
 
 export function contractWritesForChannel(channel: Channel): string[] {

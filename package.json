@@ -12,7 +12,8 @@
     "lint": "pnpm -r run lint",
     "clean": "pnpm -r run clean",
     "agent": "tsx src/index.ts",
-    "chat": "tsx src/index.ts chat"
+    "chat": "tsx src/index.ts chat",
+    "privacy:scan": "node scripts/privacy-scan.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

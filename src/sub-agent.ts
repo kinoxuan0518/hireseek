@@ -132,7 +132,10 @@ async function runLoop(t: SubTask, modelOverride?: string): Promise<void> {
           output = '后台任务不能使用该工具，请换其他方式或在总结中说明此限制。';
         } else {
           try {
-            output = await executeTool(name, JSON.parse(call.function.arguments || '{}'));
+            output = await executeTool(name, JSON.parse(call.function.arguments || '{}'), {
+              sessionId: `sub-agent-${t.id}`,
+              toolCallId: call.id,
+            });
           } catch (err) {
             output = `工具执行失败：${err instanceof Error ? err.message : err}`;
           }

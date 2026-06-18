@@ -14,11 +14,12 @@ import OpenAI from 'openai';
 import { Page } from 'playwright';
 import { emitLog, popIntervention } from '../events';
 import { parseSkillSummary, parseContactedCandidates } from './interface';
-import type { LLMRunner } from './interface';
+import type { LLMRunner, RunSkillOptions } from './interface';
 import type { SkillResult } from '../types';
 import { repairToolMessageHistoryInPlace } from '../message-integrity';
 import type { BrowserAction, BrowserTarget, RiskGuard } from '../browser-session';
 import { isDomBrowserSession } from '../browser-session';
+import { recordToolCall } from '../agent-core/trace';
 
 export type { BrowserAction, RiskGuard } from '../browser-session';
 
@@ -97,16 +98,35 @@ const RECORD_CONTACTED_TOOL: OpenAI.ChatCompletionTool = {
     name: 'record_contacted',
     description:
       '每当你联系（打招呼）完一个候选人，立刻调用本工具，逐条登记这个候选人的结构化信息。' +
-      '这是产出的【唯一权威来源】——不要只在最后的总结里写名单，必须每人一次调用。',
+      '这是产出的【唯一权威来源】——不要只在最后的总结里写名单，必须每人一次调用。' +
+      '如果 greeting_sent=true，必须填写 evidence、personalization_evidence、message_intent、greeting_text。',
     parameters: {
       type: 'object',
-      required: ['name', 'greeting_sent'],
+      required: ['name', 'greeting_sent', 'evidence', 'personalization_evidence', 'message_intent'],
       properties: {
         name:         { type: 'string', description: '候选人姓名（页面所见）' },
         company:      { type: 'string', description: '当前/最近公司' },
         title:        { type: 'string', description: '当前/最近职位' },
         location:     { type: 'string', description: '所在城市/地区' },
         evidence:     { type: 'string', description: '为什么联系 ta 的一句话依据（来自列表/简历可见信息）' },
+        personalization_evidence: {
+          type: 'string',
+          description: '招呼语里实际使用的候选人真实信息点，例如公司、项目、技术方向、学校或经历。不能写“背景匹配”这种泛话。',
+        },
+        message_intent: {
+          type: 'string',
+          description: '这条招呼想激发对方回应的理由，例如技术挑战、成长空间、方向匹配、团队影响力、稳定性等。',
+        },
+        risk_flags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选：信息不足或可能误判的风险标签，例如 no_company_detail、unclear_agent_experience、generic_message_risk。',
+        },
+        fit_tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选：命中的匹配标签，例如 Agent、RAG、大厂、明星创业、1-3年、工程平台。',
+        },
         fit_score:    { type: 'number', description: '你的自评匹配分 0-100' },
         greeting_sent:{ type: 'boolean', description: '是否真的发出了打招呼（false=看了但跳过）' },
         greeting_text:{ type: 'string', description: '实际发出的打招呼文案' },
@@ -131,7 +151,7 @@ const DOM_GUIDE = `
 4. 输入搜索词后通常需要 press(text="Enter") 提交
 5. 列表页内容不全时用 scroll(direction="down") 加载更多
 6. 页面跳转后旧 ref 全部失效，必须依据新快照操作
-7. **每联系完一个候选人，立刻调用 record_contacted 登记**（姓名/公司/职位/自评分/是否已打招呼/招呼文案等）。这是产出的唯一权威来源——别攒到最后才在总结里写名单。
+7. **每联系完一个候选人，立刻调用 record_contacted 登记**（姓名/公司/职位/自评分/是否已打招呼/招呼文案等）。已打招呼时必须包含：evidence、personalization_evidence、message_intent、greeting_text。这是产出的唯一权威来源——别攒到最后才在总结里写名单。
 8. **任务完成后**：直接回复文字总结，不再调用工具
 
 输出总结时必须包含（注意：结构化名单已由 record_contacted 逐条登记，总结里的名单只是给人看的摘要）：
@@ -316,6 +336,7 @@ export class DomRunner implements LLMRunner {
     systemPrompt: string,
     task: string,
     onProgress?: (msg: string) => void,
+    options: RunSkillOptions = {},
   ): Promise<SkillResult> {
     const system = [DOM_GUIDE, systemPrompt].join('\n\n---\n\n');
     const initSnapshot = isDomBrowserSession(page) ? await page.snapshot() : await takeDomSnapshot(page);
@@ -380,16 +401,44 @@ export class DomRunner implements LLMRunner {
       }
 
       for (const toolCall of msg.tool_calls) {
-        if (toolCall.type !== 'function') continue;
+        if (toolCall.type !== 'function') {
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify({ ok: false, error: { code: 'unsupported_tool_call_type', message: `不支持的工具调用类型：${toolCall.type}` } }),
+          });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: `unsupported:${toolCall.type}`,
+            ok: false,
+            error: `unsupported tool_call type: ${toolCall.type}`,
+          });
+          continue;
+        }
 
         // 结构化产出：逐条登记已触达候选人（契约 contacted-candidate.v1）
         if (toolCall.function.name === 'record_contacted') {
           let toolContent = '已登记。继续下一个候选人。';
+          let recordOk = true;
           try {
             const a = JSON.parse(toolCall.function.arguments || '{}');
             if (!a.name) {
+              recordOk = false;
               toolContent = '登记失败：缺少 name。请重新调用 record_contacted，补上候选人姓名。';
-            } else {
+            } else if (a.greeting_sent !== false) {
+              const missing = ['evidence', 'personalization_evidence', 'message_intent', 'greeting_text']
+                .filter(key => !String(a[key] ?? '').trim());
+              if (missing.length > 0) {
+                recordOk = false;
+                toolContent = `登记失败：已打招呼候选人缺少 ${missing.join(', ')}。请重新调用 record_contacted 补齐这些字段。`;
+              }
+            }
+
+            if (recordOk) {
+              const riskFlags = Array.isArray(a.risk_flags) ? a.risk_flags.map(String).filter(Boolean) : undefined;
+              const fitTags = Array.isArray(a.fit_tags) ? a.fit_tags.map(String).filter(Boolean) : undefined;
               const rawScore = Number(a.fit_score);
               (result.contactedList ??= []).push({
                 name: String(a.name),
@@ -397,6 +446,10 @@ export class DomRunner implements LLMRunner {
                 title: a.title ? String(a.title) : undefined,
                 location: a.location ? String(a.location) : undefined,
                 evidence: a.evidence ? String(a.evidence) : undefined,
+                personalizationEvidence: a.personalization_evidence ? String(a.personalization_evidence) : undefined,
+                messageIntent: a.message_intent ? String(a.message_intent) : undefined,
+                riskFlags,
+                fitTags,
                 score: Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : undefined,
                 greetingSent: a.greeting_sent !== false,
                 greetingText: a.greeting_text ? String(a.greeting_text) : undefined,
@@ -405,13 +458,46 @@ export class DomRunner implements LLMRunner {
               });
             }
           } catch (err) {
+            recordOk = false;
             toolContent = `登记失败：record_contacted 参数不是合法 JSON（${err instanceof Error ? err.message : String(err)}）。请重新调用。`;
           }
           messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolContent });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'record_contacted',
+            input: toolCall.function.arguments,
+            output: toolContent,
+            ok: recordOk,
+            error: recordOk ? null : toolContent,
+            sideEffect: false,
+            mode: 'execute',
+          });
           continue;
         }
 
-        if (toolCall.function.name !== 'browser') continue;
+        if (toolCall.function.name !== 'browser') {
+          const content = JSON.stringify({
+            ok: false,
+            error: {
+              code: 'unknown_tool',
+              message: `未知工具：${toolCall.function.name}`,
+            },
+          });
+          messages.push({ role: 'tool', tool_call_id: toolCall.id, content });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: toolCall.function.name,
+            input: toolCall.function.arguments,
+            output: content,
+            ok: false,
+            error: `unknown tool: ${toolCall.function.name}`,
+          });
+          continue;
+        }
 
         // 风控硬终止后拒绝执行任何动作，只允许模型输出总结
         if (hardStopped) {
@@ -423,15 +509,113 @@ export class DomRunner implements LLMRunner {
           continue;
         }
 
-        const input = JSON.parse(toolCall.function.arguments) as BrowserAction;
+        let input: BrowserAction;
+        try {
+          input = JSON.parse(toolCall.function.arguments || '{}') as BrowserAction;
+        } catch (err) {
+          const message = `browser 参数不是合法 JSON：${err instanceof Error ? err.message : String(err)}`;
+          messages.push({ role: 'tool', tool_call_id: toolCall.id, content: message });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'browser',
+            input: toolCall.function.arguments,
+            output: message,
+            ok: false,
+            error: message,
+            sideEffect: true,
+            mode: 'execute',
+          });
+          continue;
+        }
         const actionLog = `[${turn + 1}] ${input.action}${input.ref != null ? ` ref=${input.ref}` : ''}${
           input.url ? ` ${input.url}` : ''
         }`;
         onProgress?.(actionLog);
         emitLog(actionLog);
 
+        if (options.blockedBrowserActions?.includes(input.action)) {
+          const blocked = `当前模式禁止执行 ${input.action}。请改用允许的页面内动作，或停止工具调用并输出当前状态总结。`;
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: blocked,
+          });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'browser',
+            input,
+            output: blocked,
+            ok: false,
+            error: blocked,
+            sideEffect: true,
+            mode: 'execute',
+          });
+          try {
+            result.trace!.push({
+              seq: result.trace!.length + 1,
+              action: input.action,
+              target: input.url ?? (input.ref != null ? `ref=${input.ref}` : undefined),
+              detail: 'blocked by run mode',
+              ok: false,
+              toolName: 'browser',
+              sideEffect: true,
+              mode: 'execute',
+            });
+          } catch { /* 轨迹记录失败绝不影响 sourcing */ }
+          continue;
+        }
+
+        const policyDecision = options.browserActionPolicy?.(input, {
+          runId: options.runId,
+          sessionId: options.sessionId,
+        });
+        if (policyDecision && !policyDecision.allowed) {
+          const blocked = policyDecision.reason ?? `当前平台协议禁止执行 ${input.action}`;
+          const sideEffect = input.action !== 'snapshot' && input.action !== 'wait';
+          const mode = input.action === 'snapshot' ? 'read' : 'execute';
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: blocked,
+          });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'browser',
+            input,
+            output: blocked,
+            ok: false,
+            error: blocked,
+            sideEffect,
+            mode,
+          });
+          try {
+            result.trace!.push({
+              seq: result.trace!.length + 1,
+              action: input.action,
+              target: input.url ?? (input.ref != null ? `ref=${input.ref}` : undefined),
+              detail: 'blocked by platform protocol',
+              ok: false,
+              at: new Date().toISOString(),
+              toolName: 'browser',
+              inputSummary: toolCall.function.arguments,
+              outputSummary: blocked,
+              error: blocked,
+              sideEffect,
+              mode,
+            });
+          } catch { /* 轨迹记录失败绝不影响 sourcing */ }
+          continue;
+        }
+
         let snapshot: string;
         let stepOk = true;
+        let stepError: string | null = null;
         try {
           if (isDomBrowserSession(page)) {
             snapshot = await page.act(input, guard);
@@ -442,6 +626,7 @@ export class DomRunner implements LLMRunner {
         } catch (err: unknown) {
           stepOk = false;
           const message = err instanceof Error ? err.message : String(err);
+          stepError = message;
           // page 被关闭时重新获取
           if (!isDomBrowserSession(page) && (message.includes('closed') || message.includes('Target'))) {
             const { getPage } = await import('../browser-runner');
@@ -463,8 +648,27 @@ export class DomRunner implements LLMRunner {
             target: input.url ?? (input.ref != null ? `ref=${input.ref}` : undefined),
             detail: input.text ? String(input.text).slice(0, 60) : undefined,
             ok: stepOk,
+            at: new Date().toISOString(),
+            toolName: 'browser',
+            inputSummary: toolCall.function.arguments,
+            outputSummary: snapshot.slice(0, 700),
+            error: stepError ?? undefined,
+            sideEffect: input.action !== 'snapshot' && input.action !== 'wait',
+            mode: input.action === 'snapshot' ? 'read' : 'execute',
           });
         } catch { /* 轨迹记录失败绝不影响 sourcing */ }
+        recordToolCall({
+          runId: options.runId,
+          sessionId: options.sessionId,
+          toolCallId: toolCall.id,
+          toolName: 'browser',
+          input,
+          output: snapshot,
+          ok: stepOk,
+          error: stepError,
+          sideEffect: input.action !== 'snapshot' && input.action !== 'wait',
+          mode: input.action === 'snapshot' ? 'read' : 'execute',
+        });
 
         // 风控检测：基于页面快照文本（代码层判定，不依赖模型识别）
         if (DAILY_LIMIT_PATTERN.test(snapshot)) {

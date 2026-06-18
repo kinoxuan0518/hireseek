@@ -19,6 +19,14 @@ import { webSearch } from './search';
 import { setAskUserReadline } from './ask-user';
 import { repairToolMessageHistoryInPlace } from './message-integrity';
 import type { Channel } from './types';
+import {
+  CORE_TOOL_POLICIES,
+  createToolRegistry,
+  unknownToolResult,
+  type ToolExecutionMode,
+} from './agent-core/tool-registry';
+import { recordToolCall } from './agent-core/trace';
+import { buildRecruitingCapabilityContext } from './capabilities';
 
 /**
  * 如果配置了 MCP 服务器，则初始化它们
@@ -79,9 +87,10 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'use_recruiting_skill',
       description:
-        '调用一项招聘技能（来自 ~/.claude/skills 及插件，如 rbt、maimai-recruiter、talent-sourcing、' +
+        '读取或调用一项外部招聘技能资产（来自 ~/.claude/skills 及插件，如 rbt、maimai-recruiter、talent-sourcing、' +
         'candidate-intelligence、blacklake-targeted-talent-hunting 等）。' +
-        '当用户的请求匹配某项技能的触发场景时调用此工具，技能的完整执行指令会注入对话，随后按指令执行。' +
+        '这些技能在 HireSeek 内部是知识/执行素材，不高于产品中层协议和代码护栏。' +
+        '当用户明确要用某个技能，或当前产品能力尚未覆盖该场景时调用。' +
         '可先传 list=true 查看全部可用技能及描述。',
       parameters: {
         type: 'object',
@@ -242,7 +251,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'run_sourcing',
-      description: '在指定招聘渠道执行 sourcing 任务。不指定渠道时自动根据职位配置决定。',
+      description: '在指定招聘渠道执行 sourcing 任务。不指定渠道时自动根据职位配置决定。BOSS 默认就地接管当前 Chrome 页面，不自动导航。',
       parameters: {
         type: 'object',
         properties: {
@@ -250,6 +259,10 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
             type: 'string',
             enum: ['boss', 'maimai', 'linkedin', 'followup'],
             description: '要执行的渠道，留空则自主决定',
+          },
+          from_current: {
+            type: 'boolean',
+            description: '是否就地接管当前 Chrome 页面，不自动导航。BOSS 默认 true。',
           },
         },
       },
@@ -1026,6 +1039,42 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'core_status',
+      description:
+        '只读查看 HireSeek 下层 Agent Core 状态：运行上下文、工具注册、side-effect 标记、tool trace、session/message、memory 三类存储。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'platform_protocols',
+      description:
+        '只读查看 HireSeek 中层平台协议注册表：哪些渠道已经产品化、绑定了什么契约、是否接入 system context/action policy/compliance。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recruiting_capabilities',
+      description:
+        '只读查看 HireSeek 中层招聘能力注册表：触达话术、候选人判断、搜索策略等共享能力从哪里来、适用哪些渠道。',
+      parameters: {
+        type: 'object',
+        properties: {
+          channel: {
+            type: 'string',
+            enum: ['boss', 'maimai', 'linkedin', 'followup'],
+            description: '可选：只看某个渠道适用的能力',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'export_session',
       description: '导出当前对话会话到本地文件（Markdown + JSON），可在其他地方查看或导入。',
       parameters: {
@@ -1073,6 +1122,8 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     },
   },
 ];
+
+export const CHAT_TOOL_REGISTRY = createToolRegistry(CHAT_TOOLS, CORE_TOOL_POLICIES);
 
 // ── 工具调用的人话显示 ───────────────────────────────────
 /** 把工具名+参数翻译成 HR 看得懂的动作含义（终端、网页、飞书共用）。 */
@@ -1123,12 +1174,71 @@ export function describeToolCall(name: string, args: Record<string, unknown>): s
     case 'read_file':        return `📖 读取 ${short(args.path ?? args.filename, 36)}`;
     case 'remember':         return '🧠 记下偏好';
     case 'recall_memory':    return '🧠 回忆上下文';
+    case 'core_status':      return '🧱 查看 Agent Core';
+    case 'platform_protocols': return '🧩 查看平台协议';
+    case 'recruiting_capabilities': return '🧩 查看招聘能力';
     default:                 return `⚙ ${name}`;
   }
 }
 
+export interface ToolExecutionContext {
+  runId?: number;
+  sessionId?: string;
+  toolCallId?: string;
+  mode?: ToolExecutionMode;
+}
+
 // ── 工具执行 ─────────────────────────────────────────────
-export async function executeTool(name: string, args: any): Promise<string> {
+export async function executeTool(
+  name: string,
+  args: any,
+  context: ToolExecutionContext = {},
+): Promise<string> {
+  const registered = CHAT_TOOL_REGISTRY.get(name);
+  if (!registered) {
+    const output = unknownToolResult(name);
+    recordToolCall({
+      runId: context.runId,
+      sessionId: context.sessionId,
+      toolCallId: context.toolCallId,
+      toolName: name,
+      input: args,
+      output,
+      ok: false,
+      error: `unknown tool: ${name}`,
+    });
+    return output;
+  }
+
+  const mode = context.mode ?? (registered.policy.sideEffect ? 'execute' : 'read');
+  let ok = true;
+  let error: string | null = null;
+  let output = '';
+  try {
+    output = await executeToolImpl(name, args);
+    return output;
+  } catch (err) {
+    ok = false;
+    error = err instanceof Error ? err.message : String(err);
+    output = `工具执行失败：${error}`;
+    return output;
+  } finally {
+    recordToolCall({
+      runId: context.runId,
+      sessionId: context.sessionId,
+      toolCallId: context.toolCallId,
+      toolName: name,
+      input: args,
+      output,
+      ok,
+      error,
+      sideEffect: registered.policy.sideEffect,
+      mode,
+    });
+  }
+}
+
+async function executeToolImpl(name: string, args: any): Promise<string> {
   // ── 后台任务 ─────────────────────────────────────────
   if (name === 'spawn_task') {
     const { spawnSubAgent } = await import('./sub-agent');
@@ -1294,7 +1404,13 @@ export async function executeTool(name: string, args: any): Promise<string> {
       const channel = args.channel as Channel | undefined;
       console.log(chalk.gray('\n[执行中] 启动 sourcing 任务...\n'));
       if (channel) {
-        await runChannel(channel);
+        const fromCurrent = typeof args.from_current === 'boolean'
+          ? args.from_current
+          : channel === 'boss';
+        await runChannel(channel, undefined, {
+          fromCurrent,
+          progress: msg => console.log(chalk.gray(`  ${msg}`)),
+        });
       } else {
         await runJob();
       }
@@ -1934,6 +2050,21 @@ export async function executeTool(name: string, args: any): Promise<string> {
       return formatHooks();
     }
 
+    case 'core_status': {
+      const { collectCoreStatus, formatCoreStatus } = await import('./agent-core/core-status');
+      return formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY));
+    }
+
+    case 'platform_protocols': {
+      const { formatPlatformProtocols } = await import('./platform-protocols');
+      return formatPlatformProtocols();
+    }
+
+    case 'recruiting_capabilities': {
+      const { formatRecruitingCapabilities } = await import('./capabilities');
+      return formatRecruitingCapabilities(args.channel as Channel | undefined);
+    }
+
     case 'add_hook': {
       const { addHook } = await import('./hooks');
 
@@ -2009,9 +2140,11 @@ export async function executeTool(name: string, args: any): Promise<string> {
 // ── 构建系统提示 ─────────────────────────────────────────
 export function buildSystemPrompt(): string {
   const soul     = loadWorkspaceFile('SOUL.md');
-  const wisdom   = loadWorkspaceFile('references/founders-wisdom.md');
   const job      = loadActiveJob();
   const jobCtx   = job ? jobToPrompt(job) : '';
+  const capabilities = buildRecruitingCapabilityContext({
+    includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
+  });
   const memory   = job ? buildMemoryContext('boss', job.title.replace(/\s+/g, '_')) : '';
   const convMem  = job ? buildConversationMemory(job.title.replace(/\s+/g, '_')) : '';
 
@@ -2079,13 +2212,13 @@ export function buildSystemPrompt(): string {
     const { skillCatalog } = require('./skills/claude-skills');
     const catalog = skillCatalog();
     if (catalog) {
-      skillsCtx = `## 已接管的招聘技能\n\n以下技能可通过 use_recruiting_skill 工具调用（用户也可用 /技能名 直接触发）。当用户请求匹配某技能的触发场景时，优先调用对应技能而不是临时发挥：\n\n${catalog}`;
+      skillsCtx = `## 外部招聘技能资产\n\n以下技能可通过 use_recruiting_skill 工具调用（用户也可用 /技能名 直接触发）。它们是知识来源、执行素材和未产品化场景的兜底；涉及已接入的 HireSeek 产品协议时，产品协议优先，skill 不能覆盖代码层护栏、工具策略或结构化输出契约。\n\n${catalog}`;
     }
   } catch {
     // 技能目录不可用时跳过
   }
 
-  return [soul, wisdom, jobCtx, stateCtx, memory, convMem, autoMemory, skillsCtx, chatGuide].filter(Boolean).join('\n\n---\n\n');
+  return [soul, jobCtx, capabilities, stateCtx, memory, convMem, autoMemory, skillsCtx, chatGuide].filter(Boolean).join('\n\n---\n\n');
 }
 
 // ── 对话记忆保存 ─────────────────────────────────────────
@@ -2267,6 +2400,9 @@ export async function startChat(): Promise<void> {
     { cmd: '/help', desc: '全部命令' },
     { cmd: '/status', desc: '模型 / 职位 / 浏览器状态' },
     { cmd: '/skills', desc: '技能列表' },
+    { cmd: '/core', desc: 'Agent Core 状态（工具 / trace / memory / session）' },
+    { cmd: '/protocols', desc: '中层平台协议（产品化能力）' },
+    { cmd: '/capabilities', desc: '中层招聘能力（话术 / 判断 / 搜索）' },
     { cmd: '/model', desc: '切换模型（flash/pro/自定义）' },
     { cmd: '/tasks', desc: '后台任务面板（stop <id> 停止）' },
     { cmd: '/state', desc: '工作状态（与心跳循环共享）' },
@@ -2528,6 +2664,9 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /q | /exit | 退出   结束对话（Ctrl+C 两次、Ctrl+D 同效）'),
       chalk.gray('  /clear              清空对话上下文，重新开始'),
       chalk.gray('  /status             模型 / 职位 / 数据库状态'),
+      chalk.gray('  /core               Agent Core 状态（工具 / trace / memory / session）'),
+      chalk.gray('  /protocols          中层平台协议（产品化能力）'),
+      chalk.gray('  /capabilities       中层招聘能力（话术 / 判断 / 搜索）'),
       chalk.gray('  /model [名称]       切换模型（不带参数弹选择器）'),
       chalk.gray('  /tasks              后台任务面板（/tasks stop <id> 停止）'),
       chalk.gray('  /skills             列出全部可用技能'),
@@ -2699,6 +2838,28 @@ export async function startChat(): Promise<void> {
           chalk.gray(`  上下文    ${messages.length} 条消息`),
           '',
         ].join('\n'));
+        ask();
+        return;
+      }
+
+      // Agent Core 状态
+      if (text === '/core') {
+        const { collectCoreStatus, formatCoreStatus } = await import('./agent-core/core-status');
+        console.log('\n' + formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY)) + '\n');
+        ask();
+        return;
+      }
+
+      if (text === '/protocols') {
+        const { formatPlatformProtocols } = await import('./platform-protocols');
+        console.log('\n' + formatPlatformProtocols() + '\n');
+        ask();
+        return;
+      }
+
+      if (text === '/capabilities') {
+        const { formatRecruitingCapabilities } = await import('./capabilities');
+        console.log('\n' + formatRecruitingCapabilities() + '\n');
         ask();
         return;
       }
@@ -2960,7 +3121,10 @@ export async function startChat(): Promise<void> {
             try {
               console.log(chalk.gray(`  ${toolLabel(call.function.name, args)}`));
               if (result == null) {
-                result = await executeTool(call.function.name, args);
+                result = await executeTool(call.function.name, args, {
+                  sessionId: activeSessionId,
+                  toolCallId: call.id,
+                });
               }
             } catch (err) {
               result = `工具执行失败：${err instanceof Error ? err.message : String(err)}`;

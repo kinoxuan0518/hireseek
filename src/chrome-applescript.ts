@@ -111,54 +111,99 @@ export function activateTab(tab: ChromeTab): void {
 
 // ── 快照与动作（与 DOM Runner 同源的 ref 协议） ───────────────────────
 
-/** 页面内执行的快照脚本：标记 data-hs-ref 并返回 JSON */
+/**
+ * 页面内执行的快照脚本：标记 data-hs-ref 并返回 JSON。
+ * 关键：递归进入【同源 iframe】——BOSS 企业端的候选人列表/推荐牛人渲染在 iframe 里，
+ * 只读顶层 document 会"框架在、数据空"。同源 iframe 经 contentDocument 可达；跨源被
+ * try/catch 吞掉，不影响顶层与可读帧。
+ */
 const SNAPSHOT_JS = `
 (function () {
-  var MAX_EL = 120, MAX_TEXT = 6000;
+  var MAX_EL = 160, MAX_TEXT = 6000, MAX_DEPTH = 4;
   function visible(el) {
-    var r = el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) return false;
-    var s = window.getComputedStyle(el);
-    return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+    try {
+      var r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return false;
+      var win = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+      var s = win.getComputedStyle(el);
+      return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+    } catch (e) { return false; }
   }
   var sel = 'a[href],button,input,textarea,select,[role="button"],[role="link"],[role="tab"],[role="option"],[role="menuitem"],[role="checkbox"],[contenteditable="true"],[onclick]';
-  var els = Array.prototype.filter.call(document.querySelectorAll(sel), visible);
-  var lines = [], n = 0;
-  for (var i = 0; i < els.length && n < MAX_EL; i++) {
-    var el = els[i]; n++;
-    el.setAttribute('data-hs-ref', String(n));
-    var tag = el.tagName.toLowerCase();
-    var parts = ['[ref=' + n + '] <' + tag + (el.type ? ' type=' + el.type : '') + '>'];
-    var t = (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
-    if (t) parts.push(t);
-    if (el.placeholder) parts.push('placeholder="' + el.placeholder + '"');
-    if (el.value && tag === 'input') parts.push('value="' + String(el.value).slice(0, 40) + '"');
-    var aria = el.getAttribute('aria-label');
-    if (aria) parts.push('aria="' + aria + '"');
-    lines.push(parts.join(' '));
+  var lines = [], texts = [], n = 0, frameSeen = 0, frameRead = 0;
+  function collect(doc, depth) {
+    var els;
+    try { els = Array.prototype.filter.call(doc.querySelectorAll(sel), visible); } catch (e) { return; }
+    for (var i = 0; i < els.length && n < MAX_EL; i++) {
+      var el = els[i]; n++;
+      try { el.setAttribute('data-hs-ref', String(n)); } catch (e) {}
+      var tag = el.tagName.toLowerCase();
+      var parts = ['[ref=' + n + '] <' + tag + (el.type ? ' type=' + el.type : '') + '>'];
+      var t = (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+      if (t) parts.push(t);
+      if (el.placeholder) parts.push('placeholder="' + el.placeholder + '"');
+      if (el.value && tag === 'input') parts.push('value="' + String(el.value).slice(0, 40) + '"');
+      var aria = el.getAttribute('aria-label');
+      if (aria) parts.push('aria="' + aria + '"');
+      lines.push(parts.join(' '));
+    }
+    try { if (doc.body && doc.body.innerText) texts.push(doc.body.innerText); } catch (e) {}
+    if (depth < MAX_DEPTH) {
+      var frames;
+      try { frames = doc.querySelectorAll('iframe,frame'); } catch (e) { frames = []; }
+      for (var j = 0; j < frames.length && n < MAX_EL; j++) {
+        frameSeen++;
+        try { var d = frames[j].contentDocument; if (d) { frameRead++; collect(d, depth + 1); } } catch (e) {}
+      }
+    }
   }
+  collect(document, 0);
   return JSON.stringify({
     url: location.href,
     title: document.title,
     elements: lines,
-    bodyText: (document.body ? document.body.innerText : '').replace(/\\n{3,}/g, '\\n\\n').slice(0, MAX_TEXT),
+    bodyText: texts.join('\\n').replace(/\\n{3,}/g, '\\n\\n').slice(0, MAX_TEXT),
+    frameSeen: frameSeen,
+    frameRead: frameRead,
     scrollY: Math.round(window.scrollY),
     scrollMax: Math.round(Math.max(0, document.documentElement.scrollHeight - window.innerHeight))
   });
 })()
 `.trim();
 
+/** 跨【同源 iframe】按 data-hs-ref 查元素的注入函数（click/type/refText 共用）。 */
+const FIND_REF_FN = `
+function __hsFind(ref) {
+  function s(doc) {
+    try {
+      var el = doc.querySelector('[data-hs-ref="' + ref + '"]');
+      if (el) return el;
+      var fr = doc.querySelectorAll('iframe,frame');
+      for (var i = 0; i < fr.length; i++) {
+        try { var d = fr[i].contentDocument; if (d) { var e = s(d); if (e) return e; } } catch (_) {}
+      }
+    } catch (_) {}
+    return null;
+  }
+  return s(document);
+}`.trim();
+
 export function takeSnapshot(tab: ChromeTab): string {
   const raw = execJS(tab, SNAPSHOT_JS);
   const data = JSON.parse(raw) as {
-    url: string; title: string; elements: string[]; bodyText: string; scrollY: number; scrollMax: number;
+    url: string; title: string; elements: string[]; bodyText: string;
+    frameSeen: number; frameRead: number; scrollY: number; scrollMax: number;
   };
+  // iframe 诊断：BOSS 候选人列表在 iframe 里，frameSeen>frameRead 说明有跨源帧读不到
+  const frameNote = data.frameSeen > 0
+    ? `内嵌 iframe：发现 ${data.frameSeen} 个，可读 ${data.frameRead} 个${data.frameSeen > data.frameRead ? '（有跨源帧读不到，候选人列表若在其中需换策略）' : ''}`
+    : '无 iframe';
   return [
     `URL: ${data.url}`,
     `标题: ${data.title}`,
-    `滚动位置: ${data.scrollY}/${data.scrollMax}px`,
+    `滚动位置: ${data.scrollY}/${data.scrollMax}px ｜ ${frameNote}`,
     '',
-    `## 可交互元素（共 ${data.elements.length} 个）`,
+    `## 可交互元素（共 ${data.elements.length} 个，含 iframe 内）`,
     ...data.elements,
     '',
     '## 页面正文',
@@ -166,19 +211,20 @@ export function takeSnapshot(tab: ChromeTab): string {
   ].join('\n');
 }
 
-/** 取 ref 元素文本（风控节流判定用） */
+/** 取 ref 元素文本（风控节流判定用）；跨同源 iframe 查找 */
 export function refText(tab: ChromeTab, ref: number): string {
   try {
-    return execJS(tab, `(document.querySelector('[data-hs-ref="${ref}"]')||{}).textContent||''`).slice(0, 100);
+    return execJS(tab, `${FIND_REF_FN}
+(function(){ var el = __hsFind(${ref}); return el ? (el.textContent || '') : ''; })()`).slice(0, 100);
   } catch {
     return '';
   }
 }
 
 export function clickRef(tab: ChromeTab, ref: number): void {
-  const r = execJS(tab, `
+  const r = execJS(tab, `${FIND_REF_FN}
 (function(){
-  var el = document.querySelector('[data-hs-ref="${ref}"]');
+  var el = __hsFind(${ref});
   if (!el) return 'NOT_FOUND';
   el.scrollIntoView({block:'center'});
   el.click();
@@ -189,9 +235,9 @@ export function clickRef(tab: ChromeTab, ref: number): void {
 
 export function typeRef(tab: ChromeTab, ref: number, text: string): void {
   // 文本经 JSON 转义注入，原生 setter + input 事件，兼容 React/Vue 受控组件
-  const r = execJS(tab, `
+  const r = execJS(tab, `${FIND_REF_FN}
 (function(){
-  var el = document.querySelector('[data-hs-ref="${ref}"]');
+  var el = __hsFind(${ref});
   if (!el) return 'NOT_FOUND';
   el.focus();
   var v = ${JSON.stringify(text)};
@@ -219,7 +265,15 @@ export function pressKey(tab: ChromeTab, key: string): void {
   const k = keyMap[key] ?? { key, code: key, keyCode: 0 };
   execJS(tab, `
 (function(){
-  var t = document.activeElement || document.body;
+  // 焦点可能在同源 iframe 内：顶层 activeElement 会是 <iframe> 本身，需下钻到内层真实焦点元素
+  function deepActive(doc){
+    var a = doc.activeElement || doc.body;
+    if (a && (a.tagName === 'IFRAME' || a.tagName === 'FRAME')) {
+      try { if (a.contentDocument) return deepActive(a.contentDocument); } catch (_) {}
+    }
+    return a;
+  }
+  var t = deepActive(document);
   ['keydown','keypress','keyup'].forEach(function(type){
     t.dispatchEvent(new KeyboardEvent(type, {key:${JSON.stringify(k.key)}, code:${JSON.stringify(k.code)}, keyCode:${k.keyCode}, which:${k.keyCode}, bubbles:true, cancelable:true}));
   });

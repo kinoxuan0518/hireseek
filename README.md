@@ -7,7 +7,7 @@
 ## 它能做什么
 
 - **全渠道自主寻源**：BOSS直聘、脉脉、LinkedIn，自动搜索、筛选、打招呼、跟进
-- **接管你的 Claude 技能库**：自动扫描 `~/.claude/skills` 与插件目录，rbt、maimai-recruiter、talent-sourcing、candidate-intelligence、blacklake-targeted-talent-hunting、bosszhibin-auto-recruiter 等招聘技能全部可被 DeepSeek 调用
+- **接管你的 Codex/Claude 技能库**：运行时优先读取 `HIRESEEK_SKILL_HOME`（默认 `~/.codex/skills` 和 `~/.claude/skills`），rbt、maimai-recruiter、talent-sourcing、candidate-intelligence、blacklake-targeted-talent-hunting、bosszhibin-auto-recruiter 等招聘技能全部可被 DeepSeek 调用
 - **对话即工作**：chat 模式下自然语言下达任务，agent 自动路由到对应技能或渠道
 - **候选人评估 / 触达策略 / 跨会话记忆 / 招聘漏斗**：core SDK 内置
 - **定时调度**：工作日自动执行 BOSS / 脉脉 / 跟进任务
@@ -37,8 +37,8 @@ DeepSeek → browser(click, ref=42) → Playwright 精确定位执行 → 新快
 ### 3. Claude Skills 桥接层
 
 ```
-~/.claude/skills/*/SKILL.md  ──┐
-~/.claude/plugins/.../skills ──┴→ 技能注册表 → DeepSeek 智能路由
+~/.codex/skills/*/SKILL.md   ──┐
+~/.claude/skills/*/SKILL.md  ──┴→ 技能注册表 → DeepSeek 智能路由
 ```
 
 - chat 中直接 `/rbt`、`/maimai-recruiter` 触发
@@ -266,6 +266,8 @@ hireseek/
 | `LLM_PROVIDER` | `deepseek` | 可选 deepseek / claude / openai / minimax / custom |
 | `HIRESEEK_DB_PATH` | `~/.hireseek/hireseek.db` | 数据库路径（自动兼容旧 ~/.hireclaw） |
 | `AGENT_KNOWLEDGE_HOME` | — | 独立 canonical 知识/契约 sandbox 路径；不填则用内置兜底契约 |
+| `HIRESEEK_SKILL_HOME` | `~/.codex/skills:~/.claude/skills` | 运行时技能目录，优先读取真实 Codex/Claude skill |
+| `HIRESEEK_EXTERNAL_SKILLS` | `true` | 设为 `false` 时只用仓库内 fallback skill |
 | `HIRESEEK_BROWSER_CONTROL` | `chrome` | 默认接管真实 Chrome；设为 `hireseek` 才使用自有浏览器 |
 | `HIRESEEK_BROWSER_PROFILE_DIR` | `~/.hireseek/browser-profile` | 自有浏览器模式下的资料夹 |
 | `FEISHU_WEBHOOK_URL` | — | 飞书执行报告推送 |

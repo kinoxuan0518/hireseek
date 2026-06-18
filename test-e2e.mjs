@@ -15,10 +15,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // LLM Config
 // ────────────────────────────────────────────────────────────
 
+const apiKey = process.env.GLM_API_KEY || process.env.CUSTOM_API_KEY;
+if (!apiKey) {
+  console.error('Missing GLM_API_KEY or CUSTOM_API_KEY for test-e2e.mjs');
+  process.exit(1);
+}
+
 const llm = {
   provider: 'custom',
   model: 'GLM-5-Turbo',
-  apiKey: '0cbcab149d0f4746884084b6e6fba2e0.9NyrOegrBGRFMlso',
+  apiKey,
   baseUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
 };
 

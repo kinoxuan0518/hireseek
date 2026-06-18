@@ -16,6 +16,10 @@ import { generatePlan, confirmPlan } from './planner';
 import { detectErrors } from './error-detector';
 import { retryWithBackoff, saveCheckpoint, loadCheckpoint, removeCheckpoint, waitForUserIntervention } from './retry-handler';
 import type { Channel, SkillResult } from './types';
+import { createRuntimeContext } from './agent-core/runtime-context';
+import { getPlatformProtocol } from './platform-protocols';
+import { buildRecruitingCapabilityContext } from './capabilities';
+import type { RunSkillOptions } from './runners/interface';
 
 /**
  * 履约 canonical 契约 boss-greeting.v1 的 writes: [contacted_candidates, run_trace, interaction_log]。
@@ -29,11 +33,15 @@ export function persistRunResult(runId: number, jobId: string, channel: Channel,
   try {
     const runCandStmt = db.prepare(`
       INSERT INTO run_candidates
-        (run_id, candidate_fingerprint, job_id, channel, score, evidence, greeting_text, profile_url, contacted_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (run_id, candidate_fingerprint, job_id, channel, score, evidence, personalization_evidence, message_intent, risk_flags, fit_tags, greeting_text, profile_url, contacted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(run_id, candidate_fingerprint) DO UPDATE SET
         score = excluded.score,
         evidence = excluded.evidence,
+        personalization_evidence = excluded.personalization_evidence,
+        message_intent = excluded.message_intent,
+        risk_flags = excluded.risk_flags,
+        fit_tags = excluded.fit_tags,
         greeting_text = excluded.greeting_text,
         profile_url = excluded.profile_url,
         contacted_at = excluded.contacted_at
@@ -63,6 +71,10 @@ export function persistRunResult(runId: number, jobId: string, channel: Channel,
         channel,
         c.score ?? null,
         c.evidence ?? c.reason ?? null,
+        c.personalizationEvidence ?? null,
+        c.messageIntent ?? null,
+        c.riskFlags?.length ? JSON.stringify(c.riskFlags) : null,
+        c.fitTags?.length ? JSON.stringify(c.fitTags) : null,
         c.greetingText ?? null,
         c.profileUrl ?? null,
         now,
@@ -80,7 +92,13 @@ export function persistRunResult(runId: number, jobId: string, channel: Channel,
     for (const c of list) {
       if (!c.name || c.greetingSent === false) continue;
       const fingerprint = `${c.name}|${c.company ?? ''}|${channel}`;
-      const note = (c.greetingText ?? c.evidence ?? c.reason ?? '').slice(0, 300);
+      const note = [
+        c.greetingText ? `message=${c.greetingText}` : '',
+        c.personalizationEvidence ? `personalization=${c.personalizationEvidence}` : '',
+        c.messageIntent ? `intent=${c.messageIntent}` : '',
+        c.evidence || c.reason ? `evidence=${c.evidence ?? c.reason}` : '',
+        c.riskFlags?.length ? `risk=${c.riskFlags.join(',')}` : '',
+      ].filter(Boolean).join(' | ').slice(0, 600);
       logStmt.run(runId, fingerprint, 'greeting', note);
     }
   } catch { /* 交互记录失败不影响主流程 */ }
@@ -102,6 +120,24 @@ const TASK_PROMPT = (channelLabel: string) => `
 候选人摘要: <简短描述，如"5人来自大厂，3人学历985">
 `.trim();
 
+// "就地接管"模式：从用户当前真实浏览器页面开始，不新开浏览器、不切换 profile。
+// 这不是业务规则；是否需要站内流转、如何流转，由后续中层平台协议决定。
+const TASK_PROMPT_HERE = (channelLabel: string) => `
+你正在就地接管用户当前真实 Chrome 里的 ${channelLabel} 页面。
+
+**铁律（这是本模式的全部要点）：**
+- 不要打开新的浏览器、不要创建新的登录态、不要切到另一个 profile。
+- 可以读取当前页、点击页面内已有入口、输入、滚动、等待；旧 ref 失效后必须重新 snapshot。
+- 不要用直接深链 URL 取巧代替页面内真实操作；如当前状态不足以继续，请输出当前状态和需要的下一步。
+- 每完成一次真实触达，必须立刻调用 record_contacted 登记结构化候选人。
+
+任务完成后，按格式输出总结：
+触达人数: <数字>
+跳过人数: <数字>
+主要跳过原因: <简短描述>
+候选人摘要: <简短描述>
+`.trim();
+
 const CHANNEL_LABEL: Record<Channel, string> = {
   boss:     'BOSS直聘',
   maimai:   '脉脉',
@@ -121,6 +157,37 @@ const LOGIN_OR_MISSING_PATTERNS: Partial<Record<Channel, RegExp>> = {
   maimai: /登录|扫码|手机号/,
   linkedin: /Sign in|Join LinkedIn|登录/,
 };
+
+function taskPromptForChannel(channel: Channel, label: string, fromCurrent = false): string {
+  const protocol = getPlatformProtocol(channel);
+  if (protocol) {
+    return protocol.buildTaskPrompt({ channelLabel: label, fromCurrent });
+  }
+  return fromCurrent ? TASK_PROMPT_HERE(label) : TASK_PROMPT(label);
+}
+
+function runSkillOptionsForChannel(channel: Channel, runId: number | null, fromCurrent = false): RunSkillOptions {
+  const base: RunSkillOptions = { runId: runId ?? undefined };
+  const protocol = getPlatformProtocol(channel);
+  if (protocol?.browserActionPolicy) {
+    return {
+      ...base,
+      browserActionPolicy: protocol.browserActionPolicy,
+    };
+  }
+  if (fromCurrent) {
+    return {
+      ...base,
+      blockedBrowserActions: ['goto', 'back'],
+    };
+  }
+  return base;
+}
+
+function platformSystemContextForChannel(channel: Channel): string {
+  const protocol = getPlatformProtocol(channel);
+  return protocol?.buildSystemContext?.() ?? '';
+}
 
 async function createBrowserTarget(channel: Channel): Promise<BrowserTarget> {
   if (config.browser.control === 'hireseek') {
@@ -188,48 +255,60 @@ async function ensurePlatformSession(target: BrowserTarget, channel: Channel): P
 
 export async function runChannel(
   channel: Channel,
-  jobId?: string
+  jobId?: string,
+  opts: { fromCurrent?: boolean; progress?: (msg: string) => void } = {}
 ): Promise<number> {
   // 默认绑定当前 active job，而不是字面量 'default'。否则心跳/CLI 不传 jobId 时，
   // 候选人落到 job_id='default'，而 verifier 按 active job 查 → 永远查不到（落库错位）。
-  if (!jobId) {
-    const active = loadActiveJob();
-    jobId = active ? active.title.replace(/\s+/g, '_') : 'default';
-  }
+  const runtime = createRuntimeContext();
+  const activeJob = runtime.activeJob;
+  if (!jobId) jobId = runtime.activeJobId;
   const label = CHANNEL_LABEL[channel];
   console.log(`\n[Orchestrator] ▶ 开始 ${label} sourcing`);
   emitLog(`▶ 开始 ${label} sourcing`);
   emitStatus('running');
 
-  const startedAt = dayjs().toISOString();
-  const runResult = taskRunOps.start.run({ job_id: jobId, channel, started_at: startedAt });
-  const runId = runResult.lastInsertRowid as number;
   const startMs = Date.now();
+  let runId: number | null = null;
 
   try {
     const page = await createBrowserTarget(channel);
 
-    // 导航到对应招聘平台
-    await targetGoto(page, CHANNEL_URL[channel]);
-    await ensurePlatformSession(page, channel);
+    if (opts.fromCurrent) {
+      // 就地接管：不跳转、不做登录态导航，直接从用户已开好的页面开始
+      const here = await currentTargetUrl(page).catch(() => '(未知)');
+      console.log(`[Orchestrator] 📍 就地接管当前页面（--here），不跳转：${here}`);
+      emitLog(`📍 就地接管当前页面：${here}`);
+    } else {
+      // 导航到对应招聘平台
+      await targetGoto(page, CHANNEL_URL[channel]);
+      await ensurePlatformSession(page, channel);
+    }
 
-    // 组装系统提示：SOUL + 职位上下文 + 记忆 + Skill
+    const startedAt = dayjs().toISOString();
+    const runResult = taskRunOps.start.run({ job_id: jobId, channel, started_at: startedAt });
+    runId = runResult.lastInsertRowid as number;
+
+    // 组装系统提示：SOUL + 职位上下文 + 中层能力 + 记忆 + Skill资产
     const soul      = loadWorkspaceFile('SOUL.md');
-    const job       = loadActiveJob();
+    const job       = activeJob;
     const jobCtx    = job ? jobToPrompt(job) : '';
-    const wisdom     = loadWorkspaceFile('references/founders-wisdom.md');
-    const evaluation = loadWorkspaceFile('references/candidate-evaluation.md');
-    const outreach   = loadWorkspaceFile('references/outreach-guide.md');
+    const capabilities = buildRecruitingCapabilityContext({
+      channel,
+      includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
+    });
     const memory    = buildMemoryContext(channel, jobId);
     const skill     = loadSkill(channel);
-    const systemPrompt = [soul, jobCtx, wisdom, evaluation, outreach, memory, '---', skill].filter(Boolean).join('\n\n');
+    const protocolContext = platformSystemContextForChannel(channel);
+    const systemPrompt = [soul, jobCtx, protocolContext, capabilities, memory, '---', skill].filter(Boolean).join('\n\n');
 
     const runner = createRunner();
     const result = await runner.runSkill(
       page,
       systemPrompt,
-      TASK_PROMPT(label),
-      (msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))
+      taskPromptForChannel(channel, label, !!opts.fromCurrent),
+      opts.progress ?? ((msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))),
+      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent),
     );
 
     const durationSec = Math.round((Date.now() - startMs) / 1000);
@@ -277,6 +356,10 @@ export async function runChannel(
     console.error(`\n[Orchestrator] ✗ ${label} 失败: ${error}`);
     emitLog(`✗ ${label} 失败: ${error}`);
     emitStatus('idle');
+
+    if (runId == null) {
+      throw err;
+    }
 
     taskRunOps.complete.run({
       id: runId,
@@ -540,13 +623,15 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
     const job = loadActiveJob();
     const soul = loadWorkspaceFile('SOUL.md');
     const skillContent = loadSkill(channel);
-    const evaluationDoc = loadWorkspaceFile('references/candidate-evaluation.md');
-    const outreachDoc = loadWorkspaceFile('references/outreach-guide.md');
-    const wisdomDoc = loadWorkspaceFile('references/founders-wisdom.md');
     const jobContext = job ? jobToPrompt(job) : '';
     const memory = buildMemoryContext(channel, jobId);
+    const protocolContext = platformSystemContextForChannel(channel);
+    const capabilities = buildRecruitingCapabilityContext({
+      channel,
+      includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
+    });
 
-    const systemPrompt = [soul, jobContext, evaluationDoc, outreachDoc, wisdomDoc, memory, skillContent]
+    const systemPrompt = [soul, jobContext, protocolContext, capabilities, memory, skillContent]
       .filter(Boolean)
       .join('\n\n---\n\n');
 
@@ -574,10 +659,16 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
         }
 
         // 执行任务
-        return await runner.runSkill(page, systemPrompt, TASK_PROMPT(label), (msg) => {
-          console.log(`[${label}] ${msg}`);
-          emitLog(`[${label}] ${msg}`);
-        });
+        return await runner.runSkill(
+          page,
+          systemPrompt,
+          taskPromptForChannel(channel, label, false),
+          (msg) => {
+            console.log(`[${label}] ${msg}`);
+            emitLog(`[${label}] ${msg}`);
+          },
+          runSkillOptionsForChannel(channel, runId, false),
+        );
       },
       {
         maxRetries: 2,

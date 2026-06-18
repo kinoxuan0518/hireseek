@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import type OpenAI from 'openai';
 import { config } from './config';
 import { repairToolMessageHistory } from './message-integrity';
+import { saveAgentSessionMessages } from './agent-core/session-store';
 
 export interface RemoteSessionOptions {
   title?: string;
@@ -70,6 +71,18 @@ function writeSessionFiles(
     messages,
   }, null, 2);
   fs.writeFileSync(jsonPath, jsonContent, 'utf-8');
+
+  try {
+    saveAgentSessionMessages({
+      sessionId,
+      title,
+      source: 'remote-session',
+      messages,
+      createdAt,
+    });
+  } catch {
+    // SQLite 会话索引失败不影响文件会话导出/恢复。
+  }
 
   return {
     id: sessionId,

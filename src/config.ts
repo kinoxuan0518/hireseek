@@ -88,6 +88,15 @@ export const config = {
   knowledge: {
     home: process.env.AGENT_KNOWLEDGE_HOME || '',
   },
+  // 运行时技能目录。默认读 Codex/Claude 本机技能库；仓库内 workspace/skills 只做兜底。
+  skills: {
+    homes: (process.env.HIRESEEK_SKILL_HOME || ['~/.codex/skills', '~/.claude/skills'].join(path.delimiter))
+      .split(path.delimiter)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(resolveHome),
+    externalEnabled: process.env.HIRESEEK_EXTERNAL_SKILLS !== 'false',
+  },
   feishu: {
     webhookUrl: process.env.FEISHU_WEBHOOK_URL || '',
     // 多维表格读取（进化闭环：基于真实招聘结果数据自我反思）

@@ -23,6 +23,8 @@ import { db } from './db';
 import { loadActiveJob, jobToPrompt } from './skills/loader';
 import type { TraceStep, Channel } from './types';
 import type { Verdict } from './verifier';
+import { getPlatformProtocol } from './platform-protocols';
+import { contractNameForChannel, contractWritesForChannel } from './contracts';
 
 // ── 轨迹与合规留痕表 ───────────────────────────────────────────────────
 db.exec(`
@@ -91,15 +93,20 @@ const DEFAULT_RULES = `
 5. 触达前应真正看过候选人详情（轨迹里"打招呼"动作前应有对应的查看/快照），而不是列表页无差别群发。
 `.trim();
 
-function loadProcessRules(): string {
+function loadProcessRules(channel?: Channel): string {
+  const parts = [DEFAULT_RULES];
+  const protocol = channel ? getPlatformProtocol(channel) : null;
+  if (protocol?.processRules) {
+    parts.push(protocol.processRules());
+  }
   try {
     const p = path.join(config.workspace.dir, 'references', 'process-rules.md');
     if (fs.existsSync(p)) {
       const extra = fs.readFileSync(p, 'utf-8').trim();
-      if (extra) return `${DEFAULT_RULES}\n\n补充/覆盖规则（来自 process-rules.md）：\n${extra}`;
+      if (extra) parts.push(`补充/覆盖规则（来自 process-rules.md）：\n${extra}`);
     }
   } catch { /* 读取失败用默认 */ }
-  return DEFAULT_RULES;
+  return parts.join('\n\n');
 }
 
 export interface Violation {
@@ -161,7 +168,6 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   // 就机械核对本轮 run 是否真写了。少写 = 结构性违规（high），不靠 LLM 判。
   const contractViolations: Violation[] = [];
   try {
-    const { contractNameForChannel, contractWritesForChannel } = require('./contracts') as typeof import('./contracts');
     const contractName = contractNameForChannel(channel);
     const promised = contractWritesForChannel(channel);
     const wrote: Record<string, number> = {
@@ -177,6 +183,23 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
           evidence: `run #${runId} 的 ${w} 计数为 0`,
         });
       }
+    }
+    const incompleteOutreach = (db.prepare(`
+      SELECT COUNT(*) n FROM run_candidates
+      WHERE run_id = ?
+        AND (
+          COALESCE(TRIM(evidence), '') = ''
+          OR COALESCE(TRIM(personalization_evidence), '') = ''
+          OR COALESCE(TRIM(message_intent), '') = ''
+          OR COALESCE(TRIM(greeting_text), '') = ''
+        )
+    `).get(runId) as { n: number }).n;
+    if (incompleteOutreach > 0) {
+      contractViolations.push({
+        rule: `触达输出协议 outreach-output.v1 缺少可审计字段`,
+        severity: 'high',
+        evidence: `run #${runId} 有 ${incompleteOutreach} 条 contacted_candidates 缺 evidence/personalization_evidence/message_intent/greeting_text`,
+      });
     }
   } catch { /* 契约不可用则跳过履约检查 */ }
 
@@ -195,7 +218,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
 
   const userPrompt = [
     `## 岗位画像\n\n${job ? jobToPrompt(job) : '（岗位画像缺失）'}`,
-    `## 过程规则\n\n${loadProcessRules()}`,
+    `## 过程规则\n\n${loadProcessRules(channel)}`,
     `## 本轮执行轨迹（渠道：${channel}，共 ${trace.length} 步）\n\n${summarizeTrace(trace)}`,
     '请对照过程规则审计这条轨迹，输出 JSON。',
   ].join('\n\n');

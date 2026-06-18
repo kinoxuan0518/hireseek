@@ -11,17 +11,23 @@ import OpenAI from 'openai';
 import { config } from './config';
 import { buildSystemPrompt, CHAT_TOOLS, executeTool, describeToolCall } from './chat';
 import { repairToolMessageHistoryInPlace } from './message-integrity';
+import { saveAgentSessionMessages } from './agent-core/session-store';
 
 const MAX_HISTORY = 24;   // 系统提示之外保留的最近消息条数
 const MAX_ROUNDS  = 30;   // 单次回复内最多 tool-call 轮数
 
 export interface AgentSession {
+  id: string;
+  title: string;
   messages: OpenAI.ChatCompletionMessageParam[];
   busy: boolean;
 }
 
 export function createSession(): AgentSession {
+  const created = new Date().toISOString();
   return {
+    id: `agent-${created.replace(/[:.]/g, '-')}`,
+    title: `Agent 会话-${new Date().toLocaleString('zh-CN')}`,
     messages: [{ role: 'system', content: buildSystemPrompt() }],
     busy: false,
   };
@@ -92,6 +98,14 @@ export async function runAgentTurn(
     session.messages.push(msg);
 
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
+      try {
+        saveAgentSessionMessages({
+          sessionId: session.id,
+          title: session.title,
+          source: 'agent-session',
+          messages: session.messages,
+        });
+      } catch { /* 会话持久化失败不影响回复 */ }
       return msg.content ?? '（没有可回复的内容）';
     }
 
@@ -103,7 +117,10 @@ export async function runAgentTurn(
 
       let output: string;
       try {
-        output = await executeTool(call.function.name, parsedArgs);
+        output = await executeTool(call.function.name, parsedArgs, {
+          sessionId: session.id,
+          toolCallId: call.id,
+        });
       } catch (err) {
         output = `工具执行失败：${err instanceof Error ? err.message : err}`;
       }
@@ -111,5 +128,14 @@ export async function runAgentTurn(
     }
   }
 
-  return `这件事调用了很多步还没收尾（已达 ${MAX_ROUNDS} 轮上限），我先停一下。要不要把任务拆细一点再让我继续？`;
+  const finalText = `这件事调用了很多步还没收尾（已达 ${MAX_ROUNDS} 轮上限），我先停一下。要不要把任务拆细一点再让我继续？`;
+  try {
+    saveAgentSessionMessages({
+      sessionId: session.id,
+      title: session.title,
+      source: 'agent-session',
+      messages: session.messages,
+    });
+  } catch { /* 会话持久化失败不影响回复 */ }
+  return finalText;
 }

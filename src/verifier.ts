@@ -69,6 +69,10 @@ interface CandRow {
   name: string; school: string | null; company: string | null;
   channel: string; score: number | null; contacted_at: string;
   evidence?: string | null;
+  personalization_evidence?: string | null;
+  message_intent?: string | null;
+  risk_flags?: string | null;
+  fit_tags?: string | null;
   greeting_text?: string | null;
   profile_url?: string | null;
 }
@@ -96,6 +100,10 @@ function pickCandidatesByRun(runId: number, limit: number): CandRow[] {
       COALESCE(rc.score, c.score) AS score,
       rc.contacted_at,
       rc.evidence,
+      rc.personalization_evidence,
+      rc.message_intent,
+      rc.risk_flags,
+      rc.fit_tags,
       rc.greeting_text,
       rc.profile_url
     FROM run_candidates rc
@@ -126,7 +134,7 @@ const VERIFIER_SYSTEM = `
 function buildUserPrompt(job: ReturnType<typeof loadActiveJob>, cands: CandRow[]): string {
   const profile = job ? jobToPrompt(job) : '（岗位画像缺失）';
   const list = cands.map((c, i) =>
-    `${i + 1}. ${c.name}｜公司：${c.company || '未知'}｜学校：${c.school || '未知'}｜渠道：${c.channel}｜寻源agent自评：${c.score ?? '未打分'}${c.evidence ? `｜触达依据：${c.evidence}` : ''}${c.greeting_text ? `｜招呼语：${c.greeting_text.slice(0, 80)}` : ''}`,
+    `${i + 1}. ${c.name}｜公司：${c.company || '未知'}｜学校：${c.school || '未知'}｜渠道：${c.channel}｜寻源agent自评：${c.score ?? '未打分'}${c.evidence ? `｜触达依据：${c.evidence}` : ''}${c.personalization_evidence ? `｜个性化证据：${c.personalization_evidence}` : ''}${c.message_intent ? `｜触达意图：${c.message_intent}` : ''}${c.fit_tags ? `｜匹配标签：${c.fit_tags}` : ''}${c.risk_flags ? `｜风险：${c.risk_flags}` : ''}${c.greeting_text ? `｜招呼语：${c.greeting_text.slice(0, 80)}` : ''}`,
   ).join('\n');
   return `## 岗位画像\n\n${profile}\n\n## 待质检的已触达候选人（${cands.length} 人）\n\n${list}\n\n请逐一独立重判，输出 JSON 数组。`;
 }

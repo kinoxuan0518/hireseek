@@ -31,12 +31,16 @@ const USAGE = `
   hireseek feedback <名> pass|fail [备注]  手动回流面试结果（校准"合适"的判断）
   hireseek hire-sync [--apply]  从飞书招聘/多维表格自动拉面试结果回流（默认 dry-run 预览）
   hireseek verify              双轴独立质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)（--push 推送）
+  hireseek core                Agent Core 状态：工具注册 / trace / session / memory
+  hireseek protocols           中层平台协议：已产品化渠道 / 契约 / 动作策略 / 合规规则
+  hireseek capabilities        中层招聘能力：触达话术 / 候选人判断 / 搜索策略
   hireseek alive               查岗：一句话报告它在不在、做了什么、下一步（--push 推送一条）
   hireseek console             网页指挥台：打开浏览器就能看见它、打字指挥它
   hireseek dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
   hireseek run                 自主模式：自动决定今天跑哪些渠道
   hireseek run --plan          计划模式：先分析生成计划，用户确认后执行
   hireseek run <渠道>          指定渠道立即执行
+  hireseek run boss --here     就地接管：你先把 Chrome 开到推荐牛人页(选好职位)，agent 不导航直接看人打招呼
   hireseek scan                扫描收件箱，更新已回复候选人
   hireseek update <姓名> <状态>  手动更新候选人状态
   hireseek funnel              查看招聘漏斗
@@ -215,6 +219,25 @@ async function main(): Promise<void> {
     db.close();
     process.exit(0);
 
+  } else if (command === 'core') {
+    const { CHAT_TOOL_REGISTRY } = await import('./chat');
+    const { collectCoreStatus, formatCoreStatus } = await import('./agent-core/core-status');
+    console.log(formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY)) + '\n');
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'protocols') {
+    const { formatPlatformProtocols } = await import('./platform-protocols');
+    console.log(formatPlatformProtocols() + '\n');
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'capabilities') {
+    const { formatRecruitingCapabilities } = await import('./capabilities');
+    console.log(formatRecruitingCapabilities() + '\n');
+    db.close();
+    process.exit(0);
+
   } else if (command === 'alive' || command === 'vitals') {
     // 查岗：一句话回答"它在不在、做了什么、下一步"。--push 同时主动推一条到飞书/通知
     const { collectVitals, formatVitals, reportVitals } = await import('./vitals');
@@ -229,6 +252,8 @@ async function main(): Promise<void> {
   } else if (command === 'run') {
     // 检查是否使用计划模式
     const usePlan = args.includes('--plan') || args.includes('-p');
+    // 就地接管：用户已把 Chrome 开到正确的候选人列表页，agent 不导航、直接从当前页干活
+    const fromCurrent = args.includes('--here');
     // 跳过命令名本身（args[0]='run'），否则自主模式会把 run 当渠道名
     const channelArg = args.slice(1).find(a => !a.startsWith('-'));
 
@@ -254,7 +279,14 @@ async function main(): Promise<void> {
         console.log(chalk.yellow('⚠️  计划模式仅支持 "hireseek run --plan"（全渠道），指定渠道时不支持'));
         process.exit(1);
       }
-      const runId = await runChannel(channelArg as Channel);
+      let runId: number;
+      try {
+        runId = await runChannel(channelArg as Channel, undefined, { fromCurrent });
+      } catch (err) {
+        console.error(chalk.red(`\n[HireSeek] sourcing 未启动: ${err instanceof Error ? err.message : err}`));
+        db.close();
+        process.exit(1);
+      }
       // 跑完立刻对【本轮】上双轴质检 + 计分板，让用户当场看到契约闭环是否打通
       try {
         const { verifyRun, formatVerification } = await import('./verifier');

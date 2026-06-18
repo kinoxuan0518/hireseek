@@ -1,5 +1,30 @@
-import type { BrowserTarget } from '../browser-session';
+import type { BrowserAction, BrowserTarget } from '../browser-session';
 import type { SkillResult } from '../types';
+
+export interface BrowserActionPolicyDecision {
+  allowed: boolean;
+  reason?: string;
+}
+
+export interface BrowserActionPolicyContext {
+  runId?: number;
+  sessionId?: string;
+}
+
+export type BrowserActionPolicy = (
+  action: BrowserAction,
+  context: BrowserActionPolicyContext,
+) => BrowserActionPolicyDecision;
+
+export interface RunSkillOptions {
+  blockedBrowserActions?: BrowserAction['action'][];
+  /** 中层平台协议可在这里约束浏览器动作；runner 只执行通用策略结果。 */
+  browserActionPolicy?: BrowserActionPolicy;
+  /** 当前 task_runs.id，用于 agent-core 通用工具 trace；没有时仍保留内存 trace。 */
+  runId?: number;
+  /** 当前对话/任务 session id，用于会话级工具 trace。 */
+  sessionId?: string;
+}
 
 /**
  * 所有 LLM 实现都必须满足这个接口。
@@ -10,7 +35,8 @@ export interface LLMRunner {
     page: BrowserTarget,
     systemPrompt: string,
     task: string,
-    onProgress?: (msg: string) => void
+    onProgress?: (msg: string) => void,
+    options?: RunSkillOptions,
   ): Promise<SkillResult>;
 }
 

@@ -49,6 +49,13 @@ export interface TraceStep {
   target?: string;           // ref 编号或 URL
   detail?: string;           // 输入文本等（截断）
   ok: boolean;               // 该步是否成功执行
+  at?: string;                // ISO/local timestamp（可选，旧轨迹兼容）
+  toolName?: string;          // 触发该步的工具名（agent-core 通用 trace）
+  inputSummary?: string;      // 工具输入摘要
+  outputSummary?: string;     // 工具输出摘要
+  error?: string;             // 失败原因
+  sideEffect?: boolean;       // 是否真实影响外部世界
+  mode?: 'read' | 'dry_run' | 'execute';
 }
 
 /**
@@ -62,6 +69,10 @@ export interface ContactedCandidate {
   title?: string;
   location?: string;
   evidence?: string;        // 为什么联系 ta 的依据（供质检核对匹配度）
+  personalizationEvidence?: string; // 招呼语里用到的候选人真实信息点
+  messageIntent?: string;   // 这条招呼想触发候选人的哪种兴趣/回应
+  riskFlags?: string[];     // 信息不足、可能误判、话术风险等
+  fitTags?: string[];       // 命中的能力/背景标签
   score?: number;           // do-er 的自评分 0-100（契约字段名 fit_score）
   greetingSent?: boolean;   // 是否真的发出了打招呼
   greetingText?: string;    // 实际打招呼文案（供合规验证器查群发感）
