@@ -13,6 +13,7 @@ export interface ToolTraceInput {
   error?: string | null;
   sideEffect?: boolean;
   mode?: ToolExecutionMode;
+  stageId?: string | null;
 }
 
 export interface RejectedToolCallInput {
@@ -32,6 +33,11 @@ function summarize(value: unknown, max = 700): string {
   return text.replace(/\s+/g, ' ').slice(0, max);
 }
 
+function normalizeStageId(value: string | null | undefined): string | null {
+  const text = value?.trim();
+  return text ? text.slice(0, 80) : null;
+}
+
 export function summarizeForTrace(value: unknown, max = 700): string {
   return summarize(value, max);
 }
@@ -40,8 +46,8 @@ export function recordToolCall(input: ToolTraceInput): void {
   try {
     db.prepare(`
       INSERT INTO agent_tool_calls
-        (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, error, side_effect, mode)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, error, side_effect, mode, stage_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.runId ?? null,
       input.sessionId ?? null,
@@ -53,6 +59,7 @@ export function recordToolCall(input: ToolTraceInput): void {
       input.error ?? null,
       input.sideEffect ? 1 : 0,
       input.mode ?? (input.sideEffect ? 'execute' : 'read'),
+      normalizeStageId(input.stageId),
     );
   } catch {
     // Trace 是观测层，失败不能阻断主流程。
@@ -73,5 +80,6 @@ export function recordRejectedToolCall(input: RejectedToolCallInput): void {
     error: input.error,
     sideEffect,
     mode: sideEffect ? 'execute' : 'read',
+    stageId: null,
   });
 }

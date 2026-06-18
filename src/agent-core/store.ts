@@ -17,6 +17,7 @@ export function ensureAgentCoreSchema(): void {
       error          TEXT,
       side_effect    INTEGER NOT NULL DEFAULT 0,
       mode           TEXT NOT NULL DEFAULT 'read',
+      stage_id       TEXT,
       created_at     TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     );
     CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_run ON agent_tool_calls(run_id);
@@ -98,11 +99,13 @@ export function ensureAgentCoreSchema(): void {
     `ALTER TABLE agent_memory_episodic ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE agent_memory_episodic ADD COLUMN content_hash TEXT`,
     `ALTER TABLE agent_memory_semantic ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`,
+    `ALTER TABLE agent_tool_calls ADD COLUMN stage_id TEXT`,
   ]) {
     try { db.exec(sql); } catch { /* column already exists */ }
   }
 
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_stage ON agent_tool_calls(stage_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_memory_raw_dedupe
       ON agent_memory_raw(scope, source, content_hash)
       WHERE content_hash IS NOT NULL;

@@ -22,6 +22,7 @@ export interface CoreStatus {
       ok: number;
       side_effect: number;
       mode: string;
+      stage_id: string | null;
       created_at: string;
       error: string | null;
     }>;
@@ -66,7 +67,7 @@ export function collectCoreStatus(registry?: ToolRegistry): CoreStatus {
       failed: count(`SELECT COUNT(*) AS n FROM agent_tool_calls WHERE ok = 0`),
       sideEffect: count(`SELECT COUNT(*) AS n FROM agent_tool_calls WHERE side_effect = 1`),
       recent: db.prepare(`
-        SELECT tool_name, ok, side_effect, mode, created_at, error
+        SELECT tool_name, ok, side_effect, mode, stage_id, created_at, error
         FROM agent_tool_calls
         ORDER BY id DESC
         LIMIT 8
@@ -103,8 +104,9 @@ export function formatCoreStatus(status: CoreStatus): string {
     ? status.trace.recent.map(t => {
       const ok = t.ok ? 'ok' : 'fail';
       const side = t.side_effect ? ` ${t.mode}/side-effect` : ` ${t.mode}`;
+      const stage = t.stage_id ? ` stage=${t.stage_id}` : '';
       const err = t.error ? ` — ${t.error.slice(0, 80)}` : '';
-      return `- ${t.created_at} ${t.tool_name} [${ok}${side}]${err}`;
+      return `- ${t.created_at} ${t.tool_name} [${ok}${side}${stage}]${err}`;
     }).join('\n')
     : '无';
   const recentSessions = status.sessions.recent.length
@@ -135,4 +137,3 @@ export function formatCoreStatus(status: CoreStatus): string {
     `Memory: raw=${status.memory.raw}, episodic=${status.memory.episodic}, semantic=${status.memory.semantic}`,
   ].join('\n');
 }
-

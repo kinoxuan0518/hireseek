@@ -107,6 +107,7 @@ describe('agent core lower layer', () => {
       ok: true,
       sideEffect: true,
       mode: 'execute',
+      stageId: 'prefilter',
     });
     recordToolCall({
       runId: 202,
@@ -122,10 +123,42 @@ describe('agent core lower layer', () => {
     });
 
     const rows = db.prepare(`
-      SELECT run_id, tool_name, ok, side_effect, mode FROM agent_tool_calls WHERE run_id = ? ORDER BY id
-    `).all(101) as Array<{ run_id: number; tool_name: string; ok: number; side_effect: number; mode: string }>;
+      SELECT run_id, tool_name, ok, side_effect, mode, stage_id FROM agent_tool_calls WHERE run_id = ? ORDER BY id
+    `).all(101) as Array<{ run_id: number; tool_name: string; ok: number; side_effect: number; mode: string; stage_id: string | null }>;
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ run_id: 101, tool_name: 'browser_act', ok: 1, side_effect: 1, mode: 'execute' });
+    expect(rows[0]).toMatchObject({ run_id: 101, tool_name: 'browser_act', ok: 1, side_effect: 1, mode: 'execute', stage_id: 'prefilter' });
+  });
+
+  it('persists run trace stage markers for compliance coverage', async () => {
+    const { saveRunTrace, summarizeStageCoverage } = await import('../src/compliance');
+    const { db } = await import('../src/db');
+    const runId = 505;
+
+    db.prepare(`DELETE FROM run_actions WHERE run_id = ?`).run(runId);
+    db.prepare(`DELETE FROM agent_tool_calls WHERE run_id = ?`).run(runId);
+
+    saveRunTrace(runId, 'Agent工程师', 'boss', [
+      {
+        seq: 1,
+        action: 'click',
+        target: 'ref=11',
+        detail: 'open filter panel',
+        ok: true,
+        stageId: 'prefilter',
+      },
+    ]);
+
+    const row = db.prepare(`
+      SELECT stage_id FROM run_actions WHERE run_id = ? ORDER BY id DESC LIMIT 1
+    `).get(runId) as { stage_id: string | null };
+    expect(row.stage_id).toBe('prefilter');
+
+    const coverage = summarizeStageCoverage('boss', runId, [
+      { seq: 1, action: 'click', target: 'ref=11', ok: true, stageId: 'prefilter' },
+    ]);
+    expect(coverage).toContain('prefilter');
+    expect(coverage).toContain('已观测 browser=1');
+    expect(coverage).toContain('single-contact');
   });
 
   it('classifies dry-run browser actions without allowing side effects', async () => {

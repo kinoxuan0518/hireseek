@@ -87,6 +87,10 @@ const BROWSER_TOOL: OpenAI.ChatCompletionTool = {
           type: 'number',
           description: 'scroll 时的像素距离（默认 600），或 wait 时的毫秒数（默认 1500）',
         },
+        stage_id: {
+          type: 'string',
+          description: '可选：当前动作所属的协议阶段 id。若任务提示给出了 stage manifest，应填写其中一个 id。',
+        },
       },
     },
   },
@@ -153,8 +157,9 @@ const DOM_GUIDE = `
 4. 输入搜索词后通常需要 press(text="Enter") 提交
 5. 列表页内容不全时用 scroll(direction="down") 加载更多
 6. 页面跳转后旧 ref 全部失效，必须依据新快照操作
-7. **每联系完一个候选人，立刻调用 record_contacted 登记**（姓名/公司/职位/自评分/是否已打招呼/招呼文案等）。已打招呼时必须包含：evidence、personalization_evidence、message_intent、greeting_text。这是产出的唯一权威来源——别攒到最后才在总结里写名单。
-8. **任务完成后**：直接回复文字总结，不再调用工具
+7. 如果任务提示包含 stage manifest，browser 调用应带上当前阶段的 stage_id，方便流程审计。
+8. **每联系完一个候选人，立刻调用 record_contacted 登记**（姓名/公司/职位/自评分/是否已打招呼/招呼文案等）。已打招呼时必须包含：evidence、personalization_evidence、message_intent、greeting_text。这是产出的唯一权威来源——别攒到最后才在总结里写名单。
+9. **任务完成后**：直接回复文字总结，不再调用工具
 
 输出总结时必须包含（注意：结构化名单已由 record_contacted 逐条登记，总结里的名单只是给人看的摘要）：
 触达人数: <数字>
@@ -188,6 +193,12 @@ export function browserActionMode(input: BrowserAction, executionMode: SkillExec
 export function browserActionHasSideEffect(input: BrowserAction, executionMode: SkillExecutionMode = 'execute'): boolean {
   if (executionMode === 'dry_run') return dryRunBlocksBrowserAction(input);
   return input.action !== 'snapshot' && input.action !== 'wait';
+}
+
+function browserActionStageId(input: BrowserAction): string | undefined {
+  const raw = input.stage_id ?? input.stageId;
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  return text ? text.slice(0, 80) : undefined;
 }
 
 /**
@@ -507,6 +518,7 @@ export class DomRunner implements LLMRunner {
             error: recordOk ? null : toolContent,
             sideEffect: false,
             mode: executionMode === 'dry_run' ? 'dry_run' : 'execute',
+            stageId: 'single-contact',
           });
           continue;
         }
@@ -567,6 +579,7 @@ export class DomRunner implements LLMRunner {
         const actionLog = `[${turn + 1}] ${input.action}${input.ref != null ? ` ref=${input.ref}` : ''}${
           input.url ? ` ${input.url}` : ''
         }`;
+        const stageId = browserActionStageId(input);
         onProgress?.(actionLog);
         emitLog(actionLog);
 
@@ -588,6 +601,7 @@ export class DomRunner implements LLMRunner {
             error: blocked,
             sideEffect: true,
             mode: 'dry_run',
+            stageId,
           });
           try {
             result.trace!.push({
@@ -603,6 +617,7 @@ export class DomRunner implements LLMRunner {
               error: blocked,
               sideEffect: true,
               mode: 'dry_run',
+              stageId,
             });
           } catch { /* 轨迹记录失败绝不影响 sourcing */ }
           continue;
@@ -628,6 +643,7 @@ export class DomRunner implements LLMRunner {
             error: blocked,
             sideEffect,
             mode,
+            stageId,
           });
           try {
             result.trace!.push({
@@ -639,6 +655,7 @@ export class DomRunner implements LLMRunner {
               toolName: 'browser',
               sideEffect,
               mode,
+              stageId,
             });
           } catch { /* 轨迹记录失败绝不影响 sourcing */ }
           continue;
@@ -668,6 +685,7 @@ export class DomRunner implements LLMRunner {
             error: blocked,
             sideEffect,
             mode,
+            stageId,
           });
           try {
             result.trace!.push({
@@ -683,6 +701,7 @@ export class DomRunner implements LLMRunner {
               error: blocked,
               sideEffect,
               mode,
+              stageId,
             });
           } catch { /* 轨迹记录失败绝不影响 sourcing */ }
           continue;
@@ -730,6 +749,7 @@ export class DomRunner implements LLMRunner {
             error: stepError ?? undefined,
             sideEffect: browserActionHasSideEffect(input, executionMode),
             mode: browserActionMode(input, executionMode),
+            stageId,
           });
         } catch { /* 轨迹记录失败绝不影响 sourcing */ }
         recordToolCall({
@@ -743,6 +763,7 @@ export class DomRunner implements LLMRunner {
           error: stepError,
           sideEffect: browserActionHasSideEffect(input, executionMode),
           mode: browserActionMode(input, executionMode),
+          stageId,
         });
 
         // 风控检测：基于页面快照文本（代码层判定，不依赖模型识别）

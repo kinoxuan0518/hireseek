@@ -7,6 +7,9 @@ export interface BrowserAction {
   url?: string;
   direction?: 'up' | 'down';
   amount?: number;
+  /** Optional protocol stage marker, e.g. boss stage manifest id. */
+  stage_id?: string;
+  stageId?: string;
 }
 
 export interface RiskGuard {

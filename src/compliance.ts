@@ -25,6 +25,7 @@ import type { TraceStep, Channel } from './types';
 import type { Verdict } from './verifier';
 import { getPlatformProtocol } from './platform-protocols';
 import { contractNameForChannel, contractWritesForChannel } from './contracts';
+import './agent-core/store';
 
 // ── 轨迹与合规留痕表 ───────────────────────────────────────────────────
 db.exec(`
@@ -38,6 +39,7 @@ db.exec(`
     target  TEXT,
     detail  TEXT,
     ok      INTEGER NOT NULL DEFAULT 1,
+    stage_id TEXT,
     at      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
   );
   CREATE INDEX IF NOT EXISTS idx_run_actions_run ON run_actions(run_id);
@@ -55,16 +57,19 @@ db.exec(`
   );
 `);
 
+try { db.exec(`ALTER TABLE run_actions ADD COLUMN stage_id TEXT`); } catch { /* column already exists */ }
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_run_actions_stage ON run_actions(stage_id)`); } catch { /* best effort */ }
+
 // ── orchestrator 调用：把一轮执行轨迹落库 ──────────────────────────────
 export function saveRunTrace(runId: number, jobId: string, channel: string, trace: TraceStep[]): void {
   if (!trace.length) return;
   const ins = db.prepare(`
-    INSERT INTO run_actions (run_id, job_id, channel, seq, action, target, detail, ok)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO run_actions (run_id, job_id, channel, seq, action, target, detail, ok, stage_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const tx = db.transaction((steps: TraceStep[]) => {
     for (const s of steps) {
-      ins.run(runId, jobId, channel, s.seq, s.action, s.target ?? null, s.detail ?? null, s.ok ? 1 : 0);
+      ins.run(runId, jobId, channel, s.seq, s.action, s.target ?? null, s.detail ?? null, s.ok ? 1 : 0, s.stageId ?? null);
     }
   });
   tx(trace);
@@ -72,9 +77,16 @@ export function saveRunTrace(runId: number, jobId: string, channel: string, trac
 
 function loadTrace(runId: number): TraceStep[] {
   return (db.prepare(
-    `SELECT seq, action, target, detail, ok FROM run_actions WHERE run_id = ? ORDER BY seq`,
-  ).all(runId) as Array<{ seq: number; action: string; target: string | null; detail: string | null; ok: number }>)
-    .map(r => ({ seq: r.seq, action: r.action, target: r.target ?? undefined, detail: r.detail ?? undefined, ok: !!r.ok }));
+    `SELECT seq, action, target, detail, ok, stage_id FROM run_actions WHERE run_id = ? ORDER BY seq`,
+  ).all(runId) as Array<{ seq: number; action: string; target: string | null; detail: string | null; ok: number; stage_id: string | null }>)
+    .map(r => ({
+      seq: r.seq,
+      action: r.action,
+      target: r.target ?? undefined,
+      detail: r.detail ?? undefined,
+      ok: !!r.ok,
+      stageId: r.stage_id ?? undefined,
+    }));
 }
 
 /** 最近一次有轨迹的 run。无 runId 时用它兜底。 */
@@ -144,9 +156,47 @@ function summarizeTrace(trace: TraceStep[]): string {
   trace.forEach(s => { counts[s.action] = (counts[s.action] ?? 0) + 1; });
   const tally = Object.entries(counts).map(([a, n]) => `${a}×${n}`).join('、');
   const steps = trace.map(s =>
-    `${s.seq}. ${s.action}${s.target ? ` ${s.target}` : ''}${s.detail ? ` 「${s.detail}」` : ''}${s.ok ? '' : ' [失败]'}`,
+    `${s.seq}. ${s.action}${s.stageId ? ` [stage=${s.stageId}]` : ''}${s.target ? ` ${s.target}` : ''}${s.detail ? ` 「${s.detail}」` : ''}${s.ok ? '' : ' [失败]'}`,
   ).join('\n');
   return `动作统计：${tally}\n\n逐步轨迹：\n${steps}`;
+}
+
+function loadToolStageCounts(runId: number): Map<string, number> {
+  const counts = new Map<string, number>();
+  try {
+    const rows = db.prepare(`
+      SELECT stage_id, COUNT(*) n
+      FROM agent_tool_calls
+      WHERE run_id = ? AND COALESCE(TRIM(stage_id), '') <> ''
+      GROUP BY stage_id
+    `).all(runId) as Array<{ stage_id: string; n: number }>;
+    for (const r of rows) counts.set(r.stage_id, r.n);
+  } catch { /* agent-core trace unavailable */ }
+  return counts;
+}
+
+export function summarizeStageCoverage(channel: Channel, runId: number, trace: TraceStep[]): string {
+  const stages = getPlatformProtocol(channel)?.stageManifest?.() ?? [];
+  if (stages.length === 0) return '此渠道未声明 stage manifest。';
+
+  const actionCounts = new Map<string, number>();
+  for (const step of trace) {
+    if (!step.stageId) continue;
+    actionCounts.set(step.stageId, (actionCounts.get(step.stageId) ?? 0) + 1);
+  }
+  const toolCounts = loadToolStageCounts(runId);
+  const known = new Set(stages.map(s => s.id));
+  const observed = new Set([...actionCounts.keys(), ...toolCounts.keys()]);
+  const unknown = [...observed].filter(id => !known.has(id));
+
+  const rows = stages.map(stage => {
+    const actions = actionCounts.get(stage.id) ?? 0;
+    const tools = toolCounts.get(stage.id) ?? 0;
+    const status = actions + tools > 0 ? `已观测 browser=${actions}, tool=${tools}` : '未观测';
+    return `- ${stage.id} ${stage.name}: ${status}`;
+  });
+  if (unknown.length > 0) rows.push(`- 未知阶段标记: ${unknown.join('、')}`);
+  return rows.join('\n');
 }
 
 // ── 主入口：审计一轮执行流程 ───────────────────────────────────────────
@@ -222,6 +272,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   const userPrompt = [
     `## 岗位画像\n\n${job ? jobToPrompt(job) : '（岗位画像缺失）'}`,
     `## 过程规则\n\n${loadProcessRules(channel)}`,
+    `## 阶段覆盖\n\n${summarizeStageCoverage(channel, runId, trace)}`,
     `## 本轮执行轨迹（渠道：${channel}，共 ${trace.length} 步）\n\n${summarizeTrace(trace)}`,
     '请对照过程规则审计这条轨迹，输出 JSON。',
   ].join('\n\n');

@@ -57,6 +57,7 @@ export interface TraceStep {
   error?: string;             // 失败原因
   sideEffect?: boolean;       // 是否真实影响外部世界
   mode?: 'read' | 'dry_run' | 'execute';
+  stageId?: string;           // 可选：中层协议阶段 id（如下层只记录，不解释业务含义）
 }
 
 /**
