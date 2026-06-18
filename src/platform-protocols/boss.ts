@@ -1,9 +1,22 @@
 import type { BrowserAction } from '../browser-session';
 import type { BrowserActionPolicy, BrowserActionPolicyDecision } from '../runners/interface';
+import type { JobConfig } from '../skills/loader';
 
 export interface BossTaskPromptOptions {
   channelLabel?: string;
   fromCurrent?: boolean;
+  activeJob?: JobConfig | null;
+}
+
+export interface BossPrefilterPlan {
+  experienceTags: string[];
+  excludedExperienceTags: string[];
+  schoolTags: string[];
+  educationTags: string[];
+  keywordTags: string[];
+  recentUnviewed: string;
+  scriptRefineFacts: string[];
+  notes: string[];
 }
 
 const BOSS_SESSION_RULES = [
@@ -57,6 +70,113 @@ const BOSS_STOP_RULES = [
   '全部目标职位刷空但未触发每日上限时，允许进入全局补池轮；连续 3 轮仍无新增候选人才可用 pool_refill_exhausted 结束。',
 ];
 
+function uniq(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function jobFacts(job: JobConfig | null | undefined): string[] {
+  if (!job) return [];
+  return [
+    job.title,
+    ...(job.requirements?.must_have ?? []),
+    ...(job.requirements?.nice_to_have ?? []),
+    ...(job.requirements?.deal_breaker ?? []),
+  ].filter(Boolean);
+}
+
+function includesAny(text: string, patterns: RegExp[]): boolean {
+  return patterns.some(p => p.test(text));
+}
+
+function factLooksMapped(fact: string): boolean {
+  return includesAny(fact, [
+    /\d+\s*[-~到]\s*\d+\s*年/,
+    /1\s*年以内|一年以内|应届|在校|毕业/,
+    /本科|硕士|博士|学历/,
+    /985|211|C9|QS|国内外名校|海外名校/,
+    /Agent|智能体|LLM|大模型|RAG|NLP|自然语言|机器学习|推荐|Python|LangChain/i,
+  ]);
+}
+
+export function buildBossPrefilterPlan(job: JobConfig | null | undefined): BossPrefilterPlan {
+  const facts = jobFacts(job);
+  const text = facts.join('\n');
+  const experienceTags: string[] = [];
+  if (/\b1\s*[-~到]\s*3\s*年|1\s*-\s*3\s*年|1到3年/.test(text)) experienceTags.push('1-3年');
+  if (/\b3\s*[-~到]\s*5\s*年|3\s*-\s*5\s*年|3到5年/.test(text)) experienceTags.push('3-5年');
+  if (/1\s*年以内|一年以内/.test(text)) experienceTags.push('1年以内');
+  if (/应届|在校|25\s*年毕业|26\s*年毕业|25届|26届/.test(text)) {
+    experienceTags.push('在校/应届', '25年毕业', '26年毕业');
+  }
+
+  const schoolTags: string[] = [];
+  if (/985|C9/.test(text)) schoolTags.push('985');
+  if (/QS|国内外名校|海外名校|名校/.test(text)) schoolTags.push('国内外名校');
+  if (/211/.test(text)) schoolTags.push('211');
+
+  const educationTags: string[] = [];
+  if (/本科/.test(text)) educationTags.push('本科');
+  if (/硕士/.test(text)) educationTags.push('硕士');
+  if (/博士/.test(text)) educationTags.push('博士');
+
+  const keywordTags: string[] = [];
+  if (/Agent|智能体|LLM|大模型|RAG|LangChain/i.test(text)) keywordTags.push('大模型', 'AI Agent');
+  if (/NLP|自然语言/i.test(text)) keywordTags.push('自然语言处理');
+  if (/机器学习|ML/i.test(text)) keywordTags.push('机器学习');
+  if (/推荐/.test(text)) keywordTags.push('推荐算法');
+  if (/Python/i.test(text)) keywordTags.push('Python');
+
+  const notes: string[] = [
+    '经验项全局排除“26年后毕业”；27届/2027 及以后毕业信号必须脚本兜底跳过。',
+    '页面没有对应选项的事实只进入脚本精筛，不允许臆造筛选项。',
+  ];
+  if (experienceTags.length === 0) notes.push('未从岗位事实解析到可映射经验项，执行时记录 prefilter_mapping_missing。');
+  if (keywordTags.length === 0) notes.push('未从岗位事实解析到可映射关键词项，执行时记录 prefilter_mapping_missing。');
+
+  const scriptRefineFacts = facts.filter(f => !factLooksMapped(f));
+
+  return {
+    experienceTags: uniq(experienceTags),
+    excludedExperienceTags: ['26年后毕业'],
+    schoolTags: uniq(schoolTags),
+    educationTags: uniq(educationTags),
+    keywordTags: uniq(keywordTags).slice(0, 4),
+    recentUnviewed: '近14天没有',
+    scriptRefineFacts,
+    notes,
+  };
+}
+
+function formatTags(values: string[]): string {
+  return values.length ? values.join('、') : '无可安全映射项';
+}
+
+export function formatBossPrefilterPlan(job: JobConfig | null | undefined): string {
+  if (!job) {
+    return [
+      '## 当前职位 BOSS 筛选前置计划',
+      '',
+      '当前没有 active job 原始事实；只能做页面状态预检，不得臆造岗位筛选项。',
+    ].join('\n');
+  }
+  const plan = buildBossPrefilterPlan(job);
+  return [
+    '## 当前职位 BOSS 筛选前置计划（由 active job 原始事实生成）',
+    '',
+    `职位：${job.title}`,
+    `经验要求：${formatTags(plan.experienceTags)}`,
+    `经验排除：${formatTags(plan.excludedExperienceTags)}`,
+    `院校筛选：${formatTags(plan.schoolTags)}`,
+    `学历筛选：${formatTags(plan.educationTags)}`,
+    `关键词筛选：${formatTags(plan.keywordTags)}`,
+    `近期未看过：${plan.recentUnviewed}`,
+    `脚本精筛/待确认事实：${formatTags(plan.scriptRefineFacts)}`,
+    '',
+    '执行要求：逐项点击并验收激活状态；无法映射的项不要硬选，记录 prefilter_mapping_missing 并留给候选人查看阶段判断。',
+    ...plan.notes.map(note => `- ${note}`),
+  ].join('\n');
+}
+
 export function buildBossTaskPrompt(opts: BossTaskPromptOptions = {}): string {
   const label = opts.channelLabel ?? 'BOSS直聘';
   const startMode = opts.fromCurrent
@@ -87,6 +207,8 @@ ${BOSS_CANDIDATE_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\n')}
 
 ### 终止与风控
 ${BOSS_STOP_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\n')}
+
+${formatBossPrefilterPlan(opts.activeJob)}
 
 ## 动作边界
 - 只能使用当前浏览器会话中的真实页面交互：snapshot、click、type、press、scroll、wait、必要时 back。

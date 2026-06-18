@@ -158,10 +158,16 @@ const LOGIN_OR_MISSING_PATTERNS: Partial<Record<Channel, RegExp>> = {
   linkedin: /Sign in|Join LinkedIn|登录/,
 };
 
-function taskPromptForChannel(channel: Channel, label: string, fromCurrent = false, dryRun = false): string {
+function taskPromptForChannel(
+  channel: Channel,
+  label: string,
+  fromCurrent = false,
+  dryRun = false,
+  activeJob?: ReturnType<typeof loadActiveJob>,
+): string {
   const protocol = getPlatformProtocol(channel);
   const base = protocol
-    ? protocol.buildTaskPrompt({ channelLabel: label, fromCurrent })
+    ? protocol.buildTaskPrompt({ channelLabel: label, fromCurrent, activeJob })
     : fromCurrent ? TASK_PROMPT_HERE(label) : TASK_PROMPT(label);
   if (!dryRun) return base;
   return [
@@ -324,7 +330,7 @@ export async function runChannel(
     const result = await runner.runSkill(
       page,
       systemPrompt,
-      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun),
+      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, activeJob),
       opts.progress ?? ((msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))),
       runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun),
     );
@@ -686,7 +692,7 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
         return await runner.runSkill(
           page,
           systemPrompt,
-          taskPromptForChannel(channel, label, false),
+          taskPromptForChannel(channel, label, false, false, job),
           (msg) => {
             console.log(`[${label}] ${msg}`);
             emitLog(`[${label}] ${msg}`);

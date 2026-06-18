@@ -1,5 +1,6 @@
 import type { Channel } from '../types';
 import type { BrowserActionPolicy } from '../runners/interface';
+import type { JobConfig } from '../skills/loader';
 import {
   bossBrowserActionPolicy,
   bossProcessRules,
@@ -10,6 +11,7 @@ import {
 export interface PlatformTaskPromptOptions {
   channelLabel?: string;
   fromCurrent?: boolean;
+  activeJob?: JobConfig | null;
 }
 
 export interface PlatformProtocol {

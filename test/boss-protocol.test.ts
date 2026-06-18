@@ -6,14 +6,28 @@ import { formatPlatformProtocols, getPlatformProtocol } from '../src/platform-pr
 import {
   bossBrowserActionPolicy,
   bossProcessRules,
+  buildBossPrefilterPlan,
   buildBossSystemContext,
   buildBossTaskPrompt,
+  formatBossPrefilterPlan,
 } from '../src/platform-protocols/boss';
 import { loadSkill } from '../src/skills/loader';
 
 describe('boss platform protocol middle layer', () => {
+  const agentJob = {
+    title: 'Agent工程师',
+    requirements: {
+      must_have: [
+        '1-3 年工作经验',
+        'Agent 相关的工作经历',
+        '互联网大厂 / 明星创业公司背景',
+      ],
+      deal_breaker: ['跳槽超过 3 次且无合理解释'],
+    },
+  };
+
   it('tells the runner to switch jobs inside BOSS instead of asking the user', () => {
-    const prompt = buildBossTaskPrompt({ channelLabel: 'BOSS直聘', fromCurrent: true });
+    const prompt = buildBossTaskPrompt({ channelLabel: 'BOSS直聘', fromCurrent: true, activeJob: agentJob });
 
     expect(prompt).toContain('切到目标岗位');
     expect(prompt).toContain('站内');
@@ -26,7 +40,24 @@ describe('boss platform protocol middle layer', () => {
     expect(prompt).toContain('禁止跨会话复用旧选择器');
     expect(prompt).toContain('≥5 秒');
     expect(prompt).toContain('pool_refill_exhausted');
+    expect(prompt).toContain('当前职位 BOSS 筛选前置计划');
+    expect(prompt).toContain('经验要求：1-3年');
+    expect(prompt).toContain('关键词筛选：大模型、AI Agent');
+    expect(prompt).toContain('互联网大厂 / 明星创业公司背景');
     expect(prompt).toContain('推荐 -> 最新');
+  });
+
+  it('builds a conservative BOSS prefilter plan from active job facts', () => {
+    const plan = buildBossPrefilterPlan(agentJob);
+    const formatted = formatBossPrefilterPlan(agentJob);
+
+    expect(plan.experienceTags).toEqual(['1-3年']);
+    expect(plan.excludedExperienceTags).toContain('26年后毕业');
+    expect(plan.keywordTags).toEqual(['大模型', 'AI Agent']);
+    expect(plan.scriptRefineFacts).toContain('互联网大厂 / 明星创业公司背景');
+    expect(plan.scriptRefineFacts).toContain('跳槽超过 3 次且无合理解释');
+    expect(formatted).toContain('无法映射的项不要硬选');
+    expect(formatBossPrefilterPlan(null)).toContain('不得臆造岗位筛选项');
   });
 
   it('blocks direct URL navigation while allowing normal page operations', () => {
