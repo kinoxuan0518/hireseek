@@ -12,6 +12,7 @@
 
 import OpenAI from 'openai';
 import { config } from './config';
+import { recordRejectedToolCall } from './agent-core/trace';
 
 export interface SubTask {
   id: number;
@@ -86,7 +87,7 @@ export function spawnSubAgent(opts: { task: string; label: string; model?: strin
 async function runLoop(t: SubTask, modelOverride?: string): Promise<void> {
   try {
     // 运行时引入，避免与 chat.ts 的静态循环依赖
-    const { CHAT_TOOLS, executeTool } = await import('./chat');
+    const { CHAT_TOOLS, CHAT_TOOL_REGISTRY, executeTool } = await import('./chat');
 
     const client = new OpenAI({
       apiKey: config.deepseek.apiKey,
@@ -129,10 +130,39 @@ async function runLoop(t: SubTask, modelOverride?: string): Promise<void> {
 
         let output: string;
         if (!ALLOWED_TOOLS.has(name)) {
+          const error = 'tool not allowed in sub-agent';
           output = '后台任务不能使用该工具，请换其他方式或在总结中说明此限制。';
+          recordRejectedToolCall({
+            registry: CHAT_TOOL_REGISTRY,
+            sessionId: `sub-agent-${t.id}`,
+            toolCallId: call.id,
+            toolName: name,
+            input: call.function.arguments,
+            output,
+            error,
+          });
         } else {
+          let parsedArgs: Record<string, unknown>;
           try {
-            output = await executeTool(name, JSON.parse(call.function.arguments || '{}'), {
+            parsedArgs = JSON.parse(call.function.arguments || '{}');
+          } catch (err) {
+            const error = err instanceof Error ? err.message : String(err);
+            output = `工具参数解析失败：${error}`;
+            recordRejectedToolCall({
+              registry: CHAT_TOOL_REGISTRY,
+              sessionId: `sub-agent-${t.id}`,
+              toolCallId: call.id,
+              toolName: name,
+              input: call.function.arguments,
+              output,
+              error,
+            });
+            messages.push({ role: 'tool', tool_call_id: call.id, content: output });
+            continue;
+          }
+
+          try {
+            output = await executeTool(name, parsedArgs, {
               sessionId: `sub-agent-${t.id}`,
               toolCallId: call.id,
             });

@@ -1,6 +1,6 @@
 import { db } from '../db';
 import './store';
-import type { ToolExecutionMode } from './tool-registry';
+import type { ToolExecutionMode, ToolRegistry } from './tool-registry';
 
 export interface ToolTraceInput {
   runId?: number | null;
@@ -13,6 +13,17 @@ export interface ToolTraceInput {
   error?: string | null;
   sideEffect?: boolean;
   mode?: ToolExecutionMode;
+}
+
+export interface RejectedToolCallInput {
+  registry?: ToolRegistry;
+  runId?: number | null;
+  sessionId?: string | null;
+  toolCallId?: string | null;
+  toolName: string;
+  input?: unknown;
+  output?: unknown;
+  error: string;
 }
 
 function summarize(value: unknown, max = 700): string {
@@ -48,3 +59,19 @@ export function recordToolCall(input: ToolTraceInput): void {
   }
 }
 
+export function recordRejectedToolCall(input: RejectedToolCallInput): void {
+  const registered = input.registry?.get(input.toolName);
+  const sideEffect = registered?.policy.sideEffect ?? false;
+  recordToolCall({
+    runId: input.runId,
+    sessionId: input.sessionId,
+    toolCallId: input.toolCallId,
+    toolName: input.toolName,
+    input: input.input,
+    output: input.output,
+    ok: false,
+    error: input.error,
+    sideEffect,
+    mode: sideEffect ? 'execute' : 'read',
+  });
+}

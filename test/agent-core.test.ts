@@ -56,6 +56,43 @@ describe('agent core lower layer', () => {
     expect(row.error).toContain('unknown tool');
   });
 
+  it('records rejected tool calls with registry side-effect policy', async () => {
+    const { createToolRegistry } = await import('../src/agent-core/tool-registry');
+    const { recordRejectedToolCall } = await import('../src/agent-core/trace');
+    const { db } = await import('../src/db');
+    const registry = createToolRegistry([
+      {
+        type: 'function',
+        function: {
+          name: 'browser_act',
+          description: 'act',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+    ]);
+
+    recordRejectedToolCall({
+      registry,
+      runId: 77,
+      sessionId: 's-rejected',
+      toolCallId: 'tc-rejected',
+      toolName: 'browser_act',
+      input: '{bad json',
+      output: '工具参数解析失败',
+      error: 'Expected property name',
+    });
+
+    const row = db.prepare(`
+      SELECT ok, error, side_effect, mode FROM agent_tool_calls
+      WHERE session_id = ? AND tool_call_id = ?
+    `).get('s-rejected', 'tc-rejected') as { ok: number; error: string; side_effect: number; mode: string };
+
+    expect(row.ok).toBe(0);
+    expect(row.error).toContain('Expected property name');
+    expect(row.side_effect).toBe(1);
+    expect(row.mode).toBe('execute');
+  });
+
   it('records tool trace with run isolation and side-effect mode', async () => {
     const { recordToolCall } = await import('../src/agent-core/trace');
     const { db } = await import('../src/db');

@@ -25,7 +25,7 @@ import {
   unknownToolResult,
   type ToolExecutionMode,
 } from './agent-core/tool-registry';
-import { recordToolCall } from './agent-core/trace';
+import { recordRejectedToolCall, recordToolCall } from './agent-core/trace';
 import { buildRecruitingCapabilityContext } from './capabilities';
 
 /**
@@ -3121,7 +3121,17 @@ export async function startChat(): Promise<void> {
             try {
               args = JSON.parse(call.function.arguments || '{}');
             } catch (err) {
-              result = `工具参数解析失败：${err instanceof Error ? err.message : String(err)}`;
+              const error = err instanceof Error ? err.message : String(err);
+              result = `工具参数解析失败：${error}`;
+              recordRejectedToolCall({
+                registry: CHAT_TOOL_REGISTRY,
+                sessionId: activeSessionId,
+                toolCallId: call.id,
+                toolName: call.function.name,
+                input: call.function.arguments,
+                output: result,
+                error,
+              });
             }
 
             if (interactiveTool) {
