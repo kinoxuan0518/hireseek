@@ -83,6 +83,11 @@ export const config = {
   db: {
     path: resolveDbPath(),
   },
+  // canonical 知识/契约层（独立 sandbox）的位置。消费方据此读外部契约。
+  // 未配置 → contracts.ts 回退到内置默认契约，运行时绝不因此断掉。
+  knowledge: {
+    home: process.env.AGENT_KNOWLEDGE_HOME || '',
+  },
   feishu: {
     webhookUrl: process.env.FEISHU_WEBHOOK_URL || '',
     // 多维表格读取（进化闭环：基于真实招聘结果数据自我反思）
@@ -103,8 +108,10 @@ export const config = {
     },
   },
   browser: {
+    control: process.env.HIRESEEK_BROWSER_CONTROL || 'chrome',
     headless: process.env.BROWSER_HEADLESS === 'true',
     slowMo:   parseInt(process.env.BROWSER_SLOW_MO || '100', 10),
+    profileDir: resolveHome(process.env.HIRESEEK_BROWSER_PROFILE_DIR || '~/.hireseek/browser-profile'),
     viewport: { width: 900, height: 600 },
   },
   workspace: {

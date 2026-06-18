@@ -17,6 +17,7 @@ export interface Candidate {
   job_id: string;
   status: CandidateStatus;
   score?: number;
+  run_id?: number;        // 哪一轮 run 触达的（用于 verifier 按 runId 审本轮）
   contacted_at?: string;
 }
 
@@ -50,12 +51,23 @@ export interface TraceStep {
   ok: boolean;               // 该步是否成功执行
 }
 
-/** do-er 在总结里吐出的、本轮已触达候选人的结构化清单（供质检与漏斗落库） */
+/**
+ * 本轮已触达候选人的【结构化】记录——对应 canonical 契约 contacted-candidate.v1。
+ * 由 runner 通过 record_contacted 工具逐条产出（不靠总结文本正则解析），
+ * 下游 verifier / 漏斗 / 校准都按此结构吃数据。
+ */
 export interface ContactedCandidate {
   name: string;
   company?: string;
-  score?: number;     // do-er 的自评分 0-100
-  reason?: string;
+  title?: string;
+  location?: string;
+  evidence?: string;        // 为什么联系 ta 的依据（供质检核对匹配度）
+  score?: number;           // do-er 的自评分 0-100（契约字段名 fit_score）
+  greetingSent?: boolean;   // 是否真的发出了打招呼
+  greetingText?: string;    // 实际打招呼文案（供合规验证器查群发感）
+  profileUrl?: string;      // 候选人主页/详情页 URL
+  sourceChannel?: string;   // boss | maimai | linkedin
+  reason?: string;          // 兼容旧字段（等同 evidence）
 }
 
 export interface SkillResult {

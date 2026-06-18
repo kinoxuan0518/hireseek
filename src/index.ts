@@ -254,7 +254,20 @@ async function main(): Promise<void> {
         console.log(chalk.yellow('⚠️  计划模式仅支持 "hireseek run --plan"（全渠道），指定渠道时不支持'));
         process.exit(1);
       }
-      await runChannel(channelArg as Channel);
+      const runId = await runChannel(channelArg as Channel);
+      // 跑完立刻对【本轮】上双轴质检 + 计分板，让用户当场看到契约闭环是否打通
+      try {
+        const { verifyRun, formatVerification } = await import('./verifier');
+        const { complianceCheck, formatCompliance } = await import('./compliance');
+        const { goalBoard } = await import('./feedback');
+        console.log(chalk.gray('\n── 本轮质检（runId=' + runId + '）──'));
+        console.log(formatVerification(await verifyRun({ runId })));
+        console.log(formatCompliance(await complianceCheck({ runId })));
+        console.log(chalk.gray('\n── 计分板 ──'));
+        console.log(goalBoard().text);
+      } catch (e) {
+        console.log(chalk.gray('（本轮质检未完成：' + (e instanceof Error ? e.message : e) + '）'));
+      }
     } else {
       console.error(chalk.red(`渠道无效: "${channelArg}"`));
       console.log(USAGE);

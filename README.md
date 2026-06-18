@@ -265,6 +265,9 @@ hireseek/
 | `DEEPSEEK_REASONER_MODEL` | `deepseek-v4-pro` | 评估/策略等深推理场景 |
 | `LLM_PROVIDER` | `deepseek` | 可选 deepseek / claude / openai / minimax / custom |
 | `HIRESEEK_DB_PATH` | `~/.hireseek/hireseek.db` | 数据库路径（自动兼容旧 ~/.hireclaw） |
+| `AGENT_KNOWLEDGE_HOME` | — | 独立 canonical 知识/契约 sandbox 路径；不填则用内置兜底契约 |
+| `HIRESEEK_BROWSER_CONTROL` | `chrome` | 默认接管真实 Chrome；设为 `hireseek` 才使用自有浏览器 |
+| `HIRESEEK_BROWSER_PROFILE_DIR` | `~/.hireseek/browser-profile` | 自有浏览器模式下的资料夹 |
 | `FEISHU_WEBHOOK_URL` | — | 飞书执行报告推送 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | — | 飞书自建应用（多维表格读取 + 双向 Bot） |
 | `FEISHU_BITABLE_APP_TOKEN` / `FEISHU_BITABLE_TABLE_ID` | — | 招聘结果多维表格 |

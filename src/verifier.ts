@@ -68,9 +68,14 @@ interface CandRow {
   fingerprint: string;
   name: string; school: string | null; company: string | null;
   channel: string; score: number | null; contacted_at: string;
+  evidence?: string | null;
+  greeting_text?: string | null;
+  profile_url?: string | null;
 }
 
-// ── 取本次要审计的候选人（今日已触达、随机抽样）─────────────────────────
+// ── 取本次要审计的候选人 ───────────────────────────────────────────────
+// 优先按 runId 审【本轮】（契约要求："不能默认最近一条/泛泛的今天"）；
+// 不传 runId 时退回"今日 + jobId"（CLI hireseek verify 的日常用法）。
 function pickCandidates(jobId: string, limit: number): CandRow[] {
   return db.prepare(`
     SELECT fingerprint, name, school, company, channel, score, contacted_at
@@ -78,6 +83,26 @@ function pickCandidates(jobId: string, limit: number): CandRow[] {
     WHERE job_id = ? AND date(contacted_at) = date('now','localtime')
     ORDER BY RANDOM() LIMIT ?
   `).all(jobId, limit) as CandRow[];
+}
+
+function pickCandidatesByRun(runId: number, limit: number): CandRow[] {
+  return db.prepare(`
+    SELECT
+      c.fingerprint,
+      c.name,
+      c.school,
+      c.company,
+      rc.channel,
+      COALESCE(rc.score, c.score) AS score,
+      rc.contacted_at,
+      rc.evidence,
+      rc.greeting_text,
+      rc.profile_url
+    FROM run_candidates rc
+    JOIN candidates c ON c.fingerprint = rc.candidate_fingerprint
+    WHERE rc.run_id = ?
+    ORDER BY RANDOM() LIMIT ?
+  `).all(runId, limit) as CandRow[];
 }
 
 const VERIFIER_SYSTEM = `
@@ -101,7 +126,7 @@ const VERIFIER_SYSTEM = `
 function buildUserPrompt(job: ReturnType<typeof loadActiveJob>, cands: CandRow[]): string {
   const profile = job ? jobToPrompt(job) : '（岗位画像缺失）';
   const list = cands.map((c, i) =>
-    `${i + 1}. ${c.name}｜公司：${c.company || '未知'}｜学校：${c.school || '未知'}｜渠道：${c.channel}｜寻源agent自评：${c.score ?? '未打分'}`,
+    `${i + 1}. ${c.name}｜公司：${c.company || '未知'}｜学校：${c.school || '未知'}｜渠道：${c.channel}｜寻源agent自评：${c.score ?? '未打分'}${c.evidence ? `｜触达依据：${c.evidence}` : ''}${c.greeting_text ? `｜招呼语：${c.greeting_text.slice(0, 80)}` : ''}`,
   ).join('\n');
   return `## 岗位画像\n\n${profile}\n\n## 待质检的已触达候选人（${cands.length} 人）\n\n${list}\n\n请逐一独立重判，输出 JSON 数组。`;
 }
@@ -129,12 +154,39 @@ function parseJudgments(text: string, cands: CandRow[]): SampleJudgment[] {
 }
 
 // ── 主入口：审计一轮触达 ───────────────────────────────────────────────
-export async function verifyRun(opts: { sampleSize?: number } = {}): Promise<VerificationResult> {
+export async function verifyRun(opts: { sampleSize?: number; runId?: number } = {}): Promise<VerificationResult> {
+  // 传 runId → 审【本轮】，且 jobId 从 run 的真实记录取（不靠 loadActiveJob 重新猜，避免错位）
   const job = loadActiveJob();
-  const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
-  const cands = pickCandidates(jobId, opts.sampleSize ?? DEFAULT_SAMPLE);
+  let jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+  let cands: CandRow[];
+  if (opts.runId != null) {
+    const runRow = db.prepare(`SELECT job_id FROM task_runs WHERE id = ?`).get(opts.runId) as { job_id: string } | undefined;
+    if (runRow?.job_id) jobId = runRow.job_id;
+    cands = pickCandidatesByRun(opts.runId, opts.sampleSize ?? DEFAULT_SAMPLE);
+  } else {
+    cands = pickCandidates(jobId, opts.sampleSize ?? DEFAULT_SAMPLE);
+  }
 
   if (cands.length === 0) {
+    if (opts.runId != null) {
+      const runRow = db.prepare(
+        `SELECT status, contacted_count FROM task_runs WHERE id = ?`,
+      ).get(opts.runId) as { status: string; contacted_count: number } | undefined;
+      if (runRow?.status === 'completed' && runRow.contacted_count > 0) {
+        return {
+          verdict: 'warn', scope: `run:${opts.runId}`, sampled: 0, avgFit: null,
+          lowFitCount: 0, overGenerousCount: 0, gaming: false,
+          summary: `⚠️ 落库断链：run #${opts.runId} 记录触达了 ${runRow.contacted_count} 人，但 run_candidates 里没有本轮候选人快照——质检无数据可审。`,
+          judgments: [],
+        };
+      }
+      return {
+        verdict: 'skip', scope: `run:${opts.runId}`, sampled: 0, avgFit: null,
+        lowFitCount: 0, overGenerousCount: 0, gaming: false,
+        summary: `run #${opts.runId} 没有可质检的已触达候选人。`, judgments: [],
+      };
+    }
+
     // 区分"今天确实没跑"与"跑了却没有候选人入库"（落库断链=本该有数据，必须报异常而非假绿灯）
     const ranToday = (db.prepare(
       `SELECT COALESCE(SUM(contacted_count),0) AS n FROM task_runs WHERE date(started_at)=date('now','localtime') AND status='completed'`,
@@ -201,13 +253,15 @@ export async function verifyRun(opts: { sampleSize?: number } = {}): Promise<Ver
 
   const summary = buildSummary({ verdict, avgFit, lowFitCount, sampled: judgments.length, overGenerousCount, gaming, todayTotal, goal });
 
+  const scope = opts.runId != null ? `run:${opts.runId}` : 'today';
+
   db.prepare(`
     INSERT INTO verifications (job_id, scope, sampled, avg_fit, low_fit_count, gaming, verdict, detail)
-    VALUES (?, 'today', ?, ?, ?, ?, ?, ?)
-  `).run(jobId, judgments.length, avgFit, lowFitCount, gaming ? 1 : 0, verdict,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(jobId, scope, judgments.length, avgFit, lowFitCount, gaming ? 1 : 0, verdict,
     JSON.stringify({ summary, judgments }).slice(0, 4000));
 
-  return { verdict, scope: 'today', sampled: judgments.length, avgFit, lowFitCount, overGenerousCount, gaming, summary, judgments };
+  return { verdict, scope, sampled: judgments.length, avgFit, lowFitCount, overGenerousCount, gaming, summary, judgments };
 }
 
 function buildSummary(a: {

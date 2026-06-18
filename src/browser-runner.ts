@@ -1,60 +1,61 @@
+import fs from 'fs';
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import { config } from './config';
 import { getAccountStoragePath, hasStorageState } from './accounts';
 
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
+let persistentContext: BrowserContext | null = null;
 
 // 存储每个账号的独立 context
 const accountContexts = new Map<string, BrowserContext>();
+
+const USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
+  'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+  'Chrome/122.0.0.0 Safari/537.36';
+
+const launchArgs = [
+  '--disable-blink-features=AutomationControlled',
+  '--no-sandbox',
+];
 
 export async function getBrowser(): Promise<Browser> {
   if (!browser || !browser.isConnected()) {
     browser = await chromium.launch({
       headless: config.browser.headless,
       slowMo: config.browser.slowMo,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-      ],
+      args: launchArgs,
     });
   }
   return browser;
 }
 
-export async function getPage(): Promise<Page> {
-  const b = await getBrowser();
-
-  if (!context) {
-    context = await b.newContext({
+async function getPersistentContext(): Promise<BrowserContext> {
+  if (!persistentContext) {
+    fs.mkdirSync(config.browser.profileDir, { recursive: true });
+    persistentContext = await chromium.launchPersistentContext(config.browser.profileDir, {
+      headless: config.browser.headless,
+      slowMo: config.browser.slowMo,
       viewport: config.browser.viewport,
-      // 模拟正常浏览器 UA，降低反爬风险
-      userAgent:
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
-        'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-        'Chrome/122.0.0.0 Safari/537.36',
+      userAgent: USER_AGENT,
+      args: launchArgs,
     });
+    console.log(`[Browser] 使用持久浏览器资料夹：${config.browser.profileDir}`);
   }
+  return persistentContext;
+}
 
-  const pages = context.pages();
-  return pages.length > 0 ? pages[0] : await context.newPage();
+export async function getPage(): Promise<Page> {
+  const ctx = await getPersistentContext();
+  const pages = ctx.pages().filter(p => !p.isClosed());
+  return pages.length > 0 ? pages[0] : await ctx.newPage();
 }
 
 /** 创建新的独立标签页（用于并行执行多个任务） */
 export async function createNewPage(): Promise<Page> {
-  const b = await getBrowser();
-
-  if (!context) {
-    context = await b.newContext({
-      viewport: config.browser.viewport,
-      userAgent:
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
-        'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-        'Chrome/122.0.0.0 Safari/537.36',
-    });
-  }
-
-  return await context.newPage();
+  const ctx = await getPersistentContext();
+  return await ctx.newPage();
 }
 
 /**
@@ -73,10 +74,7 @@ export async function createPageForAccount(accountId: string): Promise<Page> {
   // 创建独立的 context，并尝试加载保存的登录状态
   const contextOptions: any = {
     viewport: config.browser.viewport,
-    userAgent:
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
-      'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-      'Chrome/122.0.0.0 Safari/537.36',
+    userAgent: USER_AGENT,
   };
 
   // 如果有保存的 storage state，加载它
@@ -129,8 +127,8 @@ export async function executeAction(
 ): Promise<string> {
   // 操作前确认页面还活着
   if (page.isClosed()) {
-    const ctx = context!;
-    const pages = ctx.pages();
+    const ctx = page.context() ?? context ?? persistentContext ?? await getPersistentContext();
+    const pages = ctx.pages().filter(p => !p.isClosed());
     page = pages.length > 0 ? pages[0] : await ctx.newPage();
   }
 
@@ -207,10 +205,18 @@ export async function executeAction(
 }
 
 export async function closeBrowser(): Promise<void> {
+  if (persistentContext) {
+    await persistentContext.close();
+    persistentContext = null;
+  }
   if (context) {
     await context.close();
     context = null;
   }
+  for (const ctx of accountContexts.values()) {
+    await ctx.close().catch(() => {});
+  }
+  accountContexts.clear();
   if (browser) {
     await browser.close();
     browser = null;

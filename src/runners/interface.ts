@@ -1,4 +1,4 @@
-import { Page } from 'playwright';
+import type { BrowserTarget } from '../browser-session';
 import type { SkillResult } from '../types';
 
 /**
@@ -7,7 +7,7 @@ import type { SkillResult } from '../types';
  */
 export interface LLMRunner {
   runSkill(
-    page: Page,
+    page: BrowserTarget,
     systemPrompt: string,
     task: string,
     onProgress?: (msg: string) => void

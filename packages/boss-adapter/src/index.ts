@@ -573,8 +573,8 @@ export class BossAdapter implements PlatformAdapter {
     const { rawToCandidate } = await import('./browser.js');
     const page = this.browserSession.getPage();
 
-    // 1. 导航到推荐牛人页
-    await page.goto('https://www.zhipin.com/web/employer/talent/recommend', { waitUntil: 'domcontentloaded' });
+    // 1. 导航到 BOSS 当前工作台入口，再由页面内导航进入推荐牛人
+    await page.goto('https://www.zhipin.com/web/chat/index', { waitUntil: 'domcontentloaded' });
     await this.sleep(2000, 4000);
 
     // 2. 应用页面筛选条件

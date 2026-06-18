@@ -30,6 +30,7 @@ db.exec(`
     job_id      TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'contacted',
     score       INTEGER,
+    run_id      INTEGER,
     contacted_at TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -48,10 +49,25 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS interaction_log (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id               INTEGER,
     candidate_fingerprint TEXT NOT NULL,
     action               TEXT NOT NULL,
     note                 TEXT,
     created_at           TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS run_candidates (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id                INTEGER NOT NULL,
+    candidate_fingerprint TEXT NOT NULL,
+    job_id                TEXT NOT NULL,
+    channel               TEXT NOT NULL,
+    score                 INTEGER,
+    evidence              TEXT,
+    greeting_text         TEXT,
+    profile_url           TEXT,
+    contacted_at          TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(run_id, candidate_fingerprint)
   );
 
   CREATE TABLE IF NOT EXISTS reflections (
@@ -93,6 +109,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_candidates_status   ON candidates(status);
   CREATE INDEX IF NOT EXISTS idx_task_runs_channel   ON task_runs(channel);
   CREATE INDEX IF NOT EXISTS idx_reflections_channel ON reflections(channel);
+  CREATE INDEX IF NOT EXISTS idx_run_candidates_run  ON run_candidates(run_id);
+  CREATE INDEX IF NOT EXISTS idx_run_candidates_fp   ON run_candidates(candidate_fingerprint);
   CREATE INDEX IF NOT EXISTS idx_tasks_status        ON tasks(status);
   CREATE INDEX IF NOT EXISTS idx_tasks_parent        ON tasks(parent_id);
   CREATE INDEX IF NOT EXISTS idx_tasks_job_id        ON tasks(job_id);
@@ -107,6 +125,23 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_notes_fingerprint ON candidate_notes(fingerprint);
 `);
+
+// ── 迁移：旧库 candidates 没有 run_id 列（用于"验证器按 runId 审本轮候选人"）──
+try {
+  const cols = db.prepare(`PRAGMA table_info(candidates)`).all() as Array<{ name: string }>;
+  if (!cols.some(c => c.name === 'run_id')) {
+    db.exec(`ALTER TABLE candidates ADD COLUMN run_id INTEGER`);
+  }
+} catch { /* 迁移失败不阻断启动 */ }
+db.exec(`CREATE INDEX IF NOT EXISTS idx_candidates_run_id ON candidates(run_id)`);
+
+try {
+  const cols = db.prepare(`PRAGMA table_info(interaction_log)`).all() as Array<{ name: string }>;
+  if (!cols.some(c => c.name === 'run_id')) {
+    db.exec(`ALTER TABLE interaction_log ADD COLUMN run_id INTEGER`);
+  }
+} catch { /* 迁移失败不阻断启动 */ }
+db.exec(`CREATE INDEX IF NOT EXISTS idx_interaction_log_run ON interaction_log(run_id)`);
 
 // ── 人才记忆库 FTS5 全文检索（"之前聊过的做供应链的人"）─────────────────
 // FTS5 在多数 better-sqlite3 构建中默认可用；万一缺失则降级为 LIKE 检索。
@@ -130,11 +165,12 @@ try {
 // ── 候选人操作 ────────────────────────────────────────────
 export const candidateOps = {
   upsert: db.prepare<Omit<Candidate, 'id'>>(`
-    INSERT INTO candidates (fingerprint, name, school, company, channel, job_id, status, score, contacted_at)
-    VALUES (@fingerprint, @name, @school, @company, @channel, @job_id, @status, @score, @contacted_at)
+    INSERT INTO candidates (fingerprint, name, school, company, channel, job_id, status, score, run_id, contacted_at)
+    VALUES (@fingerprint, @name, @school, @company, @channel, @job_id, @status, @score, @run_id, @contacted_at)
     ON CONFLICT(fingerprint) DO UPDATE SET
       status       = excluded.status,
       score        = COALESCE(excluded.score, score),
+      run_id       = COALESCE(excluded.run_id, run_id),
       contacted_at = COALESCE(excluded.contacted_at, contacted_at)
   `),
 

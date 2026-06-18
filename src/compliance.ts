@@ -147,13 +147,51 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   const runId = opts.runId ?? latestRunWithTrace();
   const trace = runId != null ? loadTrace(runId) : [];
 
-  if (runId == null || trace.length === 0) {
+  if (runId == null) {
     return { verdict: 'skip', runId, steps: 0, violations: [], summary: '没有可审计的执行轨迹（这一轮可能没产生浏览器动作，或用的是非 DOM runner）。' };
   }
 
   const job = loadActiveJob();
+  const runRow = db.prepare(`SELECT job_id, channel FROM task_runs WHERE id = ?`).get(runId) as { job_id: string; channel: string } | undefined;
   const channelRow = db.prepare(`SELECT channel FROM run_actions WHERE run_id = ? LIMIT 1`).get(runId) as { channel: string } | undefined;
-  const channel = (channelRow?.channel ?? 'boss') as Channel;
+  const channel = (runRow?.channel ?? channelRow?.channel ?? 'boss') as Channel;
+  const jobId = runRow?.job_id ?? (job ? job.title.replace(/\s+/g, '_') : 'default');
+
+  // 契约履约检查（manifest 即清单）：boss-greeting.v1 声明 writes 了哪些产物，
+  // 就机械核对本轮 run 是否真写了。少写 = 结构性违规（high），不靠 LLM 判。
+  const contractViolations: Violation[] = [];
+  try {
+    const { contractNameForChannel, contractWritesForChannel } = require('./contracts') as typeof import('./contracts');
+    const contractName = contractNameForChannel(channel);
+    const promised = contractWritesForChannel(channel);
+    const wrote: Record<string, number> = {
+      contacted_candidates: (db.prepare(`SELECT COUNT(*) n FROM run_candidates WHERE run_id = ?`).get(runId) as { n: number }).n,
+      run_trace: trace.length,
+      interaction_log: (db.prepare(`SELECT COUNT(*) n FROM interaction_log WHERE run_id = ?`).get(runId) as { n: number }).n,
+    };
+    for (const w of promised) {
+      if ((wrote[w] ?? 0) === 0) {
+        contractViolations.push({
+          rule: `契约 ${contractName ?? 'unknown'} 声明会写 ${w}，但本轮 run 没写`,
+          severity: 'high',
+          evidence: `run #${runId} 的 ${w} 计数为 0`,
+        });
+      }
+    }
+  } catch { /* 契约不可用则跳过履约检查 */ }
+
+  if (trace.length === 0) {
+    if (contractViolations.length > 0) {
+      const verdict: Verdict = contractViolations.some(v => v.severity === 'high') ? 'fail' : 'warn';
+      const summary = buildSummary(verdict, contractViolations, 0);
+      db.prepare(`
+        INSERT INTO compliance_checks (run_id, job_id, channel, steps, verdict, violation_count, detail)
+        VALUES (?, ?, ?, 0, ?, ?, ?)
+      `).run(runId, jobId, channel, verdict, contractViolations.length, JSON.stringify({ summary, violations: contractViolations }).slice(0, 4000));
+      return { verdict, runId, steps: 0, violations: contractViolations, summary };
+    }
+    return { verdict: 'skip', runId, steps: 0, violations: [], summary: '没有可审计的执行轨迹（这一轮可能没产生浏览器动作，或用的是非 DOM runner）。' };
+  }
 
   const userPrompt = [
     `## 岗位画像\n\n${job ? jobToPrompt(job) : '（岗位画像缺失）'}`,
@@ -177,17 +215,23 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   const finishReason = res.choices[0]?.finish_reason;
   const parsed = parseViolations(raw);
 
-  // 解析失败/被截断 ≠ 合规：不能把"读不懂模型回答"静默判成 pass（假绿灯）
+  // 解析失败/被截断 ≠ 合规：不能把"读不懂模型回答"静默判成 pass（假绿灯）。
+  // 但契约履约是代码判定的，即便 LLM 审计没解析出来，结构性违规仍要照报。
   if (parsed === null || finishReason === 'length') {
-    const summary = `🟡 流程合规：本轮审计未完成（${finishReason === 'length' ? '模型输出被截断' : '输出无法解析'}），未下结论——请重跑一次质检。`;
+    const why = finishReason === 'length' ? '模型输出被截断' : '输出无法解析';
+    const verdict: Verdict = contractViolations.some(v => v.severity === 'high') ? 'fail' : 'skip';
+    const summary = contractViolations.length
+      ? buildSummary(verdict, contractViolations, trace.length) + `\n（过程合规部分未完成：${why}，请重跑）`
+      : `🟡 流程合规：本轮审计未完成（${why}），未下结论——请重跑一次质检。`;
     db.prepare(`
       INSERT INTO compliance_checks (run_id, job_id, channel, steps, verdict, violation_count, detail)
-      VALUES (?, ?, ?, ?, 'skip', 0, ?)
-    `).run(runId, job ? job.title.replace(/\s+/g, '_') : 'default', channel, trace.length, JSON.stringify({ summary }).slice(0, 4000));
-    return { verdict: 'skip', runId, steps: trace.length, violations: [], summary };
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(runId, jobId, channel, trace.length, verdict, contractViolations.length, JSON.stringify({ summary, violations: contractViolations }).slice(0, 4000));
+    return { verdict, runId, steps: trace.length, violations: contractViolations, summary };
   }
 
-  const violations = parsed;
+  // 合并：契约履约（结构性，代码判）+ 过程合规（软规则，LLM 判）
+  const violations = [...contractViolations, ...parsed];
   const high = violations.filter(v => v.severity === 'high').length;
   const verdict: Verdict = high > 0 ? 'fail' : violations.length > 0 ? 'warn' : 'pass';
   const summary = buildSummary(verdict, violations, trace.length);
@@ -195,7 +239,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   db.prepare(`
     INSERT INTO compliance_checks (run_id, job_id, channel, steps, verdict, violation_count, detail)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(runId, job ? job.title.replace(/\s+/g, '_') : 'default', channel, trace.length, verdict, violations.length,
+  `).run(runId, jobId, channel, trace.length, verdict, violations.length,
     JSON.stringify({ summary, violations }).slice(0, 4000));
 
   return { verdict, runId, steps: trace.length, violations, summary };

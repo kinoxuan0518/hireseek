@@ -30,7 +30,7 @@ export interface BrowserConfig {
   baseUrl?: string;
 }
 
-const DEFAULT_BASE_URL = 'https://www.zhipin.com/web/recruit/';
+const DEFAULT_BASE_URL = 'https://www.zhipin.com/web/chat/index';
 const DEFAULT_USER_DATA_DIR = join(homedir(), '.hireseek', 'browser-data');
 
 // ────────────────────────────────────────────────────────────
@@ -186,9 +186,9 @@ export class BrowserSession {
       const hasJobs = await this.page.$(SEL.jobList);
       if (hasJobs) return true;
 
-      // 方法3：URL 检测 — 登录后通常会跳转到 recruit 页面
+      // 方法3：URL 检测 — 当前 BOSS 企业端入口在 /web/chat
       const url = this.page.url();
-      if (url.includes('/web/recruit') || url.includes('/web/employer')) {
+      if (url.includes('/web/chat')) {
         return true;
       }
 

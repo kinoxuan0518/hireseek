@@ -1,5 +1,10 @@
 import dayjs from 'dayjs';
+import type { Page } from 'playwright';
 import { getPage, createNewPage, createPageForAccount, saveAccountState } from './browser-runner';
+import { config } from './config';
+import type { BrowserTarget } from './browser-session';
+import { isDomBrowserSession } from './browser-session';
+import { connectRealChrome } from './real-chrome-session';
 import { createRunner } from './runners';
 import { loadSkill, loadWorkspaceFile, loadActiveJob, jobToPrompt, getEnabledChannels } from './skills/loader';
 import { sendReport } from './channels/feishu';
@@ -13,20 +18,33 @@ import { retryWithBackoff, saveCheckpoint, loadCheckpoint, removeCheckpoint, wai
 import type { Channel, SkillResult } from './types';
 
 /**
- * 一轮跑完后统一落库：① 结构化候选人(do-er 自评分进库，verifier/漏斗才有数据)
- * ② 执行轨迹(供流程合规验证器)。两条 run 路径(顺序 runChannel / 并行
- * runChannelWithPage)都必须调用，否则验证器空转。整体 try/catch，绝不影响主流程。
+ * 履约 canonical 契约 boss-greeting.v1 的 writes: [contacted_candidates, run_trace, interaction_log]。
+ * 三样产物都按 runId 落库，让 verifier/compliance 能按 runId 审【本轮】。
  */
-function persistRunResult(runId: number, jobId: string, channel: Channel, result: SkillResult): void {
-  // ① 候选人落库：fingerprint = 姓名|公司|渠道（与 types.ts 约定一致）
+export function persistRunResult(runId: number, jobId: string, channel: Channel, result: SkillResult): void {
+  const list = result.contactedList ?? [];
+  const now = dayjs().toISOString();
+
+  // ① 结构化候选人落库：主档 upsert + run 级快照（fingerprint = 姓名|公司|渠道）
   try {
-    const list = result.contactedList ?? [];
-    const now = dayjs().toISOString();
+    const runCandStmt = db.prepare(`
+      INSERT INTO run_candidates
+        (run_id, candidate_fingerprint, job_id, channel, score, evidence, greeting_text, profile_url, contacted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(run_id, candidate_fingerprint) DO UPDATE SET
+        score = excluded.score,
+        evidence = excluded.evidence,
+        greeting_text = excluded.greeting_text,
+        profile_url = excluded.profile_url,
+        contacted_at = excluded.contacted_at
+    `);
+
     for (const c of list) {
-      if (!c.name) continue;
+      if (!c.name || c.greetingSent === false) continue;
+      const fingerprint = `${c.name}|${c.company ?? ''}|${channel}`;
       // better-sqlite3 命名参数需要 null（不接受 undefined），故缺失字段显式给 null
       candidateOps.upsert.run({
-        fingerprint: `${c.name}|${c.company ?? ''}|${channel}`,
+        fingerprint,
         name: c.name,
         school: null,
         company: c.company ?? null,
@@ -34,13 +52,40 @@ function persistRunResult(runId: number, jobId: string, channel: Channel, result
         job_id: jobId,
         status: 'contacted',
         score: c.score ?? null,
+        run_id: runId,
         contacted_at: now,
       } as unknown as Parameters<typeof candidateOps.upsert.run>[0]);
+
+      runCandStmt.run(
+        runId,
+        fingerprint,
+        jobId,
+        channel,
+        c.score ?? null,
+        c.evidence ?? c.reason ?? null,
+        c.greetingText ?? null,
+        c.profileUrl ?? null,
+        now,
+      );
     }
   } catch (err) {
     emitLog(`⚠️ 候选人落库失败（不影响任务）：${err instanceof Error ? err.message : err}`);
   }
-  // ② 执行轨迹落库
+
+  // ② 交互记录落库（每个实际打了招呼的候选人一条；供合规验证器查群发感）
+  try {
+    const logStmt = db.prepare(
+      `INSERT INTO interaction_log (run_id, candidate_fingerprint, action, note) VALUES (?, ?, ?, ?)`,
+    );
+    for (const c of list) {
+      if (!c.name || c.greetingSent === false) continue;
+      const fingerprint = `${c.name}|${c.company ?? ''}|${channel}`;
+      const note = (c.greetingText ?? c.evidence ?? c.reason ?? '').slice(0, 300);
+      logStmt.run(runId, fingerprint, 'greeting', note);
+    }
+  } catch { /* 交互记录失败不影响主流程 */ }
+
+  // ③ 执行轨迹落库
   try {
     const { saveRunTrace } = require('./compliance') as typeof import('./compliance');
     saveRunTrace(runId, jobId, channel, result.trace ?? []);
@@ -65,16 +110,92 @@ const CHANNEL_LABEL: Record<Channel, string> = {
 };
 
 const CHANNEL_URL: Record<Channel, string> = {
-  boss:     'https://www.zhipin.com/web/employer/talent/recommend',
+  boss:     'https://www.zhipin.com/web/chat/index',
   maimai:   'https://maimai.cn/ent/v41/recruit/talents?tab=1',
   linkedin: 'https://www.linkedin.com/talent/hire',
-  followup: 'https://www.zhipin.com/web/im/',
+  followup: 'https://www.zhipin.com/web/chat/index',
 };
+
+const LOGIN_OR_MISSING_PATTERNS: Partial<Record<Channel, RegExp>> = {
+  boss: /访问的资源不存在|登录\/注册|扫码登录|密码登录|请登录|我要招聘/,
+  maimai: /登录|扫码|手机号/,
+  linkedin: /Sign in|Join LinkedIn|登录/,
+};
+
+async function createBrowserTarget(channel: Channel): Promise<BrowserTarget> {
+  if (config.browser.control === 'hireseek') {
+    return await getPage();
+  }
+
+  if (config.browser.control !== 'chrome') {
+    throw new Error(`不支持的 HIRESEEK_BROWSER_CONTROL=${config.browser.control}，可选 chrome / hireseek`);
+  }
+
+  try {
+    return await connectRealChrome(channel);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `无法接管真实 Chrome：${message}\n` +
+      '请确认：1) Google Chrome 已打开；2) 已登录对应招聘平台；' +
+      '3) Chrome 菜单「视图 > 开发者 > 允许 Apple 事件中的 JavaScript」已开启。'
+    );
+  }
+}
+
+async function targetGoto(target: BrowserTarget, url: string): Promise<void> {
+  if (isDomBrowserSession(target)) {
+    await target.goto(url);
+  } else {
+    await target.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  }
+}
+
+async function currentTargetUrl(target: BrowserTarget): Promise<string> {
+  return isDomBrowserSession(target) ? await target.url() : target.url();
+}
+
+async function targetText(target: BrowserTarget): Promise<string> {
+  return isDomBrowserSession(target)
+    ? await target.bodyText()
+    : await target.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+}
+
+async function ensurePlatformSession(target: BrowserTarget, channel: Channel): Promise<void> {
+  const channelUrl = CHANNEL_URL[channel];
+  const targetPath = new URL(channelUrl).pathname;
+  const pattern = LOGIN_OR_MISSING_PATTERNS[channel];
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const currentUrl = await currentTargetUrl(target);
+    const isOnTargetPage = currentUrl.startsWith(channelUrl) || currentUrl.includes(targetPath);
+    const body = await targetText(target);
+    const looksUnavailable = pattern ? pattern.test(body) : false;
+
+    if (isOnTargetPage && !looksUnavailable) return;
+
+    console.log(`\n[HireSeek] ⚠️  当前 Chrome 还没有可用的 ${CHANNEL_LABEL[channel]} 登录态（当前：${currentUrl}）`);
+    console.log('[HireSeek] 请在你已打开的 Chrome 里完成登录/切到正确页面，登录完成后回到终端按 Enter 继续...');
+    await new Promise<void>(resolve => {
+      process.stdin.once('data', () => resolve());
+    });
+
+    await targetGoto(target, channelUrl);
+  }
+
+  throw new Error(`${CHANNEL_LABEL[channel]} 登录态仍不可用，已停止本轮 sourcing，避免产生 0 触达假成功。`);
+}
 
 export async function runChannel(
   channel: Channel,
-  jobId: string = 'default'
-): Promise<void> {
+  jobId?: string
+): Promise<number> {
+  // 默认绑定当前 active job，而不是字面量 'default'。否则心跳/CLI 不传 jobId 时，
+  // 候选人落到 job_id='default'，而 verifier 按 active job 查 → 永远查不到（落库错位）。
+  if (!jobId) {
+    const active = loadActiveJob();
+    jobId = active ? active.title.replace(/\s+/g, '_') : 'default';
+  }
   const label = CHANNEL_LABEL[channel];
   console.log(`\n[Orchestrator] ▶ 开始 ${label} sourcing`);
   emitLog(`▶ 开始 ${label} sourcing`);
@@ -86,24 +207,11 @@ export async function runChannel(
   const startMs = Date.now();
 
   try {
-    const page = await getPage();
+    const page = await createBrowserTarget(channel);
 
     // 导航到对应招聘平台
-    await page.goto(CHANNEL_URL[channel], { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-    // 登录检测：检查是否成功进入目标页（而非被重定向到其他页面）
-    const currentUrl = page.url();
-    const targetUrl = CHANNEL_URL[channel];
-    const isOnTargetPage = currentUrl.startsWith(targetUrl) || currentUrl.includes(new URL(targetUrl).pathname);
-    if (!isOnTargetPage) {
-      console.log(`\n[HireSeek] ⚠️  未能进入目标页（当前：${currentUrl}）`);
-      console.log('[HireSeek] 请在浏览器窗口中完成登录，登录完成后按 Enter 继续...');
-      await new Promise<void>(resolve => {
-        process.stdin.once('data', () => resolve());
-      });
-      // 登录后再跳转到目标页
-      await page.goto(CHANNEL_URL[channel], { waitUntil: 'domcontentloaded', timeout: 30000 });
-    }
+    await targetGoto(page, CHANNEL_URL[channel]);
+    await ensurePlatformSession(page, channel);
 
     // 组装系统提示：SOUL + 职位上下文 + 记忆 + Skill
     const soul      = loadWorkspaceFile('SOUL.md');
@@ -187,6 +295,7 @@ export async function runChannel(
       durationSec: Math.round((Date.now() - startMs) / 1000),
     });
   }
+  return runId; // 供调用方把 verify/compliance 绑定到【本轮】
 }
 
 /**
@@ -195,13 +304,13 @@ export async function runChannel(
 export async function scanInbox(jobId: string = 'default'): Promise<void> {
   console.log('\n[Scanner] 🔍 开始扫描收件箱...');
   const page = await getPage();
-  await page.goto('https://www.zhipin.com/web/im/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto('https://www.zhipin.com/web/chat/index', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
   const currentUrl = page.url();
   if (!currentUrl.includes('zhipin.com/web')) {
     console.log('\n[HireSeek] ⚠️  请先登录 BOSS直聘，登录完成后按 Enter 继续...');
     await new Promise<void>(resolve => { process.stdin.once('data', () => resolve()); });
-    await page.goto('https://www.zhipin.com/web/im/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto('https://www.zhipin.com/web/chat/index', { waitUntil: 'domcontentloaded', timeout: 30000 });
   }
 
   const soul  = loadWorkspaceFile('SOUL.md');

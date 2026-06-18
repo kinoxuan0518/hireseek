@@ -16,10 +16,16 @@ import { emitLog, popIntervention } from '../events';
 import { parseSkillSummary, parseContactedCandidates } from './interface';
 import type { LLMRunner } from './interface';
 import type { SkillResult } from '../types';
+import { repairToolMessageHistoryInPlace } from '../message-integrity';
+import type { BrowserAction, BrowserTarget, RiskGuard } from '../browser-session';
+import { isDomBrowserSession } from '../browser-session';
+
+export type { BrowserAction, RiskGuard } from '../browser-session';
 
 const MAX_TURNS = 150;
 const MAX_BODY_TEXT = 6000;
 const MAX_ELEMENTS = 120;
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 // ── 风控规则（代码层硬约束，不依赖模型遵守 prompt）──────────────────────
 /** 打招呼类按钮的最小点击间隔（毫秒） */
@@ -83,6 +89,33 @@ const BROWSER_TOOL: OpenAI.ChatCompletionTool = {
   },
 };
 
+// 结构化产出工具——履约 canonical 契约 contacted-candidate.v1。
+// 每联系完一个候选人就调一次，让下游 verifier/漏斗拿到结构化数据，而不是事后从总结文本里猜。
+const RECORD_CONTACTED_TOOL: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'record_contacted',
+    description:
+      '每当你联系（打招呼）完一个候选人，立刻调用本工具，逐条登记这个候选人的结构化信息。' +
+      '这是产出的【唯一权威来源】——不要只在最后的总结里写名单，必须每人一次调用。',
+    parameters: {
+      type: 'object',
+      required: ['name', 'greeting_sent'],
+      properties: {
+        name:         { type: 'string', description: '候选人姓名（页面所见）' },
+        company:      { type: 'string', description: '当前/最近公司' },
+        title:        { type: 'string', description: '当前/最近职位' },
+        location:     { type: 'string', description: '所在城市/地区' },
+        evidence:     { type: 'string', description: '为什么联系 ta 的一句话依据（来自列表/简历可见信息）' },
+        fit_score:    { type: 'number', description: '你的自评匹配分 0-100' },
+        greeting_sent:{ type: 'boolean', description: '是否真的发出了打招呼（false=看了但跳过）' },
+        greeting_text:{ type: 'string', description: '实际发出的打招呼文案' },
+        profile_url:  { type: 'string', description: '候选人详情页 URL（如能取到）' },
+      },
+    },
+  },
+};
+
 const DOM_GUIDE = `
 ## 浏览器操作说明（文本模式）
 
@@ -98,24 +131,16 @@ const DOM_GUIDE = `
 4. 输入搜索词后通常需要 press(text="Enter") 提交
 5. 列表页内容不全时用 scroll(direction="down") 加载更多
 6. 页面跳转后旧 ref 全部失效，必须依据新快照操作
-7. **任务完成后**：直接回复文字总结，不再调用工具
+7. **每联系完一个候选人，立刻调用 record_contacted 登记**（姓名/公司/职位/自评分/是否已打招呼/招呼文案等）。这是产出的唯一权威来源——别攒到最后才在总结里写名单。
+8. **任务完成后**：直接回复文字总结，不再调用工具
 
-输出总结时必须包含：
+输出总结时必须包含（注意：结构化名单已由 record_contacted 逐条登记，总结里的名单只是给人看的摘要）：
 触达人数: <数字>
 跳过人数: <数字>
-已触达候选人清单（每个已打招呼的人一行，格式严格为：姓名 | 公司 | 自评分(0-100) | 一句话匹配理由）：
+已触达候选人清单（每个已打招呼的人一行，格式：姓名 | 公司 | 自评分(0-100) | 一句话匹配理由）：
 - 张三 | 字节跳动 | 82 | 2年Agent平台经验，与岗位高度匹配
 （没有触达任何人就写"已触达候选人清单：无"）
 `.trim();
-
-export interface BrowserAction {
-  action: 'snapshot' | 'click' | 'type' | 'press' | 'scroll' | 'goto' | 'back' | 'wait';
-  ref?: number;
-  text?: string;
-  url?: string;
-  direction?: 'up' | 'down';
-  amount?: number;
-}
 
 /**
  * 提取页面文本快照：标记可交互元素 + 收集正文。
@@ -190,11 +215,6 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
     '## 页面正文',
     data.bodyText,
   ].join('\n');
-}
-
-/** 跨动作的风控状态（每次 runSkill 创建一份） */
-export interface RiskGuard {
-  lastGreetingAt: number;
 }
 
 /** 执行单个浏览器动作 */
@@ -292,13 +312,13 @@ export class DomRunner implements LLMRunner {
   }
 
   async runSkill(
-    page: Page,
+    page: BrowserTarget,
     systemPrompt: string,
     task: string,
     onProgress?: (msg: string) => void,
   ): Promise<SkillResult> {
     const system = [DOM_GUIDE, systemPrompt].join('\n\n---\n\n');
-    const initSnapshot = await takeDomSnapshot(page);
+    const initSnapshot = isDomBrowserSession(page) ? await page.snapshot() : await takeDomSnapshot(page);
 
     const messages: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'system', content: system },
@@ -318,10 +338,14 @@ export class DomRunner implements LLMRunner {
         messages.push({ role: 'user', content: msg });
       }
 
+      // 兜底：循环里若有 tool_call 走了未知/非 function 分支没回 tool 响应，会留下
+      // 悬空 tool_call_id，下一次请求被 OpenAI 兼容端 400 拒。每次发请求前先补齐，
+      // 保证 assistant 的每个 tool_call 都有对应 tool 消息（真实 BOSS run 的稳定性兜底）。
+      repairToolMessageHistoryInPlace(messages);
       const response = await this.client.chat.completions.create({
         model: this.model,
         messages: pruneSnapshots(messages),
-        tools: [BROWSER_TOOL],
+        tools: [BROWSER_TOOL, RECORD_CONTACTED_TOOL],
         tool_choice: 'auto',
         max_tokens: 2048,
       });
@@ -343,13 +367,51 @@ export class DomRunner implements LLMRunner {
         const parsed = parseSkillSummary(finalText);
         result.contacted = parsed.contacted;
         result.skipped = parsed.skipped;
-        result.contactedList = parseContactedCandidates(finalText);
+        // 结构化清单以 record_contacted 工具的逐条登记为权威；
+        // 仅当模型一次都没调用该工具时，才降级用总结文本解析（过渡兼容）。
+        if (!result.contactedList || result.contactedList.length === 0) {
+          result.contactedList = parseContactedCandidates(finalText);
+        }
+        if (result.contacted === 0 && result.contactedList) {
+          result.contacted = result.contactedList.filter(c => c.greetingSent !== false).length;
+        }
         onProgress?.('✓ 完成');
         break;
       }
 
       for (const toolCall of msg.tool_calls) {
-        if (toolCall.type !== 'function' || toolCall.function.name !== 'browser') continue;
+        if (toolCall.type !== 'function') continue;
+
+        // 结构化产出：逐条登记已触达候选人（契约 contacted-candidate.v1）
+        if (toolCall.function.name === 'record_contacted') {
+          let toolContent = '已登记。继续下一个候选人。';
+          try {
+            const a = JSON.parse(toolCall.function.arguments || '{}');
+            if (!a.name) {
+              toolContent = '登记失败：缺少 name。请重新调用 record_contacted，补上候选人姓名。';
+            } else {
+              const rawScore = Number(a.fit_score);
+              (result.contactedList ??= []).push({
+                name: String(a.name),
+                company: a.company ? String(a.company) : undefined,
+                title: a.title ? String(a.title) : undefined,
+                location: a.location ? String(a.location) : undefined,
+                evidence: a.evidence ? String(a.evidence) : undefined,
+                score: Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : undefined,
+                greetingSent: a.greeting_sent !== false,
+                greetingText: a.greeting_text ? String(a.greeting_text) : undefined,
+                profileUrl: a.profile_url ? String(a.profile_url) : undefined,
+                // sourceChannel 由 orchestrator 的 channel 参数权威决定，runner 不臆测
+              });
+            }
+          } catch (err) {
+            toolContent = `登记失败：record_contacted 参数不是合法 JSON（${err instanceof Error ? err.message : String(err)}）。请重新调用。`;
+          }
+          messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolContent });
+          continue;
+        }
+
+        if (toolCall.function.name !== 'browser') continue;
 
         // 风控硬终止后拒绝执行任何动作，只允许模型输出总结
         if (hardStopped) {
@@ -371,18 +433,25 @@ export class DomRunner implements LLMRunner {
         let snapshot: string;
         let stepOk = true;
         try {
-          await executeDomAction(page, input, guard);
-          snapshot = await takeDomSnapshot(page);
+          if (isDomBrowserSession(page)) {
+            snapshot = await page.act(input, guard);
+          } else {
+            await executeDomAction(page, input, guard);
+            snapshot = await takeDomSnapshot(page);
+          }
         } catch (err: unknown) {
           stepOk = false;
           const message = err instanceof Error ? err.message : String(err);
           // page 被关闭时重新获取
-          if (message.includes('closed') || message.includes('Target')) {
+          if (!isDomBrowserSession(page) && (message.includes('closed') || message.includes('Target'))) {
             const { getPage } = await import('../browser-runner');
             page = await getPage();
             snapshot = await takeDomSnapshot(page);
           } else {
-            snapshot = `[动作执行失败] ${message}\n请根据下方快照调整策略。\n\n${await takeDomSnapshot(page).catch(() => '[快照获取失败]')}`;
+            const fallbackSnapshot = isDomBrowserSession(page)
+              ? await page.snapshot().catch(() => '[快照获取失败]')
+              : await takeDomSnapshot(page).catch(() => '[快照获取失败]');
+            snapshot = `[动作执行失败] ${message}\n请根据下方快照调整策略。\n\n${fallbackSnapshot}`;
           }
         }
 
@@ -409,7 +478,11 @@ export class DomRunner implements LLMRunner {
           const warn = `⏳ [风控软退避] 检测到频率告警，等待 ${Math.round(backoffMs / 1000)} 秒后继续`;
           onProgress?.(warn);
           emitLog(warn);
-          await page.waitForTimeout(backoffMs);
+          if (isDomBrowserSession(page)) {
+            await sleep(backoffMs);
+          } else {
+            await page.waitForTimeout(backoffMs);
+          }
           snapshot = `${warn}（已等待完成，请放慢节奏继续）\n\n${snapshot}`;
         }
 
