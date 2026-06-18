@@ -19,6 +19,14 @@ export interface BossPrefilterPlan {
   notes: string[];
 }
 
+export interface BossProtocolStage {
+  id: string;
+  name: string;
+  required: string[];
+  evidence: string[];
+  onFailure: string;
+}
+
 const BOSS_SESSION_RULES = [
   '优先复用用户已经登录的真实有头 Chrome 页面；不要创建新浏览器、新 profile、新标签页或无头会话。',
   '整轮任务只接管一个 BOSS 页面；如果发现额外 BOSS 页面、登录失效、验证码、滑块或 IP 风控，先停止自动化动作，再说明需要用户处理什么。',
@@ -69,6 +77,79 @@ const BOSS_STOP_RULES = [
   '当前页签刷空但还没到每日上限时，应按推荐 -> 最新 -> 下一个目标职位的顺序继续；不要把单职位刷空误报为整轮完成。',
   '全部目标职位刷空但未触发每日上限时，允许进入全局补池轮；连续 3 轮仍无新增候选人才可用 pool_refill_exhausted 结束。',
 ];
+
+const BOSS_PROTOCOL_STAGES: BossProtocolStage[] = [
+  {
+    id: 'session-precheck',
+    name: '会话接管与只读预检',
+    required: ['复用唯一真实有头 Chrome 页面', '只读确认登录/风控/验证码状态'],
+    evidence: ['snapshot/status 确认当前 URL 与页面状态', '未出现新标签页、新 profile、headless 降级'],
+    onFailure: '停止所有 BOSS 自动化动作，说明需要用户在受控页面处理什么。',
+  },
+  {
+    id: 'job-positioning',
+    name: '目标职位定位',
+    required: ['归一化匹配当前职位与 active job', '不匹配时通过站内入口切换职位'],
+    evidence: ['页面内 click/scroll/type 进入职位下拉或职位列表', '记录目标职位命中或 job_missing'],
+    onFailure: '不能在错误职位继续处理；记录 job_missing 或页面阻断原因。',
+  },
+  {
+    id: 'prefilter',
+    name: '筛选面板前置',
+    required: ['打开或识别已展开筛选面板', '按 prefilter plan 逐项选择并验收激活态'],
+    evidence: ['筛选控件 click/type 动作早于候选人触达', '逐项 active 验收或复用上次筛选依据'],
+    onFailure: '记录 prefilter_mapping_missing 或筛选失败原因；不能跳过筛选直接批量看人。',
+  },
+  {
+    id: 'dom-probe',
+    name: '候选人 DOM 探测',
+    required: ['以打招呼按钮为锚点探测候选人卡片容器', '记录本轮选择器路径'],
+    evidence: ['run trace 或总结出现 card/button path、parse_quality 统计'],
+    onFailure: '记录 ERROR_DOM_PROBE_FAILED 并停止当前候选人列表处理。',
+  },
+  {
+    id: 'candidate-screen',
+    name: '候选人证据查看',
+    required: ['先看可见证据再决定是否触达', '无法页面筛选的事实进入脚本精筛'],
+    evidence: ['触达前存在候选人详情/卡片 snapshot', '候选人证据、风险标签、跳过原因进入结构化输出'],
+    onFailure: '不允许列表页无差别群发；信息不足时记录风险或跳过。',
+  },
+  {
+    id: 'single-contact',
+    name: '单人触达与留痕',
+    required: ['每次只点击一个沟通按钮', '点击后确认状态并立即 record_contacted'],
+    evidence: ['打招呼动作间隔符合 >=5 秒', 'run_candidates、interaction_log、run_trace 同步写入'],
+    onFailure: '停止批量点击；补写结构化记录或标记触达失败。',
+  },
+  {
+    id: 'exhaustion-and-risk',
+    name: '终止信号与风控处理',
+    required: ['区分页签刷空、职位刷空、全局补池耗尽、每日上限', '风控/验证码/登录失效时强停'],
+    evidence: ['终止原因为 daily_limit、job_missing、pool_refill_exhausted、user_interrupted 等明确枚举'],
+    onFailure: '不能把 0 触达或单职位刷空伪装成整轮成功。',
+  },
+];
+
+export function bossProtocolStages(): BossProtocolStage[] {
+  return BOSS_PROTOCOL_STAGES.map(stage => ({
+    ...stage,
+    required: [...stage.required],
+    evidence: [...stage.evidence],
+  }));
+}
+
+export function formatBossProtocolStages(): string {
+  return [
+    '## BOSS 结构化阶段清单（stage manifest）',
+    '',
+    ...BOSS_PROTOCOL_STAGES.map((stage, index) => [
+      `${index + 1}. ${stage.name} (${stage.id})`,
+      `   必须完成：${stage.required.join('；')}`,
+      `   可审计证据：${stage.evidence.join('；')}`,
+      `   失败处理：${stage.onFailure}`,
+    ].join('\n')),
+  ].join('\n');
+}
 
 function uniq(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
@@ -190,6 +271,8 @@ ${startMode}
 
 ## BOSS 平台执行协议
 
+${formatBossProtocolStages()}
+
 ### 会话接管
 ${BOSS_SESSION_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\n')}
 
@@ -232,6 +315,8 @@ export function buildBossSystemContext(): string {
 这份协议是 HireSeek 产品内置的平台能力协议，优先级高于外部 skill 资产。
 外部 BOSS skill 仍可作为历史经验、页面细节、异常案例和迁移素材参考；如果它与本协议冲突，以本协议为准。
 
+${formatBossProtocolStages()}
+
 ## 会话接管
 ${BOSS_SESSION_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\n')}
 
@@ -273,6 +358,8 @@ export const bossBrowserActionPolicy: BrowserActionPolicy = (
 export function bossProcessRules(): string {
   return `
 BOSS 平台过程规则：
+${formatBossProtocolStages()}
+
 1. 当前页面职位与目标岗位不一致时，不能直接结束或要求用户手动切；应优先通过 BOSS 站内可见入口切到目标岗位。
 2. 职位匹配必须做标题归一化；目标职位不在下拉/列表中时应记录 job_missing，不能用错误职位继续处理。
 3. 职位切换、进入推荐牛人、进入候选人列表，都应通过页面内 click/type/press/scroll 等真实交互完成，不能用直接 URL 深链代替。

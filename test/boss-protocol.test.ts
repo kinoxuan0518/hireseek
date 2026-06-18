@@ -6,9 +6,11 @@ import { formatPlatformProtocols, getPlatformProtocol } from '../src/platform-pr
 import {
   bossBrowserActionPolicy,
   bossProcessRules,
+  bossProtocolStages,
   buildBossPrefilterPlan,
   buildBossSystemContext,
   buildBossTaskPrompt,
+  formatBossProtocolStages,
   formatBossPrefilterPlan,
 } from '../src/platform-protocols/boss';
 import { loadSkill } from '../src/skills/loader';
@@ -40,6 +42,9 @@ describe('boss platform protocol middle layer', () => {
     expect(prompt).toContain('禁止跨会话复用旧选择器');
     expect(prompt).toContain('≥5 秒');
     expect(prompt).toContain('pool_refill_exhausted');
+    expect(prompt).toContain('BOSS 结构化阶段清单');
+    expect(prompt).toContain('筛选面板前置');
+    expect(prompt).toContain('单人触达与留痕');
     expect(prompt).toContain('当前职位 BOSS 筛选前置计划');
     expect(prompt).toContain('经验要求：1-3年');
     expect(prompt).toContain('关键词筛选：大模型、AI Agent');
@@ -58,6 +63,24 @@ describe('boss platform protocol middle layer', () => {
     expect(plan.scriptRefineFacts).toContain('跳槽超过 3 次且无合理解释');
     expect(formatted).toContain('无法映射的项不要硬选');
     expect(formatBossPrefilterPlan(null)).toContain('不得臆造岗位筛选项');
+  });
+
+  it('exposes BOSS workflow stages as a structured manifest', () => {
+    const stages = bossProtocolStages();
+    const formatted = formatBossProtocolStages();
+
+    expect(stages.map(s => s.id)).toEqual([
+      'session-precheck',
+      'job-positioning',
+      'prefilter',
+      'dom-probe',
+      'candidate-screen',
+      'single-contact',
+      'exhaustion-and-risk',
+    ]);
+    expect(stages.find(s => s.id === 'prefilter')?.required.join(' ')).toContain('prefilter plan');
+    expect(stages.find(s => s.id === 'single-contact')?.evidence.join(' ')).toContain('run_candidates');
+    expect(formatted).toContain('可审计证据');
   });
 
   it('blocks direct URL navigation while allowing normal page operations', () => {
@@ -86,6 +109,7 @@ describe('boss platform protocol middle layer', () => {
     expect(rules).toContain('DOM 探测');
     expect(rules).toContain('≥5 秒');
     expect(rules).toContain('人工接管期间必须零动作');
+    expect(rules).toContain('stage manifest');
     expect(rules).toContain('record_contacted');
   });
 
@@ -98,6 +122,7 @@ describe('boss platform protocol middle layer', () => {
     expect(protocol?.buildSystemContext?.()).toContain('优先级高于外部 skill 资产');
     expect(formatPlatformProtocols()).toContain('boss-platform.v1');
     expect(formatPlatformProtocols()).toContain('产品中层协议');
+    expect(formatPlatformProtocols()).toContain('Stage manifest: 7 stages');
   });
 
   it('keeps legacy skill assets below product protocols', () => {
