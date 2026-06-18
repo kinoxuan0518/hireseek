@@ -143,6 +143,42 @@ describe('agent core lower layer', () => {
     expect(row.message_count).toBe(4);
   });
 
+  it('lists and resumes agent-core-only sessions', async () => {
+    const { saveAgentSessionMessages } = await import('../src/agent-core/session-store');
+    const { listSessions, loadSession } = await import('../src/remote-session');
+
+    saveAgentSessionMessages({
+      sessionId: 'db-only-session',
+      title: 'DB only session',
+      source: 'agent-session',
+      messages: [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: '继续上一轮' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_resume_1',
+              type: 'function',
+              function: { name: 'run_sourcing', arguments: '{"channel":"boss"}' },
+            },
+          ],
+        } as OpenAI.ChatCompletionAssistantMessageParam,
+      ],
+    });
+
+    const listed = listSessions().find(s => s.id === 'db-only-session');
+    expect(listed?.title).toBe('DB only session');
+    expect(listed?.source).toBe('agent-session');
+    expect(listed?.conversationMessageCount).toBe(3);
+
+    const loaded = loadSession('db-only-session');
+    expect(loaded?.title).toBe('DB only session');
+    expect(loaded?.messages.map(m => m.role)).toEqual(['system', 'user', 'assistant', 'tool']);
+    expect((loaded?.messages[3] as OpenAI.ChatCompletionToolMessageParam).tool_call_id).toBe('call_resume_1');
+  });
+
   it('stores raw, episodic, and semantic memory without strategy interpretation', async () => {
     const {
       getSemanticFacts,

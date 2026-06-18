@@ -11,6 +11,16 @@ export interface SaveAgentSessionInput {
   createdAt?: string;
 }
 
+export interface AgentSessionMeta {
+  id: string;
+  title: string;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  conversationMessageCount: number;
+}
+
 function messageContent(msg: OpenAI.ChatCompletionMessageParam): string {
   const content = (msg as any).content;
   if (typeof content === 'string') return content;
@@ -71,3 +81,41 @@ export function loadAgentSessionMessages(sessionId: string): OpenAI.ChatCompleti
   return repairToolMessageHistory(messages).messages;
 }
 
+export function getAgentSession(sessionId: string): AgentSessionMeta | null {
+  const row = db.prepare(`
+    SELECT
+      s.id,
+      s.title,
+      s.source,
+      s.created_at AS createdAt,
+      s.updated_at AS updatedAt,
+      s.message_count AS messageCount,
+      COALESCE((
+        SELECT COUNT(*)
+        FROM agent_messages m
+        WHERE m.session_id = s.id AND m.role != 'system'
+      ), 0) AS conversationMessageCount
+    FROM agent_sessions s
+    WHERE s.id = ?
+  `).get(sessionId) as AgentSessionMeta | undefined;
+  return row ?? null;
+}
+
+export function listAgentSessions(): AgentSessionMeta[] {
+  return db.prepare(`
+    SELECT
+      s.id,
+      s.title,
+      s.source,
+      s.created_at AS createdAt,
+      s.updated_at AS updatedAt,
+      s.message_count AS messageCount,
+      COALESCE((
+        SELECT COUNT(*)
+        FROM agent_messages m
+        WHERE m.session_id = s.id AND m.role != 'system'
+      ), 0) AS conversationMessageCount
+    FROM agent_sessions s
+    ORDER BY s.updated_at DESC
+  `).all() as AgentSessionMeta[];
+}

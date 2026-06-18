@@ -10,7 +10,12 @@ import crypto from 'crypto';
 import type OpenAI from 'openai';
 import { config } from './config';
 import { repairToolMessageHistory } from './message-integrity';
-import { saveAgentSessionMessages } from './agent-core/session-store';
+import {
+  getAgentSession,
+  listAgentSessions,
+  loadAgentSessionMessages,
+  saveAgentSessionMessages,
+} from './agent-core/session-store';
 
 export interface RemoteSessionOptions {
   title?: string;
@@ -22,6 +27,7 @@ export interface RemoteSession {
   id: string;
   title: string;
   url: string;
+  source?: string;
   createdAt: string;
   updatedAt?: string;
   messageCount: number;
@@ -221,7 +227,7 @@ export function listSessions(): RemoteSession[] {
   ensureSessionsDir();
 
   const files = fs.readdirSync(SESSIONS_DIR);
-  const sessions: RemoteSession[] = [];
+  const sessionsById = new Map<string, RemoteSession>();
 
   for (const file of files) {
     if (!file.endsWith('.json')) continue;
@@ -232,10 +238,11 @@ export function listSessions(): RemoteSession[] {
       const data = JSON.parse(content);
       const messages = Array.isArray(data.messages) ? data.messages : [];
 
-      sessions.push({
+      sessionsById.set(file.replace('.json', ''), {
         id: file.replace('.json', ''),
         title: data.title,
         url: `file://${filepath.replace('.json', '.md')}`,
+        source: 'file',
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
         messageCount: data.messageCount,
@@ -246,7 +253,21 @@ export function listSessions(): RemoteSession[] {
     }
   }
 
-  return sessions.sort((a, b) =>
+  for (const s of listAgentSessions()) {
+    if (sessionsById.has(s.id)) continue;
+    sessionsById.set(s.id, {
+      id: s.id,
+      title: s.title,
+      url: `agent-session://${s.id}`,
+      source: s.source,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      messageCount: s.messageCount,
+      conversationMessageCount: s.conversationMessageCount,
+    });
+  }
+
+  return [...sessionsById.values()].sort((a, b) =>
     new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime()
   );
 }
@@ -260,23 +281,28 @@ export function loadSession(sessionId: string): {
 } | null {
   const jsonPath = path.join(SESSIONS_DIR, `${sessionId}.json`);
 
-  if (!fs.existsSync(jsonPath)) {
-    return null;
+  if (fs.existsSync(jsonPath)) {
+    try {
+      const content = fs.readFileSync(jsonPath, 'utf-8');
+      const data = JSON.parse(content);
+      const rawMessages = Array.isArray(data.messages) ? data.messages : [];
+      const repaired = repairToolMessageHistory(rawMessages);
+
+      return {
+        title: data.title,
+        messages: repaired.messages,
+      };
+    } catch {
+      return null;
+    }
   }
 
-  try {
-    const content = fs.readFileSync(jsonPath, 'utf-8');
-    const data = JSON.parse(content);
-    const rawMessages = Array.isArray(data.messages) ? data.messages : [];
-    const repaired = repairToolMessageHistory(rawMessages);
-
-    return {
-      title: data.title,
-      messages: repaired.messages,
-    };
-  } catch {
-    return null;
-  }
+  const meta = getAgentSession(sessionId);
+  if (!meta) return null;
+  return {
+    title: meta.title,
+    messages: loadAgentSessionMessages(sessionId),
+  };
 }
 
 /**
@@ -358,7 +384,9 @@ export function formatSessionList(sessions: RemoteSession[]): string {
     output += `   ID: ${session.id}\n`;
     output += `   更新时间: ${date}\n`;
     output += `   对话: ${session.conversationMessageCount ?? session.messageCount} 条 / 总消息: ${session.messageCount} 条\n`;
-    output += `   文件: ${session.url}\n\n`;
+    output += session.url.startsWith('file://')
+      ? `   文件: ${session.url}\n\n`
+      : `   来源: ${session.source ?? 'agent-core'}\n\n`;
   });
 
   return output.trim();
