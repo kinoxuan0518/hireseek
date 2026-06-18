@@ -48,7 +48,7 @@ export function createRuntimeContext(): RuntimeContext {
     },
     llm: {
       provider: config.llm.provider,
-      model: config.llm.model,
+      model: process.env.LLM_MODEL || config.llm.model,
       verifierModel: config.verifier.model,
     },
     paths: {
@@ -65,4 +65,3 @@ export function createRuntimeContext(): RuntimeContext {
     enabledChannels: activeJob ? getEnabledChannels(activeJob) : [],
   };
 }
-

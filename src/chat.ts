@@ -27,6 +27,7 @@ import {
 } from './agent-core/tool-registry';
 import { recordRejectedToolCall, recordToolCall } from './agent-core/trace';
 import { buildRecruitingCapabilityContext } from './capabilities';
+import { createRuntimeContext } from './agent-core/runtime-context';
 
 /**
  * 如果配置了 MCP 服务器，则初始化它们
@@ -2835,16 +2836,16 @@ export async function startChat(): Promise<void> {
 
       // 状态
       if (text === '/status') {
-        const activeJob = loadActiveJob();
+        const runtime = createRuntimeContext();
         const { listClaudeSkills } = await import('./skills/claude-skills');
         const { browserStatus } = await import('./chat-browser');
         console.log([
           '',
           chalk.bold('状态：'),
-          chalk.gray(`  模型      ${model}（${config.llm.provider}）`),
-          chalk.gray(`  职位      ${activeJob?.title ?? '未配置'}`),
+          chalk.gray(`  模型      ${model}（${runtime.llm.provider}）`),
+          chalk.gray(`  职位      ${runtime.activeJob?.title ?? '未配置'}`),
           chalk.gray(`  浏览器    ${browserStatus()}`),
-          chalk.gray(`  数据库    ${db.name}`),
+          chalk.gray(`  数据库    ${runtime.paths.dbPath}`),
           chalk.gray(`  技能      ${listClaudeSkills().length} 个已接管`),
           chalk.gray(`  后台任务  ${(require('./sub-agent') as typeof import('./sub-agent')).runningCount()} 个运行中`),
           chalk.gray(`  上下文    ${messages.length} 条消息`),

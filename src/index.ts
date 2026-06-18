@@ -6,7 +6,7 @@ import { startChat } from './chat';
 import { runSetup } from './setup';
 import { startDashboard } from './dashboard';
 import { db, candidateOps } from './db';
-import { loadActiveJob } from './skills/loader';
+import { createRuntimeContext } from './agent-core/runtime-context';
 import { createTask, updateTask, deleteTask, displayTaskBoard, displayTask, listAllTasks } from './tasks';
 import type { Channel } from './types';
 
@@ -79,7 +79,7 @@ async function checkSetup(): Promise<boolean> {
   }
 
   // 检查职位文件
-  const job = loadActiveJob();
+  const job = createRuntimeContext().activeJob;
   if (!job) {
     issues.push('未配置招聘职位');
   } else if (job.title === 'AI 算法工程师') {
@@ -343,8 +343,9 @@ async function main(): Promise<void> {
     process.exit(0);
 
   } else if (command === 'funnel') {
-    const job   = loadActiveJob();
-    const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+    const runtime = createRuntimeContext();
+    const job = runtime.activeJob;
+    const jobId = runtime.activeJobId;
     const stats = candidateOps.funnelStats.all(jobId) as { status: string; count: number }[];
     console.log(chalk.cyan(`\n招聘漏斗：${job?.title ?? jobId}\n`));
     if (stats.length === 0) {
@@ -368,8 +369,8 @@ async function main(): Promise<void> {
       displayTask(parseInt(taskId, 10));
     } else {
       // 显示任务看板
-      const job = loadActiveJob();
-      const jobId = job ? job.title.replace(/\s+/g, '_') : undefined;
+      const runtime = createRuntimeContext();
+      const jobId = runtime.activeJob ? runtime.activeJobId : undefined;
       displayTaskBoard(jobId);
     }
 

@@ -16,10 +16,10 @@ import http from 'http';
 import { exec } from 'child_process';
 import { config } from './config';
 import { db } from './db';
-import { loadActiveJob } from './skills/loader';
 import { setHeadless } from './permissions';
 import { createSession, runAgentTurn, type AgentSession } from './agent-session';
 import { collectVitals } from './vitals';
+import { createRuntimeContext } from './agent-core/runtime-context';
 
 const PORT = parseInt(process.env.HIRESEEK_CONSOLE_PORT || '7799', 10);
 
@@ -37,8 +37,9 @@ function getWebSession(): AgentSession {
 
 // ── 状态数据：它此刻活着、今天干了什么 ──────────────────────────────────
 function collectStatus(): Record<string, unknown> {
-  const job = loadActiveJob();
-  const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+  const runtime = createRuntimeContext();
+  const job = runtime.activeJob;
+  const jobId = runtime.activeJobId;
 
   const today = db.prepare(
     `SELECT COUNT(*) AS n FROM candidates WHERE date(contacted_at) = date('now','localtime')`,
@@ -77,7 +78,7 @@ function collectStatus(): Record<string, unknown> {
     funnel: funnel.map(f => ({ label: STATUS_LABEL[f.status] ?? f.status, count: f.count })),
     lastBeat,
     feishuBot: config.feishu.bot.enabled,
-    model: process.env.LLM_MODEL || config.llm.model,
+    model: runtime.llm.model,
   };
 }
 
