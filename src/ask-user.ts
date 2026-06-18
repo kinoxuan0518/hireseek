@@ -27,6 +27,25 @@ export interface UserAnswers {
   [questionIndex: string]: string | string[];
 }
 
+export const ASK_USER_MIN_QUESTIONS = 1;
+export const ASK_USER_MAX_QUESTIONS = 3;
+export const ASK_USER_MIN_OPTIONS = 2;
+export const ASK_USER_MAX_OPTIONS = 4;
+
+export class AskUserQuestionCancelled extends Error {
+  code = 'ask_user_question_cancelled';
+
+  constructor(message = '用户取消了选择') {
+    super(message);
+    this.name = 'AskUserQuestionCancelled';
+  }
+}
+
+export function isAskUserQuestionCancelled(err: unknown): err is AskUserQuestionCancelled {
+  return err instanceof AskUserQuestionCancelled
+    || (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'ask_user_question_cancelled');
+}
+
 let sharedReadline: readline.Interface | null = null;
 
 export function setAskUserReadline(rl: readline.Interface | null): void {
@@ -56,6 +75,46 @@ function optionChoices(question: Question): QuestionOption[] {
     ...question.options,
     { label: '其他', description: '自定义输入' },
   ];
+}
+
+export function validateAskUserQuestions(params: AskUserQuestionParams): void {
+  if (!Array.isArray(params.questions)) {
+    throw new Error('questions 必须是数组');
+  }
+
+  if (params.questions.length < ASK_USER_MIN_QUESTIONS) {
+    throw new Error('至少需要 1 个问题');
+  }
+
+  if (params.questions.length > ASK_USER_MAX_QUESTIONS) {
+    throw new Error(`最多支持 ${ASK_USER_MAX_QUESTIONS} 个问题`);
+  }
+
+  params.questions.forEach((question, index) => {
+    if (!question || typeof question !== 'object') {
+      throw new Error(`第 ${index + 1} 个问题格式无效`);
+    }
+    if (typeof question.question !== 'string' || question.question.trim().length === 0) {
+      throw new Error(`第 ${index + 1} 个问题缺少 question`);
+    }
+    if (typeof question.header !== 'string' || question.header.trim().length === 0) {
+      throw new Error(`第 ${index + 1} 个问题缺少 header`);
+    }
+    if (!Array.isArray(question.options)) {
+      throw new Error(`第 ${index + 1} 个问题 options 必须是数组`);
+    }
+    if (question.options.length < ASK_USER_MIN_OPTIONS || question.options.length > ASK_USER_MAX_OPTIONS) {
+      throw new Error(`第 ${index + 1} 个问题必须提供 ${ASK_USER_MIN_OPTIONS}-${ASK_USER_MAX_OPTIONS} 个选项`);
+    }
+    question.options.forEach((option, optionIndex) => {
+      if (typeof option?.label !== 'string' || option.label.trim().length === 0) {
+        throw new Error(`第 ${index + 1} 个问题的第 ${optionIndex + 1} 个选项缺少 label`);
+      }
+      if (typeof option.description !== 'string') {
+        throw new Error(`第 ${index + 1} 个问题的第 ${optionIndex + 1} 个选项缺少 description`);
+      }
+    });
+  });
 }
 
 async function askWithTextFallback(question: Question, prompt: string): Promise<string | string[]> {
@@ -133,8 +192,7 @@ async function askSingleQuestion(
   if (question.multiSelect) {
     const picked = await selectMultipleOptions(selectQuestion, options);
     if (picked == null) {
-      console.log(chalk.red('已取消，请重新选择'));
-      return askSingleQuestion(question, questionIndex, totalQuestions);
+      throw new AskUserQuestionCancelled();
     }
     const customIndex = choices.length - 1;
     const results = picked
@@ -149,8 +207,7 @@ async function askSingleQuestion(
 
   const picked = await selectOption(selectQuestion, options);
   if (picked == null) {
-    console.log(chalk.red('已取消，请重新选择'));
-    return askSingleQuestion(question, questionIndex, totalQuestions);
+    throw new AskUserQuestionCancelled();
   }
   if (picked === choices.length - 1) {
     const customInput = await askLine('请输入自定义内容: ');
@@ -165,14 +222,7 @@ async function askSingleQuestion(
  */
 export async function askUserQuestions(params: AskUserQuestionParams): Promise<UserAnswers> {
   const { questions } = params;
-
-  if (questions.length === 0) {
-    throw new Error('至少需要 1 个问题');
-  }
-
-  if (questions.length > 4) {
-    throw new Error('最多支持 4 个问题');
-  }
+  validateAskUserQuestions(params);
 
   const answers: UserAnswers = {};
 

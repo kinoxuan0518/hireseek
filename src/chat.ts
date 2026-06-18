@@ -897,7 +897,9 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
         properties: {
           questions: {
             type: 'array',
-            description: '要询问的问题列表（1-4 个）',
+            description: '要询问的问题列表（1-3 个）',
+            minItems: 1,
+            maxItems: 3,
             items: {
               type: 'object',
               required: ['question', 'header', 'options', 'multiSelect'],
@@ -908,6 +910,8 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
                 options: {
                   type: 'array',
                   description: '选项列表（2-4 个）',
+                  minItems: 2,
+                  maxItems: 4,
                   items: {
                     type: 'object',
                     required: ['label', 'description'],
@@ -1981,12 +1985,15 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
     }
 
     case 'ask_user_question': {
-      const { askUserQuestions, formatAnswers } = await import('./ask-user');
+      const { askUserQuestions, formatAnswers, isAskUserQuestionCancelled } = await import('./ask-user');
 
       try {
         const answers = await askUserQuestions({ questions: args.questions });
         return formatAnswers(args.questions, answers);
       } catch (err: any) {
+        if (isAskUserQuestionCancelled(err)) {
+          return `用户取消了本次选择：${err.message}`;
+        }
         return `询问失败: ${err.message}`;
       }
     }
