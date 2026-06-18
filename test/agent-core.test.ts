@@ -219,25 +219,62 @@ describe('agent core lower layer', () => {
   it('stores raw, episodic, and semantic memory without strategy interpretation', async () => {
     const {
       getSemanticFacts,
+      listRawMemory,
       searchEpisodicMemory,
       upsertSemanticFact,
       writeEpisodicMemory,
       writeRawMemory,
     } = await import('../src/agent-core/memory-store');
 
-    const rawId = writeRawMemory({ source: 'test', content: 'raw event', metadata: { kind: 'event' } });
+    const rawId = writeRawMemory({
+      source: 'test',
+      content: 'raw event',
+      visibility: 'private',
+      metadata: { kind: 'event' },
+    });
+    const duplicatedRawId = writeRawMemory({
+      source: 'test',
+      content: 'raw event',
+      visibility: 'private',
+      metadata: { kind: 'event' },
+    });
     const episodeId = writeEpisodicMemory({
       userId: 'u1',
       source: 'chat',
+      visibility: 'private',
       summary: 'talked about candidate A',
       content: 'candidate A prefers remote',
     });
-    upsertSemanticFact({ key: 'company.name', value: 'BlackLake', source: 'profile', version: 1 });
+    const duplicatedEpisodeId = writeEpisodicMemory({
+      userId: 'u1',
+      source: 'chat',
+      visibility: 'private',
+      summary: 'talked about candidate A',
+      content: 'candidate A prefers remote',
+    });
+    upsertSemanticFact({
+      key: 'company.name',
+      value: 'BlackLake',
+      source: 'profile',
+      visibility: 'private',
+      version: 1,
+    });
 
     expect(rawId).toBeGreaterThan(0);
+    expect(duplicatedRawId).toBe(rawId);
     expect(episodeId).toBeGreaterThan(0);
-    expect(searchEpisodicMemory({ userId: 'u1', query: 'remote' })).toHaveLength(1);
-    expect(getSemanticFacts({ key: 'company.name' })[0].fact_value).toBe('BlackLake');
+    expect(duplicatedEpisodeId).toBe(episodeId);
+    expect(listRawMemory({ source: 'test', visibility: 'private' })[0]).toMatchObject({
+      source: 'test',
+      visibility: 'private',
+      version: 1,
+    });
+    expect(searchEpisodicMemory({ userId: 'u1', query: 'remote', visibility: 'private' })).toHaveLength(1);
+    expect(getSemanticFacts({ key: 'company.name', visibility: 'private' })[0]).toMatchObject({
+      fact_value: 'BlackLake',
+      visibility: 'private',
+      version: 1,
+    });
   });
 
   it('persists outreach output protocol fields for contacted candidates', async () => {

@@ -49,6 +49,9 @@ export function ensureAgentCoreSchema(): void {
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       scope         TEXT NOT NULL DEFAULT 'global',
       source        TEXT NOT NULL,
+      visibility    TEXT NOT NULL DEFAULT 'private',
+      version       INTEGER NOT NULL DEFAULT 1,
+      content_hash  TEXT,
       content       TEXT NOT NULL,
       metadata_json TEXT,
       created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
@@ -60,6 +63,9 @@ export function ensureAgentCoreSchema(): void {
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id       TEXT NOT NULL DEFAULT 'default',
       source        TEXT NOT NULL,
+      visibility    TEXT NOT NULL DEFAULT 'private',
+      version       INTEGER NOT NULL DEFAULT 1,
+      content_hash  TEXT,
       summary       TEXT NOT NULL,
       content       TEXT NOT NULL,
       metadata_json TEXT,
@@ -73,6 +79,7 @@ export function ensureAgentCoreSchema(): void {
       fact_key      TEXT NOT NULL,
       fact_value    TEXT NOT NULL,
       source        TEXT NOT NULL,
+      visibility    TEXT NOT NULL DEFAULT 'private',
       version       INTEGER NOT NULL DEFAULT 1,
       metadata_json TEXT,
       created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -82,8 +89,28 @@ export function ensureAgentCoreSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_agent_memory_semantic_key ON agent_memory_semantic(fact_key);
     CREATE INDEX IF NOT EXISTS idx_agent_memory_semantic_source ON agent_memory_semantic(source);
   `);
+
+  for (const sql of [
+    `ALTER TABLE agent_memory_raw ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`,
+    `ALTER TABLE agent_memory_raw ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE agent_memory_raw ADD COLUMN content_hash TEXT`,
+    `ALTER TABLE agent_memory_episodic ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`,
+    `ALTER TABLE agent_memory_episodic ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE agent_memory_episodic ADD COLUMN content_hash TEXT`,
+    `ALTER TABLE agent_memory_semantic ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`,
+  ]) {
+    try { db.exec(sql); } catch { /* column already exists */ }
+  }
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_memory_raw_dedupe
+      ON agent_memory_raw(scope, source, content_hash)
+      WHERE content_hash IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_memory_episodic_dedupe
+      ON agent_memory_episodic(user_id, source, content_hash)
+      WHERE content_hash IS NOT NULL;
+  `);
   initialized = true;
 }
 
 ensureAgentCoreSchema();
-
