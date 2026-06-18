@@ -490,4 +490,62 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Trace:');
     expect(text).toContain('Memory:');
   });
+
+  it('formats product doctor report without executing live browser workflows', async () => {
+    const { collectDoctorReport, formatDoctorReport } = await import('../src/doctor');
+    const { createToolRegistry } = await import('../src/agent-core/tool-registry');
+
+    const registry = createToolRegistry([
+      {
+        type: 'function',
+        function: {
+          name: 'core_status',
+          description: 'core',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'product_doctor',
+          description: 'doctor',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'platform_protocols',
+          description: 'protocols',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'recruiting_capabilities',
+          description: 'capabilities',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_sourcing',
+          description: 'run',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+    ]);
+
+    const report = collectDoctorReport(registry);
+    const text = formatDoctorReport(report);
+
+    expect(text).toContain('HireSeek Doctor');
+    expect(text).toContain('下层 Agent Core');
+    expect(text).toContain('BOSS protocol wiring');
+    expect(text).toContain('Recruiting capabilities');
+    expect(text).toContain('Live BOSS run');
+    expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
+  });
 });

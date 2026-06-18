@@ -75,6 +75,20 @@ db.exec(`
     UNIQUE(run_id, candidate_fingerprint)
   );
 
+  CREATE TABLE IF NOT EXISTS run_actions (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id   INTEGER NOT NULL,
+    job_id   TEXT NOT NULL,
+    channel  TEXT NOT NULL,
+    seq      INTEGER NOT NULL,
+    action   TEXT NOT NULL,
+    target   TEXT,
+    detail   TEXT,
+    ok       INTEGER NOT NULL DEFAULT 1,
+    stage_id TEXT,
+    at       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  );
+
   CREATE TABLE IF NOT EXISTS reflections (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id     TEXT NOT NULL,
@@ -116,6 +130,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_reflections_channel ON reflections(channel);
   CREATE INDEX IF NOT EXISTS idx_run_candidates_run  ON run_candidates(run_id);
   CREATE INDEX IF NOT EXISTS idx_run_candidates_fp   ON run_candidates(candidate_fingerprint);
+  CREATE INDEX IF NOT EXISTS idx_run_actions_run     ON run_actions(run_id);
   CREATE INDEX IF NOT EXISTS idx_tasks_status        ON tasks(status);
   CREATE INDEX IF NOT EXISTS idx_tasks_parent        ON tasks(parent_id);
   CREATE INDEX IF NOT EXISTS idx_tasks_job_id        ON tasks(job_id);
@@ -158,6 +173,15 @@ try {
   addColumn('risk_flags', `ALTER TABLE run_candidates ADD COLUMN risk_flags TEXT`);
   addColumn('fit_tags', `ALTER TABLE run_candidates ADD COLUMN fit_tags TEXT`);
 } catch { /* 迁移失败不阻断启动 */ }
+
+try {
+  const cols = db.prepare(`PRAGMA table_info(run_actions)`).all() as Array<{ name: string }>;
+  if (!cols.some(c => c.name === 'stage_id')) {
+    db.exec(`ALTER TABLE run_actions ADD COLUMN stage_id TEXT`);
+  }
+} catch { /* 迁移失败不阻断启动 */ }
+db.exec(`CREATE INDEX IF NOT EXISTS idx_run_actions_run ON run_actions(run_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_run_actions_stage ON run_actions(stage_id)`);
 
 try {
   const cols = db.prepare(`PRAGMA table_info(task_runs)`).all() as Array<{ name: string }>;

@@ -1057,6 +1057,15 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'product_doctor',
+      description:
+        '只读体检 HireSeek 产品结构：下层 Agent Core、工具注册、数据库/trace/session/memory、BOSS 中层协议、招聘能力模块、外部 skill 边界与真实验收缺口。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'platform_protocols',
       description:
         '只读查看 HireSeek 中层平台协议注册表：哪些渠道已经产品化、绑定了什么契约、是否接入 system context/action policy/compliance。',
@@ -1184,6 +1193,7 @@ export function describeToolCall(name: string, args: Record<string, unknown>): s
     case 'remember':         return '🧠 记下偏好';
     case 'recall_memory':    return '🧠 回忆上下文';
     case 'core_status':      return '🧱 查看 Agent Core';
+    case 'product_doctor':   return '🩺 产品结构体检';
     case 'platform_protocols': return '🧩 查看平台协议';
     case 'recruiting_capabilities': return '🧩 查看招聘能力';
     default:                 return `⚙ ${name}`;
@@ -2068,6 +2078,11 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
       return formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY));
     }
 
+    case 'product_doctor': {
+      const { collectDoctorReport, formatDoctorReport } = await import('./doctor');
+      return formatDoctorReport(collectDoctorReport(CHAT_TOOL_REGISTRY));
+    }
+
     case 'platform_protocols': {
       const { formatPlatformProtocols } = await import('./platform-protocols');
       return formatPlatformProtocols();
@@ -2414,6 +2429,7 @@ export async function startChat(): Promise<void> {
     { cmd: '/status', desc: '模型 / 职位 / 浏览器状态' },
     { cmd: '/skills', desc: '技能列表' },
     { cmd: '/core', desc: 'Agent Core 状态（工具 / trace / memory / session）' },
+    { cmd: '/doctor', desc: '产品结构体检（下层 / 中层 / skill 边界）' },
     { cmd: '/protocols', desc: '中层平台协议（产品化能力）' },
     { cmd: '/capabilities', desc: '中层招聘能力（话术 / 判断 / 搜索）' },
     { cmd: '/model', desc: '切换模型（flash/pro/自定义）' },
@@ -2678,6 +2694,7 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /clear              清空对话上下文，重新开始'),
       chalk.gray('  /status             模型 / 职位 / 数据库状态'),
       chalk.gray('  /core               Agent Core 状态（工具 / trace / memory / session）'),
+      chalk.gray('  /doctor             产品结构体检（下层 / 中层 / skill 边界）'),
       chalk.gray('  /protocols          中层平台协议（产品化能力）'),
       chalk.gray('  /capabilities       中层招聘能力（话术 / 判断 / 搜索）'),
       chalk.gray('  /model [名称]       切换模型（不带参数弹选择器）'),
@@ -2859,6 +2876,13 @@ export async function startChat(): Promise<void> {
       if (text === '/core') {
         const { collectCoreStatus, formatCoreStatus } = await import('./agent-core/core-status');
         console.log('\n' + formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY)) + '\n');
+        ask();
+        return;
+      }
+
+      if (text === '/doctor') {
+        const { collectDoctorReport, formatDoctorReport } = await import('./doctor');
+        console.log('\n' + formatDoctorReport(collectDoctorReport(CHAT_TOOL_REGISTRY)) + '\n');
         ask();
         return;
       }

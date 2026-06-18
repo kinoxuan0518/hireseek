@@ -83,6 +83,7 @@ export const CORE_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
   mcp_call_tool: { category: 'mcp', sideEffect: true, requiresApproval: true },
   mcp_read_resource: { category: 'mcp', sideEffect: false },
   core_status: { category: 'workflow', sideEffect: false },
+  product_doctor: { category: 'workflow', sideEffect: false },
   update_config: { category: 'file', sideEffect: true, requiresApproval: true },
   create_task: { category: 'db', sideEffect: true },
   update_task: { category: 'db', sideEffect: true },
