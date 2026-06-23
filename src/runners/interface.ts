@@ -27,6 +27,8 @@ export interface RunSkillOptions {
   runId?: number;
   /** 当前对话/任务 session id，用于会话级工具 trace。 */
   sessionId?: string;
+  /** 平台协议声明的首个阶段 id；runner 只把初始快照归档到该阶段。 */
+  initialStageId?: string;
 }
 
 /**

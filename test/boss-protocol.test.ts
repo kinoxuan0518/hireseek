@@ -14,6 +14,7 @@ import {
   formatBossPrefilterPlan,
 } from '../src/platform-protocols/boss';
 import { loadSkill } from '../src/skills/loader';
+import { channelSkillAssetContext, runSkillOptionsForChannel } from '../src/orchestrator';
 
 describe('boss platform protocol middle layer', () => {
   const agentJob = {
@@ -123,6 +124,7 @@ describe('boss platform protocol middle layer', () => {
     expect(formatPlatformProtocols()).toContain('boss-platform.v1');
     expect(formatPlatformProtocols()).toContain('产品中层协议');
     expect(formatPlatformProtocols()).toContain('Stage manifest: 7 stages');
+    expect(runSkillOptionsForChannel('boss', 123, true, true).initialStageId).toBe('session-precheck');
   });
 
   it('keeps legacy skill assets below product protocols', () => {
@@ -138,5 +140,10 @@ describe('boss platform protocol middle layer', () => {
     expect(skill).toContain('HireSeek 产品中层协议');
     expect(fallback).toContain('如果当前职位不是目标岗位，应优先站内切到目标岗位');
     expect(fallback).not.toContain('禁止 `goto`、禁止切职位');
+
+    const productContext = channelSkillAssetContext('boss');
+    expect(productContext.mode).toBe('fallback-only');
+    expect(productContext.content).toContain('完整 legacy skill 不预加载');
+    expect(productContext.content).not.toContain('<!-- HireSeek skill source:');
   });
 });

@@ -130,7 +130,8 @@ describe('agent core lower layer', () => {
   });
 
   it('persists run trace stage markers for compliance coverage', async () => {
-    const { inspectStageCoverage, saveRunTrace, summarizeStageCoverage } = await import('../src/compliance');
+    const { inspectStageCoverage, summarizeStageCoverage } = await import('../src/compliance');
+    const { loadRunTrace, saveRunTrace } = await import('../src/agent-core/run-trace-store');
     const { db } = await import('../src/db');
     const runId = 505;
 
@@ -152,6 +153,9 @@ describe('agent core lower layer', () => {
       SELECT stage_id FROM run_actions WHERE run_id = ? ORDER BY id DESC LIMIT 1
     `).get(runId) as { stage_id: string | null };
     expect(row.stage_id).toBe('prefilter');
+    expect(loadRunTrace(runId)).toEqual([
+      expect.objectContaining({ seq: 1, action: 'click', stageId: 'prefilter', ok: true }),
+    ]);
 
     const coverage = summarizeStageCoverage('boss', runId, [
       { seq: 1, action: 'click', target: 'ref=11', ok: true, stageId: 'prefilter' },
@@ -390,6 +394,33 @@ describe('agent core lower layer', () => {
     expect(JSON.parse(row.risk_flags)).toEqual(['unclear_years']);
     expect(JSON.parse(row.fit_tags)).toEqual(['Agent', '平台工程']);
     expect(row.greeting_text).toContain('ExampleAI');
+  });
+
+  it('keeps dry-run candidate text out of outreach persistence', async () => {
+    const { normalizeResultForRunMode, persistRunResult } = await import('../src/orchestrator');
+    const { db } = await import('../src/db');
+    const runId = 304;
+
+    db.prepare(`DELETE FROM interaction_log WHERE run_id = ?`).run(runId);
+    db.prepare(`DELETE FROM run_actions WHERE run_id = ?`).run(runId);
+    db.prepare(`DELETE FROM run_candidates WHERE run_id = ?`).run(runId);
+
+    const result = normalizeResultForRunMode({
+      contacted: 1,
+      skipped: 0,
+      candidates: [],
+      summary: 'dry-run report with a candidate bullet',
+      contactedList: [{ name: 'Observed Candidate', greetingSent: true }],
+      trace: [{ seq: 1, action: 'wait', ok: true, stageId: 'session-precheck', mode: 'dry_run' }],
+    }, 'dry_run');
+
+    persistRunResult(runId, 'Agent工程师', 'boss', result, { mode: 'dry_run' });
+
+    expect(result.contacted).toBe(0);
+    expect(result.contactedList?.[0]?.greetingSent).toBe(false);
+    expect((db.prepare(`SELECT COUNT(*) n FROM run_candidates WHERE run_id = ?`).get(runId) as { n: number }).n).toBe(0);
+    expect((db.prepare(`SELECT COUNT(*) n FROM interaction_log WHERE run_id = ?`).get(runId) as { n: number }).n).toBe(0);
+    expect((db.prepare(`SELECT COUNT(*) n FROM run_actions WHERE run_id = ?`).get(runId) as { n: number }).n).toBe(1);
   });
 
   it('fails compliance when contacted candidates miss outreach output fields', async () => {

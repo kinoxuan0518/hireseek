@@ -20,13 +20,22 @@ import { createRuntimeContext } from './agent-core/runtime-context';
 import { getPlatformProtocol } from './platform-protocols';
 import { buildRecruitingCapabilityContext } from './capabilities';
 import type { RunSkillOptions } from './runners/interface';
+import { saveRunTrace } from './agent-core/run-trace-store';
 
 /**
  * 履约 canonical 契约 boss-greeting.v1 的 writes: [contacted_candidates, run_trace, interaction_log]。
  * 三样产物都按 runId 落库，让 verifier/compliance 能按 runId 审【本轮】。
  */
-export function persistRunResult(runId: number, jobId: string, channel: Channel, result: SkillResult): void {
-  const list = result.contactedList ?? [];
+export function persistRunResult(
+  runId: number,
+  jobId: string,
+  channel: Channel,
+  result: SkillResult,
+  opts: { mode?: 'execute' | 'dry_run' } = {},
+): void {
+  // dry-run 只保留过程轨迹。即便模型总结被误解析成候选人，也不能污染主档、
+  // run_candidates 或 interaction_log。
+  const list = opts.mode === 'dry_run' ? [] : result.contactedList ?? [];
   const now = dayjs().toISOString();
 
   // ① 结构化候选人落库：主档 upsert + run 级快照（fingerprint = 姓名|公司|渠道）
@@ -105,9 +114,23 @@ export function persistRunResult(runId: number, jobId: string, channel: Channel,
 
   // ③ 执行轨迹落库
   try {
-    const { saveRunTrace } = require('./compliance') as typeof import('./compliance');
     saveRunTrace(runId, jobId, channel, result.trace ?? []);
   } catch { /* 轨迹落库失败不影响主流程 */ }
+}
+
+export function normalizeResultForRunMode(
+  result: SkillResult,
+  mode: 'execute' | 'dry_run',
+): SkillResult {
+  if (mode === 'execute') return result;
+  return {
+    ...result,
+    contacted: 0,
+    contactedList: (result.contactedList ?? []).map(candidate => ({
+      ...candidate,
+      greetingSent: false,
+    })),
+  };
 }
 
 const TASK_PROMPT = (channelLabel: string) => `
@@ -187,11 +210,12 @@ export function runSkillOptionsForChannel(
   fromCurrent = false,
   dryRun = false,
 ): RunSkillOptions {
+  const protocol = getPlatformProtocol(channel);
   const base: RunSkillOptions = {
     runId: runId ?? undefined,
     executionMode: dryRun ? 'dry_run' : 'execute',
+    initialStageId: protocol?.stageManifest?.()[0]?.id,
   };
-  const protocol = getPlatformProtocol(channel);
   if (protocol?.browserActionPolicy) {
     return {
       ...base,
@@ -210,6 +234,27 @@ export function runSkillOptionsForChannel(
 function platformSystemContextForChannel(channel: Channel): string {
   const protocol = getPlatformProtocol(channel);
   return protocol?.buildSystemContext?.() ?? '';
+}
+
+export interface ChannelSkillAssetContext {
+  mode: 'preloaded' | 'fallback-only';
+  content: string;
+}
+
+export function channelSkillAssetContext(channel: Channel): ChannelSkillAssetContext {
+  const protocol = getPlatformProtocol(channel);
+  if (!protocol || config.skills.preloadLegacyForProductizedChannels) {
+    return { mode: 'preloaded', content: loadSkill(channel) };
+  }
+  return {
+    mode: 'fallback-only',
+    content: [
+      '# Legacy skill fallback',
+      `渠道 ${channel} 已由 HireSeek 产品协议 ${protocol.name} 接管。`,
+      '完整 legacy skill 不预加载进本轮 prompt，避免历史规则覆盖产品协议。',
+      'skill 文件仍保留在外部 skill homes，供 CC/Codex 原生使用，也可通过显式回退配置重新启用。',
+    ].join('\n'),
+  };
 }
 
 async function createBrowserTarget(channel: Channel): Promise<BrowserTarget> {
@@ -322,18 +367,19 @@ export async function runChannel(
       includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
     });
     const memory    = buildMemoryContext(channel, jobId);
-    const skill     = loadSkill(channel);
+    const skillAsset = channelSkillAssetContext(channel);
     const protocolContext = platformSystemContextForChannel(channel);
-    const systemPrompt = [soul, jobCtx, protocolContext, capabilities, memory, '---', skill].filter(Boolean).join('\n\n');
+    const systemPrompt = [soul, jobCtx, skillAsset.content, protocolContext, capabilities, memory].filter(Boolean).join('\n\n---\n\n');
 
     const runner = createRunner();
-    const result = await runner.runSkill(
+    const rawResult = await runner.runSkill(
       page,
       systemPrompt,
       taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, activeJob),
       opts.progress ?? ((msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))),
       runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun),
     );
+    const result = normalizeResultForRunMode(rawResult, dryRun ? 'dry_run' : 'execute');
 
     const durationSec = Math.round((Date.now() - startMs) / 1000);
 
@@ -351,7 +397,7 @@ export async function runChannel(
     });
 
     // 统一落库：结构化候选人（verifier 数据来源）+ 执行轨迹（合规审计来源）
-    persistRunResult(runId, jobId, channel, result);
+    persistRunResult(runId, jobId, channel, result, { mode: dryRun ? 'dry_run' : 'execute' });
 
     if (!dryRun) {
       // 生成反思并存储
@@ -652,7 +698,7 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
     // 构建 prompt
     const job = loadActiveJob();
     const soul = loadWorkspaceFile('SOUL.md');
-    const skillContent = loadSkill(channel);
+    const skillAsset = channelSkillAssetContext(channel);
     const jobContext = job ? jobToPrompt(job) : '';
     const memory = buildMemoryContext(channel, jobId);
     const protocolContext = platformSystemContextForChannel(channel);
@@ -661,7 +707,7 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
       includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
     });
 
-    const systemPrompt = [soul, jobContext, protocolContext, capabilities, memory, skillContent]
+    const systemPrompt = [soul, jobContext, skillAsset.content, protocolContext, capabilities, memory]
       .filter(Boolean)
       .join('\n\n---\n\n');
 

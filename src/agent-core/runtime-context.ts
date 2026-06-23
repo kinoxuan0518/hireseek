@@ -24,6 +24,7 @@ export interface RuntimeContext {
   };
   flags: {
     externalSkillsEnabled: boolean;
+    legacySkillPreload: boolean;
   };
   activeJob: JobConfig | null;
   activeJobId: string;
@@ -59,6 +60,7 @@ export function createRuntimeContext(): RuntimeContext {
     },
     flags: {
       externalSkillsEnabled: config.skills.externalEnabled,
+      legacySkillPreload: config.skills.preloadLegacyForProductizedChannels,
     },
     activeJob,
     activeJobId: jobIdOf(activeJob),

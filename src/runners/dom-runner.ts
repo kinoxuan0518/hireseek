@@ -381,14 +381,40 @@ export class DomRunner implements LLMRunner {
     const system = [DOM_GUIDE, executionMode === 'dry_run' ? DRY_RUN_GUIDE : '', systemPrompt]
       .filter(Boolean)
       .join('\n\n---\n\n');
+    const result: SkillResult = { contacted: 0, skipped: 0, candidates: [], summary: '', trace: [] };
     const initSnapshot = isDomBrowserSession(page) ? await page.snapshot() : await takeDomSnapshot(page);
+    const initialMode = executionMode === 'dry_run' ? 'dry_run' : 'read';
+    result.trace!.push({
+      seq: 1,
+      action: 'snapshot',
+      detail: 'initial page snapshot',
+      ok: true,
+      at: new Date().toISOString(),
+      toolName: 'browser',
+      inputSummary: 'initial snapshot',
+      outputSummary: initSnapshot.slice(0, 700),
+      sideEffect: false,
+      mode: initialMode,
+      stageId: options.initialStageId,
+    });
+    recordToolCall({
+      runId: options.runId,
+      sessionId: options.sessionId,
+      toolCallId: null,
+      toolName: 'browser',
+      input: { action: 'snapshot', source: 'initial' },
+      output: initSnapshot,
+      ok: true,
+      sideEffect: false,
+      mode: initialMode,
+      stageId: options.initialStageId,
+    });
 
     const messages: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'system', content: system },
       { role: 'user', content: `${task}\n\n## 当前页面快照\n${initSnapshot}` },
     ];
 
-    const result: SkillResult = { contacted: 0, skipped: 0, candidates: [], summary: '', trace: [] };
     const guard: RiskGuard = { lastGreetingAt: 0 };
     let hardStopped = false;
 
@@ -430,13 +456,22 @@ export class DomRunner implements LLMRunner {
         const parsed = parseSkillSummary(finalText);
         result.contacted = parsed.contacted;
         result.skipped = parsed.skipped;
-        // 结构化清单以 record_contacted 工具的逐条登记为权威；
-        // 仅当模型一次都没调用该工具时，才降级用总结文本解析（过渡兼容）。
-        if (!result.contactedList || result.contactedList.length === 0) {
-          result.contactedList = parseContactedCandidates(finalText);
-        }
-        if (result.contacted === 0 && result.contactedList) {
-          result.contacted = result.contactedList.filter(c => c.greetingSent !== false).length;
+        if (executionMode === 'dry_run') {
+          // 预检报告常包含候选人项目符号，不能让旧文本兜底把它们误认成已触达。
+          result.contacted = 0;
+          result.contactedList = (result.contactedList ?? []).map(candidate => ({
+            ...candidate,
+            greetingSent: false,
+          }));
+        } else {
+          // 结构化清单以 record_contacted 工具的逐条登记为权威；
+          // 仅当模型一次都没调用该工具时，才降级用总结文本解析（过渡兼容）。
+          if (!result.contactedList || result.contactedList.length === 0) {
+            result.contactedList = parseContactedCandidates(finalText);
+          }
+          if (result.contacted === 0 && result.contactedList) {
+            result.contacted = result.contactedList.filter(c => c.greetingSent !== false).length;
+          }
         }
         onProgress?.('✓ 完成');
         break;

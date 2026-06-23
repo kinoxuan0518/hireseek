@@ -64,6 +64,50 @@ function missingWorkspaceSources(sourceFiles: string[], workspaceDir: string): s
   return sourceFiles.filter(file => !fs.existsSync(path.join(workspaceDir, file)));
 }
 
+export interface BossDryRunEvidence {
+  id: number;
+  status: string;
+  contactedCount: number;
+  runCandidates: number;
+  interactions: number;
+  runActions: number;
+  toolCalls: number;
+  sideEffects: number;
+}
+
+export function hasPassingBossDryRunEvidence(evidence: BossDryRunEvidence | null): boolean {
+  return !!evidence
+    && evidence.status === 'completed'
+    && evidence.contactedCount === 0
+    && evidence.runCandidates === 0
+    && evidence.interactions === 0
+    && evidence.runActions > 0
+    && evidence.toolCalls > 0
+    && evidence.sideEffects === 0;
+}
+
+function latestBossDryRunEvidence(): BossDryRunEvidence | null {
+  try {
+    return db.prepare(`
+      SELECT
+        task_runs.id,
+        task_runs.status,
+        task_runs.contacted_count AS contactedCount,
+        (SELECT COUNT(*) FROM run_candidates WHERE run_id = task_runs.id) AS runCandidates,
+        (SELECT COUNT(*) FROM interaction_log WHERE run_id = task_runs.id) AS interactions,
+        (SELECT COUNT(*) FROM run_actions WHERE run_id = task_runs.id) AS runActions,
+        (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id) AS toolCalls,
+        (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id AND side_effect = 1) AS sideEffects
+      FROM task_runs
+      WHERE channel = 'boss' AND mode = 'dry_run'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get() as BossDryRunEvidence | undefined ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   const runtime = createRuntimeContext();
   const checks: DoctorCheck[] = [];
@@ -182,11 +226,15 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
       : 'no capability modules registered',
   ));
 
+  const dryRun = latestBossDryRunEvidence();
+  const dryRunPassed = hasPassingBossDryRunEvidence(dryRun);
   checks.push(check(
     'upper',
     'Live BOSS run',
-    'warn',
-    'not executed by doctor; verify separately with hireseek run boss --here --dry-run before real outreach',
+    dryRunPassed ? 'pass' : 'warn',
+    dryRun
+      ? `latest dry-run #${dryRun.id}: status=${dryRun.status}, contacted=${dryRun.contactedCount}, candidates=${dryRun.runCandidates}, interactions=${dryRun.interactions}, actions=${dryRun.runActions}, toolCalls=${dryRun.toolCalls}, sideEffects=${dryRun.sideEffects}`
+      : 'no BOSS dry-run evidence; run hireseek run boss --here --dry-run before real outreach',
   ));
 
   const skillHomes = runtime.paths.skillHomes;
@@ -204,6 +252,14 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     'Legacy BOSS skill availability',
     hasBossSkill ? 'pass' : 'warn',
     hasBossSkill ? 'BOSS skill asset is visible as external knowledge/fallback' : 'no BOSS external skill found in configured homes',
+  ));
+  checks.push(check(
+    'external',
+    'Productized channel skill preload',
+    runtime.flags.legacySkillPreload ? 'warn' : 'pass',
+    runtime.flags.legacySkillPreload
+      ? 'full legacy skill preload is enabled and may override product protocols'
+      : 'full legacy skill is not preloaded; external skill remains available to CC/Codex and explicit fallback',
   ));
 
   const status = worstStatus(checks.map(c => c.status));

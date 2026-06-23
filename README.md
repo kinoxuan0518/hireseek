@@ -268,6 +268,7 @@ hireseek/
 | `AGENT_KNOWLEDGE_HOME` | — | 独立 canonical 知识/契约 sandbox 路径；不填则用内置兜底契约 |
 | `HIRESEEK_SKILL_HOME` | `~/.codex/skills:~/.claude/skills` | 运行时技能目录，优先读取真实 Codex/Claude skill |
 | `HIRESEEK_EXTERNAL_SKILLS` | `true` | 设为 `false` 时只用仓库内 fallback skill |
+| `HIRESEEK_PRELOAD_LEGACY_SKILLS` | `false` | 已产品化渠道是否仍把完整历史 skill 注入 prompt；默认关闭，避免覆盖产品协议 |
 | `HIRESEEK_BROWSER_CONTROL` | `chrome` | 默认接管真实 Chrome；设为 `hireseek` 才使用自有浏览器 |
 | `HIRESEEK_BROWSER_PROFILE_DIR` | `~/.hireseek/browser-profile` | 自有浏览器模式下的资料夹 |
 | `FEISHU_WEBHOOK_URL` | — | 飞书执行报告推送 |

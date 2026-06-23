@@ -96,6 +96,7 @@ export const config = {
       .filter(Boolean)
       .map(resolveHome),
     externalEnabled: process.env.HIRESEEK_EXTERNAL_SKILLS !== 'false',
+    preloadLegacyForProductizedChannels: process.env.HIRESEEK_PRELOAD_LEGACY_SKILLS === 'true',
   },
   feishu: {
     webhookUrl: process.env.FEISHU_WEBHOOK_URL || '',

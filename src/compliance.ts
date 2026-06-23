@@ -25,25 +25,13 @@ import type { TraceStep, Channel } from './types';
 import type { Verdict } from './verifier';
 import { getPlatformProtocol } from './platform-protocols';
 import { contractNameForChannel, contractWritesForChannel } from './contracts';
+import { loadRunTrace, latestRunWithTrace, saveRunTrace } from './agent-core/run-trace-store';
 import './agent-core/store';
 
-// ── 轨迹与合规留痕表 ───────────────────────────────────────────────────
-db.exec(`
-  CREATE TABLE IF NOT EXISTS run_actions (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id  INTEGER NOT NULL,
-    job_id  TEXT NOT NULL,
-    channel TEXT NOT NULL,
-    seq     INTEGER NOT NULL,
-    action  TEXT NOT NULL,
-    target  TEXT,
-    detail  TEXT,
-    ok      INTEGER NOT NULL DEFAULT 1,
-    stage_id TEXT,
-    at      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-  );
-  CREATE INDEX IF NOT EXISTS idx_run_actions_run ON run_actions(run_id);
+export { saveRunTrace };
 
+// ── 合规留痕表 ─────────────────────────────────────────────────────────
+db.exec(`
   CREATE TABLE IF NOT EXISTS compliance_checks (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id          INTEGER,
@@ -56,44 +44,6 @@ db.exec(`
     created_at      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
   );
 `);
-
-try { db.exec(`ALTER TABLE run_actions ADD COLUMN stage_id TEXT`); } catch { /* column already exists */ }
-try { db.exec(`CREATE INDEX IF NOT EXISTS idx_run_actions_stage ON run_actions(stage_id)`); } catch { /* best effort */ }
-
-// ── orchestrator 调用：把一轮执行轨迹落库 ──────────────────────────────
-export function saveRunTrace(runId: number, jobId: string, channel: string, trace: TraceStep[]): void {
-  if (!trace.length) return;
-  const ins = db.prepare(`
-    INSERT INTO run_actions (run_id, job_id, channel, seq, action, target, detail, ok, stage_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const tx = db.transaction((steps: TraceStep[]) => {
-    for (const s of steps) {
-      ins.run(runId, jobId, channel, s.seq, s.action, s.target ?? null, s.detail ?? null, s.ok ? 1 : 0, s.stageId ?? null);
-    }
-  });
-  tx(trace);
-}
-
-function loadTrace(runId: number): TraceStep[] {
-  return (db.prepare(
-    `SELECT seq, action, target, detail, ok, stage_id FROM run_actions WHERE run_id = ? ORDER BY seq`,
-  ).all(runId) as Array<{ seq: number; action: string; target: string | null; detail: string | null; ok: number; stage_id: string | null }>)
-    .map(r => ({
-      seq: r.seq,
-      action: r.action,
-      target: r.target ?? undefined,
-      detail: r.detail ?? undefined,
-      ok: !!r.ok,
-      stageId: r.stage_id ?? undefined,
-    }));
-}
-
-/** 最近一次有轨迹的 run。无 runId 时用它兜底。 */
-function latestRunWithTrace(): number | null {
-  const r = db.prepare(`SELECT run_id FROM run_actions ORDER BY id DESC LIMIT 1`).get() as { run_id: number } | undefined;
-  return r?.run_id ?? null;
-}
 
 // ── 过程规则集：默认规则 + 可选 workspace 覆盖 ──────────────────────────
 const DEFAULT_RULES = `
@@ -284,7 +234,7 @@ export function summarizeStageCoverage(channel: Channel, runId: number, trace: T
 // ── 主入口：审计一轮执行流程 ───────────────────────────────────────────
 export async function complianceCheck(opts: { runId?: number } = {}): Promise<ComplianceResult> {
   const runId = opts.runId ?? latestRunWithTrace();
-  const trace = runId != null ? loadTrace(runId) : [];
+  const trace = runId != null ? loadRunTrace(runId) : [];
 
   if (runId == null) {
     return { verdict: 'skip', runId, steps: 0, violations: [], summary: '没有可审计的执行轨迹（这一轮可能没产生浏览器动作，或用的是非 DOM runner）。' };
