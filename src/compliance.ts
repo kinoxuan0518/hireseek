@@ -20,12 +20,13 @@ import path from 'path';
 import OpenAI from 'openai';
 import { config } from './config';
 import { db } from './db';
-import { loadActiveJob, jobToPrompt } from './skills/loader';
+import { jobToPrompt } from './skills/loader';
 import type { TraceStep, Channel } from './types';
 import type { Verdict } from './verifier';
 import { getPlatformProtocol } from './platform-protocols';
 import { contractNameForChannel, contractWritesForChannel } from './contracts';
 import { loadRunTrace, latestRunWithTrace, saveRunTrace } from './agent-core/run-trace-store';
+import { createRuntimeContext } from './agent-core/runtime-context';
 import './agent-core/store';
 
 export { saveRunTrace };
@@ -240,12 +241,13 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
     return { verdict: 'skip', runId, steps: 0, violations: [], summary: '没有可审计的执行轨迹（这一轮可能没产生浏览器动作，或用的是非 DOM runner）。' };
   }
 
-  const job = loadActiveJob();
+  const runtime = createRuntimeContext();
+  const job = runtime.activeJob;
   const runRow = db.prepare(`SELECT job_id, channel, mode FROM task_runs WHERE id = ?`).get(runId) as { job_id: string; channel: string; mode?: string } | undefined;
   const channelRow = db.prepare(`SELECT channel FROM run_actions WHERE run_id = ? LIMIT 1`).get(runId) as { channel: string } | undefined;
   const channel = (runRow?.channel ?? channelRow?.channel ?? 'boss') as Channel;
   const runMode = runRow?.mode === 'dry_run' ? 'dry_run' : 'execute';
-  const jobId = runRow?.job_id ?? (job ? job.title.replace(/\s+/g, '_') : 'default');
+  const jobId = runRow?.job_id ?? runtime.activeJobId;
   const stageAudit = inspectStageCoverage(channel, runId, trace, { runMode });
 
   // 契约履约检查（manifest 即清单）：boss-greeting.v1 声明 writes 了哪些产物，

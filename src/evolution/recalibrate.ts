@@ -17,9 +17,10 @@
 import OpenAI from 'openai';
 import { config } from '../config';
 import { db } from '../db';
-import { loadActiveJob, loadWorkspaceFile } from '../skills/loader';
+import { loadWorkspaceFile } from '../skills/loader';
 import { calibrationReport } from '../feedback';
 import { EVOLVABLE_FILES, type Retrospective, type EvolutionProposal } from './retrospect';
+import { createRuntimeContext } from '../agent-core/runtime-context';
 
 /** 启动重校所需的最小"既预测又有结果"样本量——低于此不改写 */
 const MIN_MATCHED = 8;
@@ -97,8 +98,7 @@ function extractJSON(text: string): any | null {
  * 样本不足或模型判无需改 → proposals 为空（不改写）。
  */
 export async function recalibrateFromOutcomes(): Promise<Retrospective> {
-  const job = loadActiveJob();
-  const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+  const jobId = createRuntimeContext().activeJobId;
   const rows = gatherOutcomeEvidence(jobId);
 
   if (rows.length < MIN_MATCHED) {

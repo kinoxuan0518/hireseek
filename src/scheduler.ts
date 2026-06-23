@@ -2,9 +2,9 @@ import cron from 'node-cron';
 import { config } from './config';
 import { runChannel } from './orchestrator';
 import { db } from './db';
-import { loadActiveJob } from './skills/loader';
 import { notify } from './notifier';
 import type { Channel } from './types';
+import { createRuntimeContext } from './agent-core/runtime-context';
 
 // 防止同时跑多个任务
 let isRunning = false;
@@ -24,8 +24,7 @@ async function safeRun(channel: Channel): Promise<void> {
 
 // ── 主动检查逻辑 ──────────────────────────────────────────
 async function proactiveCheck(): Promise<void> {
-  const job   = loadActiveJob();
-  const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+  const jobId = createRuntimeContext().activeJobId;
 
   // 1. 超过 7 天未回复的候选人
   const stale = db.prepare(`

@@ -1,8 +1,9 @@
 import { createRunner } from './runners';
-import { loadActiveJob, jobToPrompt, getEnabledChannels } from './skills/loader';
+import { jobToPrompt, getEnabledChannels } from './skills/loader';
 import { loadWorkspaceFile } from './skills/loader';
 import { db } from './db';
 import type { Channel } from './types';
+import { createRuntimeContext } from './agent-core/runtime-context';
 
 export interface ChannelPlan {
   channel: Channel;
@@ -36,7 +37,7 @@ const CHANNEL_LABEL: Record<Channel, string> = {
  * 使用 LLM 分析历史数据、职位要求、今日目标，生成最优执行策略
  */
 export async function generatePlan(jobId: string = 'default'): Promise<ExecutionPlan> {
-  const job = loadActiveJob();
+  const job = createRuntimeContext().activeJob;
   if (!job) {
     throw new Error('未找到 active.yaml 职位配置');
   }

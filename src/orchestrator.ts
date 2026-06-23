@@ -6,7 +6,7 @@ import type { BrowserTarget } from './browser-session';
 import { isDomBrowserSession } from './browser-session';
 import { connectRealChrome } from './real-chrome-session';
 import { createRunner } from './runners';
-import { loadSkill, loadWorkspaceFile, loadActiveJob, jobToPrompt, getEnabledChannels } from './skills/loader';
+import { loadSkill, loadWorkspaceFile, jobToPrompt, getEnabledChannels, type JobConfig } from './skills/loader';
 import { sendReport } from './channels/feishu';
 import { taskRunOps, reflectionOps, candidateOps, db } from './db';
 import { buildMemoryContext, buildReflectionPrompt } from './memory';
@@ -186,7 +186,7 @@ function taskPromptForChannel(
   label: string,
   fromCurrent = false,
   dryRun = false,
-  activeJob?: ReturnType<typeof loadActiveJob>,
+  activeJob?: JobConfig | null,
 ): string {
   const protocol = getPlatformProtocol(channel);
   const base = protocol
@@ -523,13 +523,14 @@ export async function scanInbox(jobId: string = 'default'): Promise<void> {
  * @param usePlan 是否使用计划模式（先分析、用户确认、再执行）
  */
 export async function runJob(usePlan: boolean = false): Promise<void> {
-  const job = loadActiveJob();
+  const runtime = createRuntimeContext();
+  const job = runtime.activeJob;
   if (!job) {
     console.error('[Orchestrator] 未找到 workspace/jobs/active.yaml，请先配置职位');
     return;
   }
 
-  const jobId = job.title.replace(/\s+/g, '_');
+  const jobId = runtime.activeJobId;
   const enabledChannels = getEnabledChannels(job);
   const dailyGoal = job.daily_goal?.contact ?? 30;
 
@@ -592,6 +593,7 @@ async function executeTasks(
   tasks: Array<{ channel: Channel; accountIndex: number; accountId: string; page: any }>,
   jobId: string
 ): Promise<void> {
+  const dailyGoal = createRuntimeContext().activeJob?.daily_goal?.contact ?? 30;
   // 登录引导：检查并引导用户登录每个账号
   const loggedInAccounts = await ensureAccountsLoggedIn(tasks);
 
@@ -628,8 +630,6 @@ async function executeTasks(
         }
 
         // 检查今日触达量
-        const job = loadActiveJob();
-        const dailyGoal = job?.daily_goal?.contact ?? 30;
         const todayCount = (db.prepare(`
           SELECT COUNT(*) as n FROM candidates
           WHERE channel = ? AND job_id = ? AND date(contacted_at) = date('now')
@@ -696,7 +696,7 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
     }
 
     // 构建 prompt
-    const job = loadActiveJob();
+    const job = createRuntimeContext().activeJob;
     const soul = loadWorkspaceFile('SOUL.md');
     const skillAsset = channelSkillAssetContext(channel);
     const jobContext = job ? jobToPrompt(job) : '';

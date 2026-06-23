@@ -6,6 +6,9 @@ import {
   STATUS_LABELS,
 } from '../index.js';
 import type { CandidateStatus, TrackingEntry } from '../index.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let passed = 0;
 let failed = 0;
@@ -230,26 +233,26 @@ console.log('\n--- Follow-up reminders ---');
 // 12. Save and reload
 console.log('\n--- Save and reload ---');
 {
-  const tmpDir = `C:\\Users\\Kino Xuan\\.openclaw-autoclaw\\workspace\\hireseek\\.tmp-test-${Date.now()}`;
-  const storagePath = `${tmpDir}\\tracking.json`;
+  const tmpDir = mkdtempSync(join(tmpdir(), 'hireseek-tracking-'));
+  const storagePath = join(tmpDir, 'tracking.json');
 
-  const tracker1 = new CandidateTracker({ storagePath });
-  await tracker1.init();
-  tracker1.register('c1', '张三');
-  tracker1.transition('c1', 'contacted');
-  tracker1.transition('c1', 'replied');
-  await tracker1.save();
+  try {
+    const tracker1 = new CandidateTracker({ storagePath });
+    await tracker1.init();
+    tracker1.register('c1', '张三');
+    tracker1.transition('c1', 'contacted');
+    tracker1.transition('c1', 'replied');
+    await tracker1.save();
 
-  const tracker2 = new CandidateTracker({ storagePath });
-  await tracker2.init();
-  const entry = tracker2.get('c1');
-  assert(entry !== undefined, 'Entry exists after reload');
-  assert(entry!.status === 'replied', `Status after reload: ${entry!.status}`);
-  assert(entry!.history.length === 2, `History after reload: ${entry!.history.length}`);
-
-  // Cleanup
-  const { rmSync } = await import('node:fs');
-  rmSync(tmpDir, { recursive: true, force: true });
+    const tracker2 = new CandidateTracker({ storagePath });
+    await tracker2.init();
+    const entry = tracker2.get('c1');
+    assert(entry !== undefined, 'Entry exists after reload');
+    assert(entry!.status === 'replied', `Status after reload: ${entry!.status}`);
+    assert(entry!.history.length === 2, `History after reload: ${entry!.history.length}`);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 }
 
 // Summary

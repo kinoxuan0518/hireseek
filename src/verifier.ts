@@ -19,7 +19,8 @@
 import OpenAI from 'openai';
 import { config } from './config';
 import { db } from './db';
-import { loadActiveJob, jobToPrompt } from './skills/loader';
+import { jobToPrompt, type JobConfig } from './skills/loader';
+import { createRuntimeContext } from './agent-core/runtime-context';
 
 // ── 质检留痕表 ───────────────────────────────────────────────────────
 db.exec(`
@@ -131,7 +132,7 @@ const VERIFIER_SYSTEM = `
 [{"name":"...","fit":0-100,"reason":"一句话","padding":true/false}]
 `.trim();
 
-function buildUserPrompt(job: ReturnType<typeof loadActiveJob>, cands: CandRow[]): string {
+function buildUserPrompt(job: JobConfig | null, cands: CandRow[]): string {
   const profile = job ? jobToPrompt(job) : '（岗位画像缺失）';
   const list = cands.map((c, i) =>
     `${i + 1}. ${c.name}｜公司：${c.company || '未知'}｜学校：${c.school || '未知'}｜渠道：${c.channel}｜寻源agent自评：${c.score ?? '未打分'}${c.evidence ? `｜触达依据：${c.evidence}` : ''}${c.personalization_evidence ? `｜个性化证据：${c.personalization_evidence}` : ''}${c.message_intent ? `｜触达意图：${c.message_intent}` : ''}${c.fit_tags ? `｜匹配标签：${c.fit_tags}` : ''}${c.risk_flags ? `｜风险：${c.risk_flags}` : ''}${c.greeting_text ? `｜招呼语：${c.greeting_text.slice(0, 80)}` : ''}`,
@@ -164,8 +165,9 @@ function parseJudgments(text: string, cands: CandRow[]): SampleJudgment[] {
 // ── 主入口：审计一轮触达 ───────────────────────────────────────────────
 export async function verifyRun(opts: { sampleSize?: number; runId?: number } = {}): Promise<VerificationResult> {
   // 传 runId → 审【本轮】，且 jobId 从 run 的真实记录取（不靠 loadActiveJob 重新猜，避免错位）
-  const job = loadActiveJob();
-  let jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+  const runtime = createRuntimeContext();
+  const job = runtime.activeJob;
+  let jobId = runtime.activeJobId;
   let cands: CandRow[];
   if (opts.runId != null) {
     const runRow = db.prepare(`SELECT job_id FROM task_runs WHERE id = ?`).get(opts.runId) as { job_id: string } | undefined;

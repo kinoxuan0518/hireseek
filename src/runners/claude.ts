@@ -2,9 +2,15 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Page } from 'playwright';
 import { config } from '../config';
 import { takeScreenshot, executeAction } from '../browser-runner';
-import type { LLMRunner } from './interface';
+import type { LLMRunner, RunSkillOptions } from './interface';
 import { parseSkillSummary } from './interface';
 import type { SkillResult } from '../types';
+import { recordToolCall } from '../agent-core/trace';
+import {
+  computerActionHasSideEffect,
+  computerActionMode,
+  dryRunBlocksComputerAction,
+} from '../agent-core/computer-actions';
 
 const MAX_TURNS = 120;
 
@@ -22,8 +28,10 @@ export class ClaudeRunner implements LLMRunner {
     page: Page,
     systemPrompt: string,
     task: string,
-    onProgress?: (msg: string) => void
+    onProgress?: (msg: string) => void,
+    options: RunSkillOptions = {},
   ): Promise<SkillResult> {
+    const executionMode = options.executionMode ?? 'execute';
     const COMPUTER_TOOL = {
       type: 'computer_20241022' as const,
       name: 'computer' as const,
@@ -46,7 +54,28 @@ export class ClaudeRunner implements LLMRunner {
       },
     ];
 
-    const result: SkillResult = { contacted: 0, skipped: 0, candidates: [], summary: '' };
+    const result: SkillResult = { contacted: 0, skipped: 0, candidates: [], summary: '', trace: [] };
+    result.trace!.push({
+      seq: 1,
+      action: 'screenshot',
+      detail: 'initial screenshot',
+      ok: true,
+      toolName: 'computer',
+      sideEffect: false,
+      mode: executionMode === 'dry_run' ? 'dry_run' : 'read',
+      stageId: options.initialStageId,
+    });
+    recordToolCall({
+      runId: options.runId,
+      sessionId: options.sessionId,
+      toolName: 'computer',
+      input: { action: 'screenshot', source: 'initial' },
+      output: 'screenshot captured',
+      ok: true,
+      sideEffect: false,
+      mode: executionMode === 'dry_run' ? 'dry_run' : 'read',
+      stageId: options.initialStageId,
+    });
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const response = await this.client.beta.messages.create({
@@ -84,19 +113,63 @@ export class ClaudeRunner implements LLMRunner {
           `[${turn + 1}] ${input.action}${input.coordinate ? ` (${input.coordinate})` : ''}`
         );
 
+        const action = String(input.action ?? 'unknown');
+        const sideEffect = computerActionHasSideEffect(action);
+        const mode = computerActionMode(action, executionMode);
+        const stageId = options.initialStageId;
         let content: Anthropic.Beta.BetaToolResultBlockParam['content'];
+        let stepOk = true;
+        let stepError: string | null = null;
 
-        if (input.action === 'screenshot') {
-          const img = await takeScreenshot(page);
-          content = [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img } }];
-        } else {
-          const actionResult = await executeAction(page, input);
+        if (executionMode === 'dry_run' && dryRunBlocksComputerAction(action)) {
+          stepOk = false;
+          stepError = `dry-run 预检模式禁止执行 ${action}，已阻止真实 computer 动作。`;
           const img = await takeScreenshot(page);
           content = [
-            { type: 'text', text: actionResult },
+            { type: 'text', text: stepError },
             { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img } },
           ];
+        } else {
+          let actionResult = '';
+          try {
+            if (action !== 'screenshot') actionResult = await executeAction(page, input);
+          } catch (err) {
+            stepOk = false;
+            stepError = err instanceof Error ? err.message : String(err);
+            actionResult = `动作执行失败：${stepError}`;
+          }
+          const img = await takeScreenshot(page);
+          content = action === 'screenshot'
+            ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img } }]
+            : [
+                { type: 'text', text: actionResult },
+                { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img } },
+              ];
         }
+
+        recordToolCall({
+          runId: options.runId,
+          sessionId: options.sessionId,
+          toolCallId: tool.id,
+          toolName: 'computer',
+          input,
+          output: stepOk ? 'screenshot captured' : stepError,
+          ok: stepOk,
+          error: stepError,
+          sideEffect,
+          mode,
+          stageId,
+        });
+        result.trace!.push({
+          seq: result.trace!.length + 1,
+          action,
+          ok: stepOk,
+          toolName: 'computer',
+          error: stepError ?? undefined,
+          sideEffect,
+          mode,
+          stageId,
+        });
 
         toolResults.push({ type: 'tool_result', tool_use_id: tool.id, content });
       }

@@ -27,6 +27,7 @@ export interface RegisteredTool {
   name: string;
   schema: OpenAI.ChatCompletionTool;
   policy: ToolPolicy;
+  policyDeclared: boolean;
 }
 
 export interface RegistryValidationIssue {
@@ -42,9 +43,12 @@ const DEFAULT_POLICY: ToolPolicy = {
 };
 
 export const CORE_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
+  browser: { category: 'browser', sideEffect: true, supportsDryRun: true },
   browser_connect: { category: 'browser', sideEffect: false },
   browser_snapshot: { category: 'browser', sideEffect: false },
   browser_act: { category: 'browser', sideEffect: true },
+  computer: { category: 'browser', sideEffect: true, supportsDryRun: true },
+  record_contacted: { category: 'db', sideEffect: false, supportsDryRun: true },
   run_shell: { category: 'shell', sideEffect: false, requiresApproval: true },
   read_file: { category: 'file', sideEffect: false },
   read_code: { category: 'file', sideEffect: false },
@@ -84,6 +88,8 @@ export const CORE_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
   mcp_read_resource: { category: 'mcp', sideEffect: false },
   core_status: { category: 'workflow', sideEffect: false },
   product_doctor: { category: 'workflow', sideEffect: false },
+  platform_protocols: { category: 'workflow', sideEffect: false },
+  recruiting_capabilities: { category: 'workflow', sideEffect: false },
   update_config: { category: 'file', sideEffect: true, requiresApproval: true },
   create_task: { category: 'db', sideEffect: true },
   update_task: { category: 'db', sideEffect: true },
@@ -115,6 +121,7 @@ export class ToolRegistry {
       name,
       schema,
       policy: { ...DEFAULT_POLICY, ...policy },
+      policyDeclared: policy.category != null && typeof policy.sideEffect === 'boolean',
     });
   }
 
@@ -140,6 +147,9 @@ export class ToolRegistry {
       }
       if (!tool.policy.category) {
         issues.push({ tool: tool.name, problem: 'missing policy.category' });
+      }
+      if (!tool.policyDeclared) {
+        issues.push({ tool: tool.name, problem: 'category and sideEffect must be explicitly declared' });
       }
       if (typeof tool.policy.sideEffect !== 'boolean') {
         issues.push({ tool: tool.name, problem: 'missing policy.sideEffect' });

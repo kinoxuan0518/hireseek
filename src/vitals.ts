@@ -20,8 +20,8 @@ import fs from 'fs';
 import path from 'path';
 import { config } from './config';
 import { db } from './db';
-import { loadActiveJob } from './skills/loader';
 import { SCHEDULE_TASKS, currentCron, nextRun, daemonAlive } from './schedule-manager';
+import { createRuntimeContext } from './agent-core/runtime-context';
 
 const ALIVE_PATH = path.join(path.dirname(config.db.path), 'alive.json');
 /** 超过这个时长没收到"报平安"，就认为它可能掉线了（心跳兜底是每分钟一次） */
@@ -128,8 +128,9 @@ export function collectVitals(): Vitals {
   const guarding = daemonAlive();          // 调度器写了 scheduler.pid 且进程存活
   const online = fresh || guarding;        // 有进程在报平安 / 守护进程在跑
 
-  const job = loadActiveJob();
-  const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+  const runtime = createRuntimeContext();
+  const job = runtime.activeJob;
+  const jobId = runtime.activeJobId;
   const goal = (job as any)?.daily_goal?.contact ?? 30;
   const today = db.prepare(
     `SELECT COUNT(*) AS n FROM candidates WHERE date(contacted_at) = date('now','localtime')`,

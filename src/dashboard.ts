@@ -7,9 +7,9 @@ import http from 'http';
 import { exec } from 'child_process';
 import { bus, pushIntervention } from './events';
 import { db } from './db';
-import { loadActiveJob } from './skills/loader';
 import { runChannel, runJob, scanInbox } from './orchestrator';
 import type { Channel } from './types';
+import { createRuntimeContext } from './agent-core/runtime-context';
 
 const PORT = 7788;
 
@@ -195,8 +195,7 @@ function router(req: http.IncomingMessage, res: http.ServerResponse): void {
 
   // GET /funnel
   if (req.method === 'GET' && url === '/funnel') {
-    const job   = loadActiveJob();
-    const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+    const jobId = createRuntimeContext().activeJobId;
     const stats = db.prepare(`
       SELECT status, COUNT(*) as count FROM candidates
       WHERE job_id = ? GROUP BY status ORDER BY count DESC
@@ -214,7 +213,7 @@ function router(req: http.IncomingMessage, res: http.ServerResponse): void {
       'Connection':    'keep-alive',
     });
 
-    const job = loadActiveJob();
+    const job = createRuntimeContext().activeJob;
     if (job) {
       res.write(`event: job\ndata: ${job.title}\n\n`);
     }

@@ -12,8 +12,19 @@ import { emitLog, popIntervention } from '../events';
 import { Page } from 'playwright';
 import { takeScreenshot, executeAction } from '../browser-runner';
 import { parseSkillSummary } from './interface';
-import type { LLMRunner } from './interface';
+import type { LLMRunner, RunSkillOptions } from './interface';
 import type { SkillResult } from '../types';
+import { repairToolMessageHistoryInPlace } from '../message-integrity';
+import {
+  createToolRegistry,
+  unknownToolResult,
+} from '../agent-core/tool-registry';
+import { recordRejectedToolCall, recordToolCall } from '../agent-core/trace';
+import {
+  computerActionHasSideEffect,
+  computerActionMode,
+  dryRunBlocksComputerAction,
+} from '../agent-core/computer-actions';
 
 const SCREENSHOT_PATH = '/tmp/hireseek-latest.jpg';
 
@@ -66,10 +77,17 @@ const COMPUTER_TOOL: OpenAI.ChatCompletionTool = {
           type: 'number',
           description: 'scroll 时的像素距离，默认 500',
         },
+        stage_id: {
+          type: 'string',
+          description: '可选：当前动作所属的协议阶段 id。',
+        },
       },
     },
   },
 };
+
+export const GENERIC_VISION_TOOL_REGISTRY = createToolRegistry([COMPUTER_TOOL]);
+const GENERIC_VISION_TOOLS = GENERIC_VISION_TOOL_REGISTRY.list().map(tool => tool.schema);
 
 // ── 注入给模型的操作说明（弥补非原生 computer-use 模型的训练差距）─────────
 const COMPUTER_USE_GUIDE = `
@@ -195,8 +213,10 @@ export class GenericVisionRunner implements LLMRunner {
     page: Page,
     systemPrompt: string,
     task: string,
-    onProgress?: (msg: string) => void
+    onProgress?: (msg: string) => void,
+    options: RunSkillOptions = {},
   ): Promise<SkillResult> {
+    const executionMode = options.executionMode ?? 'execute';
     const system = [COMPUTER_USE_GUIDE, systemPrompt].join('\n\n---\n\n');
 
     // 初始截图
@@ -213,7 +233,28 @@ export class GenericVisionRunner implements LLMRunner {
       },
     ];
 
-    const result: SkillResult = { contacted: 0, skipped: 0, candidates: [], summary: '' };
+    const result: SkillResult = { contacted: 0, skipped: 0, candidates: [], summary: '', trace: [] };
+    result.trace!.push({
+      seq: 1,
+      action: 'screenshot',
+      detail: 'initial screenshot',
+      ok: true,
+      toolName: 'computer',
+      sideEffect: false,
+      mode: executionMode === 'dry_run' ? 'dry_run' : 'read',
+      stageId: options.initialStageId,
+    });
+    recordToolCall({
+      runId: options.runId,
+      sessionId: options.sessionId,
+      toolName: 'computer',
+      input: { action: 'screenshot', source: 'initial' },
+      output: 'screenshot captured',
+      ok: true,
+      sideEffect: false,
+      mode: executionMode === 'dry_run' ? 'dry_run' : 'read',
+      stageId: options.initialStageId,
+    });
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       // 检查用户介入指令
@@ -225,10 +266,11 @@ export class GenericVisionRunner implements LLMRunner {
         messages.push({ role: 'user', content: msg });
       }
 
+      repairToolMessageHistoryInPlace(messages);
       const response = await this.client.chat.completions.create({
         model:    this.model,
         messages: pruneImages(messages, 2),
-        tools:    [COMPUTER_TOOL],
+        tools:    GENERIC_VISION_TOOLS,
         tool_choice: 'auto',
         max_tokens:  2048,
       });
@@ -266,17 +308,86 @@ export class GenericVisionRunner implements LLMRunner {
 
       // 处理工具调用（每次一个，串行执行）
       const toolResults: OpenAI.ChatCompletionToolMessageParam[] = [];
+      let latestImage: string | null = null;
 
       for (const toolCall of msg.tool_calls) {
-        if (toolCall.function.name !== 'computer') continue;
+        if (toolCall.function.name !== 'computer') {
+          const content = unknownToolResult(toolCall.function.name);
+          toolResults.push({ role: 'tool', tool_call_id: toolCall.id, content });
+          recordRejectedToolCall({
+            registry: GENERIC_VISION_TOOL_REGISTRY,
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: toolCall.function.name,
+            input: toolCall.function.arguments,
+            output: content,
+            error: `unknown tool: ${toolCall.function.name}`,
+          });
+          continue;
+        }
 
-        const input = JSON.parse(toolCall.function.arguments) as {
+        let input: {
           action: string;
           coordinate?: [number, number];
           text?: string;
           direction?: string;
           amount?: number;
+          stage_id?: string;
         };
+        try {
+          input = JSON.parse(toolCall.function.arguments || '{}');
+        } catch (err) {
+          const error = `computer 参数不是合法 JSON：${err instanceof Error ? err.message : String(err)}`;
+          toolResults.push({ role: 'tool', tool_call_id: toolCall.id, content: error });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'computer',
+            input: toolCall.function.arguments,
+            output: error,
+            ok: false,
+            error,
+            sideEffect: true,
+            mode: executionMode === 'dry_run' ? 'dry_run' : 'execute',
+          });
+          continue;
+        }
+
+        const sideEffect = computerActionHasSideEffect(input.action);
+        const mode = computerActionMode(input.action, executionMode);
+        const stageId = input.stage_id ?? options.initialStageId;
+
+        if (executionMode === 'dry_run' && dryRunBlocksComputerAction(input.action)) {
+          const blocked = `dry-run 预检模式禁止执行 ${input.action}，已阻止真实 computer 动作。`;
+          toolResults.push({ role: 'tool', tool_call_id: toolCall.id, content: blocked });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'computer',
+            input,
+            output: blocked,
+            ok: false,
+            error: blocked,
+            sideEffect,
+            mode,
+            stageId,
+          });
+          result.trace!.push({
+            seq: result.trace!.length + 1,
+            action: input.action,
+            detail: 'blocked by dry-run',
+            ok: false,
+            toolName: 'computer',
+            error: blocked,
+            sideEffect,
+            mode,
+            stageId,
+          });
+          continue;
+        }
 
         const actionLog = `[${turn + 1}] ${input.action}${
           input.coordinate ? ` (${input.coordinate[0]}, ${input.coordinate[1]})` : ''
@@ -284,44 +395,74 @@ export class GenericVisionRunner implements LLMRunner {
         onProgress?.(actionLog);
         emitLog(actionLog);
 
-        let imgData: string;
+        let imgData = '';
+        let stepOk = true;
+        let stepError: string | null = null;
 
-        if (input.action === 'screenshot') {
-          imgData = await takeScreenshot(page);
-        } else {
-          try {
+        try {
+          if (input.action === 'screenshot') {
+            imgData = await takeScreenshot(page);
+          } else {
             await executeAction(page, input);
-          } catch (err: any) {
-            // page 被关闭时重新获取
-            if (err.message?.includes('closed') || err.message?.includes('Target')) {
-              const { getPage } = await import('../browser-runner');
-              page = await getPage();
-            } else {
-              throw err;
-            }
+            imgData = await takeScreenshot(page);
           }
-          imgData = await takeScreenshot(page);
+        } catch (err) {
+          stepOk = false;
+          stepError = err instanceof Error ? err.message : String(err);
+          if (stepError.includes('closed') || stepError.includes('Target')) {
+            const { getPage } = await import('../browser-runner');
+            page = await getPage();
+          }
+          imgData = await takeScreenshot(page).catch(() => '');
         }
 
         // 保存最新截图供用户查看
-        saveScreenshot(imgData);
+        if (imgData) {
+          saveScreenshot(imgData);
+          latestImage = imgData;
+        }
         if (turn === 0) {
           onProgress?.(`📸 实时截图：${SCREENSHOT_PATH}`);
         }
 
         // 把截图作为工具结果回传（text 形式嵌入 base64，兼容性最好）
+        const content = imgData
+          ? JSON.stringify({ type: 'image', url: `data:image/jpeg;base64,${imgData}`, ok: stepOk, error: stepError })
+          : JSON.stringify({ ok: false, error: stepError ?? 'screenshot unavailable' });
         toolResults.push({
           role:         'tool',
           tool_call_id: toolCall.id,
-          content:      JSON.stringify({
-            type:  'image',
-            url:   `data:image/jpeg;base64,${imgData}`,
-          }),
+          content,
+        });
+        recordToolCall({
+          runId: options.runId,
+          sessionId: options.sessionId,
+          toolCallId: toolCall.id,
+          toolName: 'computer',
+          input,
+          output: stepOk ? 'screenshot captured' : stepError,
+          ok: stepOk,
+          error: stepError,
+          sideEffect,
+          mode,
+          stageId,
+        });
+        result.trace!.push({
+          seq: result.trace!.length + 1,
+          action: input.action,
+          detail: input.text?.slice(0, 60),
+          ok: stepOk,
+          toolName: 'computer',
+          error: stepError ?? undefined,
+          sideEffect,
+          mode,
+          stageId,
         });
       }
 
       // 把工具结果追加；同时附一条 user 消息告知模型继续
       messages.push(...toolResults);
+      const visibleImage = latestImage ?? await takeScreenshot(page);
       messages.push({
         role:    'user',
         content: [
@@ -329,9 +470,7 @@ export class GenericVisionRunner implements LLMRunner {
           // 重新截图一次，确保模型能看到最新状态
           {
             type:      'image_url',
-            image_url: { url: `data:image/jpeg;base64,${toolResults.length > 0
-              ? JSON.parse((toolResults[toolResults.length - 1].content as string)).url.split(',')[1]
-              : await takeScreenshot(page)}` },
+            image_url: { url: `data:image/jpeg;base64,${visibleImage}` },
           },
         ],
       });

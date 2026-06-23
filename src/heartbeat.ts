@@ -18,7 +18,7 @@ import path from 'path';
 import OpenAI from 'openai';
 import { config } from './config';
 import { db } from './db';
-import { loadActiveJob } from './skills/loader';
+import { createRuntimeContext } from './agent-core/runtime-context';
 
 // ── 守护栏参数 ───────────────────────────────────────────────────────
 const WORK_HOUR_START = 9;
@@ -56,8 +56,9 @@ function writeState(content: string): void {
 // ── 数据信号收集（原 proactiveCheck 规则并入，作为决策证据） ─────────────
 
 function gatherSignals(): string {
-  const job = loadActiveJob();
-  const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+  const runtime = createRuntimeContext();
+  const job = runtime.activeJob;
+  const jobId = runtime.activeJobId;
   const signals: string[] = [];
 
   // 方向盘：合格供给 vs 过面目标（不是触达数）——心跳的首要决策依据
@@ -220,8 +221,9 @@ function guard(d: HeartbeatDecision): string | null {
       return `无效渠道：${d.detail}`;
     }
     // 目标是"合格供给"而非触达数：合格够了就停（追求过面，不凑数）
-    const job = loadActiveJob();
-    const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+    const runtime = createRuntimeContext();
+    const job = runtime.activeJob;
+    const jobId = runtime.activeJobId;
     const qualityTarget = job?.daily_goal?.quality ?? 5;
     try {
       const { supplyBoard } = require('./feedback') as typeof import('./feedback');
@@ -345,7 +347,7 @@ async function execute(d: HeartbeatDecision): Promise<string> {
     case 'evolve_dry': {
       const { evolve, learn } = await import('./evolution');
       // 判断失效（校准没区分度）时，优先跑"合适"定义重校（学习闭环），否则跑常规复盘
-      const jobId = (() => { const j = loadActiveJob(); return j ? j.title.replace(/\s+/g, '_') : 'default'; })();
+      const jobId = createRuntimeContext().activeJobId;
       let calBroken = false;
       try {
         const { calibrationReport } = await import('./feedback');

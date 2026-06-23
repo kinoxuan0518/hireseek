@@ -19,8 +19,12 @@ import type { SkillResult } from '../types';
 import { repairToolMessageHistoryInPlace } from '../message-integrity';
 import type { BrowserAction, BrowserTarget, RiskGuard } from '../browser-session';
 import { isDomBrowserSession } from '../browser-session';
-import { recordToolCall } from '../agent-core/trace';
-import type { ToolExecutionMode } from '../agent-core/tool-registry';
+import { recordRejectedToolCall, recordToolCall } from '../agent-core/trace';
+import {
+  createToolRegistry,
+  unknownToolResult,
+  type ToolExecutionMode,
+} from '../agent-core/tool-registry';
 
 export type { BrowserAction, RiskGuard } from '../browser-session';
 
@@ -141,6 +145,12 @@ const RECORD_CONTACTED_TOOL: OpenAI.ChatCompletionTool = {
     },
   },
 };
+
+export const DOM_RUNNER_TOOL_REGISTRY = createToolRegistry([
+  BROWSER_TOOL,
+  RECORD_CONTACTED_TOOL,
+]);
+const DOM_RUNNER_TOOLS = DOM_RUNNER_TOOL_REGISTRY.list().map(tool => tool.schema);
 
 const DOM_GUIDE = `
 ## 浏览器操作说明（文本模式）
@@ -434,7 +444,7 @@ export class DomRunner implements LLMRunner {
       const response = await this.client.chat.completions.create({
         model: this.model,
         messages: pruneSnapshots(messages),
-        tools: [BROWSER_TOOL, RECORD_CONTACTED_TOOL],
+        tools: DOM_RUNNER_TOOLS,
         tool_choice: 'auto',
         max_tokens: 2048,
       });
@@ -559,22 +569,16 @@ export class DomRunner implements LLMRunner {
         }
 
         if (toolCall.function.name !== 'browser') {
-          const content = JSON.stringify({
-            ok: false,
-            error: {
-              code: 'unknown_tool',
-              message: `未知工具：${toolCall.function.name}`,
-            },
-          });
+          const content = unknownToolResult(toolCall.function.name);
           messages.push({ role: 'tool', tool_call_id: toolCall.id, content });
-          recordToolCall({
+          recordRejectedToolCall({
+            registry: DOM_RUNNER_TOOL_REGISTRY,
             runId: options.runId,
             sessionId: options.sessionId,
             toolCallId: toolCall.id,
             toolName: toolCall.function.name,
             input: toolCall.function.arguments,
             output: content,
-            ok: false,
             error: `unknown tool: ${toolCall.function.name}`,
           });
           continue;
@@ -582,10 +586,23 @@ export class DomRunner implements LLMRunner {
 
         // 风控硬终止后拒绝执行任何动作，只允许模型输出总结
         if (hardStopped) {
+          const content = '[风控硬终止] 已检测到每日上限弹窗，禁止继续任何操作。请立即停止调用工具，输出文字总结（含 触达人数/跳过人数）。';
           messages.push({
             role: 'tool',
             tool_call_id: toolCall.id,
-            content: '[风控硬终止] 已检测到每日上限弹窗，禁止继续任何操作。请立即停止调用工具，输出文字总结（含 触达人数/跳过人数）。',
+            content,
+          });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'browser',
+            input: toolCall.function.arguments,
+            output: content,
+            ok: false,
+            error: content,
+            sideEffect: true,
+            mode: executionMode === 'dry_run' ? 'dry_run' : 'execute',
           });
           continue;
         }

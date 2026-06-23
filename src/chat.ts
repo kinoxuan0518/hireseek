@@ -11,7 +11,7 @@ import OpenAI from 'openai';
 import chalk from 'chalk';
 import yaml from 'js-yaml';
 import { config } from './config';
-import { loadWorkspaceFile, loadActiveJob, jobToPrompt } from './skills/loader';
+import { loadWorkspaceFile, jobToPrompt } from './skills/loader';
 import { buildMemoryContext, buildConversationMemory } from './memory';
 import { candidateOps, conversationOps, db } from './db';
 import { runChannel, runJob, scanInbox } from './orchestrator';
@@ -1444,8 +1444,7 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
     }
 
     case 'get_funnel': {
-      const job   = loadActiveJob();
-      const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+      const jobId = createRuntimeContext().activeJobId;
       const stats = (db.prepare(`
         SELECT status, COUNT(*) as count FROM candidates
         WHERE job_id = ? GROUP BY status ORDER BY count DESC
@@ -2168,13 +2167,14 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
 // ── 构建系统提示 ─────────────────────────────────────────
 export function buildSystemPrompt(): string {
   const soul     = loadWorkspaceFile('SOUL.md');
-  const job      = loadActiveJob();
+  const runtime  = createRuntimeContext();
+  const job      = runtime.activeJob;
   const jobCtx   = job ? jobToPrompt(job) : '';
   const capabilities = buildRecruitingCapabilityContext({
     includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
   });
-  const memory   = job ? buildMemoryContext('boss', job.title.replace(/\s+/g, '_')) : '';
-  const convMem  = job ? buildConversationMemory(job.title.replace(/\s+/g, '_')) : '';
+  const memory   = job ? buildMemoryContext('boss', runtime.activeJobId) : '';
+  const convMem  = job ? buildConversationMemory(runtime.activeJobId) : '';
 
   // Auto Memory - 跨会话记忆
   let autoMemory = '';
@@ -2259,8 +2259,7 @@ async function saveConversationMemory(
   const userMessages = messages.filter(m => m.role === 'user');
   if (userMessages.length === 0) return;
 
-  const job   = loadActiveJob();
-  const jobId = job ? job.title.replace(/\s+/g, '_') : 'default';
+  const jobId = createRuntimeContext().activeJobId;
 
   try {
     // 提取最后 6 轮对话原文（user + assistant 交替）
@@ -2521,7 +2520,7 @@ export async function startChat(): Promise<void> {
   // 输入行靠近终端底部时，浮动菜单会触发滚屏，旧菜单内容无法稳定清除。
 
   // ── 极简启动（CC 风格：安静，信息在需要时出现）──────────────────────
-  const job = loadActiveJob();
+  const job = createRuntimeContext().activeJob;
   console.log('');
   console.log(
     `${chalk.cyan.bold('🔱 HireSeek')} ${chalk.gray(`${model} · ${job?.title ?? '未配置职位'}`)}`,

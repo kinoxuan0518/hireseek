@@ -13,6 +13,27 @@ describe('agent core lower layer', () => {
     await import('../src/agent-core/store');
   });
 
+  it('keeps active-job file reads behind RuntimeContext', () => {
+    const srcRoot = path.resolve(process.cwd(), 'src');
+    const allowed = new Set([
+      path.join(srcRoot, 'skills', 'loader.ts'),
+      path.join(srcRoot, 'agent-core', 'runtime-context.ts'),
+    ]);
+    const violations: string[] = [];
+    const visit = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const absolute = path.join(dir, entry.name);
+        if (entry.isDirectory()) visit(absolute);
+        if (!entry.isFile() || !entry.name.endsWith('.ts') || allowed.has(absolute)) continue;
+        if (/\bloadActiveJob\s*\(/.test(fs.readFileSync(absolute, 'utf8'))) {
+          violations.push(path.relative(srcRoot, absolute));
+        }
+      }
+    };
+    visit(srcRoot);
+    expect(violations).toEqual([]);
+  });
+
   it('registers tools with schemas and side-effect policy', async () => {
     const { createToolRegistry } = await import('../src/agent-core/tool-registry');
     const tools: OpenAI.ChatCompletionTool[] = [
@@ -38,6 +59,42 @@ describe('agent core lower layer', () => {
     expect(registry.validate()).toEqual([]);
     expect(registry.get('browser_act')?.policy.sideEffect).toBe(true);
     expect(registry.get('read_file')?.policy.sideEffect).toBe(false);
+
+    const unclassified = createToolRegistry([{
+      type: 'function',
+      function: {
+        name: 'unclassified_tool',
+        description: 'missing explicit policy',
+        parameters: { type: 'object', properties: {} },
+      },
+    }]);
+    expect(unclassified.validate()).toEqual([
+      expect.objectContaining({
+        tool: 'unclassified_tool',
+        problem: 'category and sideEffect must be explicitly declared',
+      }),
+    ]);
+  });
+
+  it('registers runner tools and blocks computer side effects in dry-run', async () => {
+    const { DOM_RUNNER_TOOL_REGISTRY } = await import('../src/runners/dom-runner');
+    const { GENERIC_VISION_TOOL_REGISTRY } = await import('../src/runners/generic-vision');
+    const {
+      computerActionHasSideEffect,
+      computerActionMode,
+      dryRunBlocksComputerAction,
+    } = await import('../src/agent-core/computer-actions');
+
+    expect(DOM_RUNNER_TOOL_REGISTRY.validate()).toEqual([]);
+    expect(DOM_RUNNER_TOOL_REGISTRY.get('browser')?.policy.supportsDryRun).toBe(true);
+    expect(DOM_RUNNER_TOOL_REGISTRY.get('record_contacted')?.policy.sideEffect).toBe(false);
+    expect(GENERIC_VISION_TOOL_REGISTRY.validate()).toEqual([]);
+    expect(GENERIC_VISION_TOOL_REGISTRY.get('computer')?.policy.sideEffect).toBe(true);
+    expect(computerActionHasSideEffect('left_click')).toBe(true);
+    expect(computerActionHasSideEffect('screenshot')).toBe(false);
+    expect(dryRunBlocksComputerAction('type')).toBe(true);
+    expect(dryRunBlocksComputerAction('scroll')).toBe(false);
+    expect(computerActionMode('left_click', 'dry_run')).toBe('dry_run');
   });
 
   it('returns structured unknown-tool errors without throwing', async () => {
@@ -578,5 +635,6 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Recruiting capabilities');
     expect(text).toContain('Live BOSS run');
     expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
+    expect(report.checks.some(c => c.name === 'Runner tool registry' && c.status === 'pass')).toBe(true);
   });
 });

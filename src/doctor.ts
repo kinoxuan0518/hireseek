@@ -6,6 +6,8 @@ import type { ToolRegistry } from './agent-core/tool-registry';
 import { listPlatformProtocols } from './platform-protocols';
 import { listRecruitingCapabilities } from './capabilities';
 import { listClaudeSkills } from './skills/claude-skills';
+import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
+import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 export type DoctorLayer = 'lower' | 'middle' | 'upper' | 'external';
@@ -151,6 +153,22 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   } else {
     checks.push(check('lower', 'Tool registry', 'warn', 'registry not supplied; run from CLI/chat to verify tools'));
   }
+
+  const runnerRegistries = [DOM_RUNNER_TOOL_REGISTRY, GENERIC_VISION_TOOL_REGISTRY];
+  const runnerIssues = runnerRegistries.flatMap(runnerRegistry => runnerRegistry.validate());
+  const runnerTools = new Set(runnerRegistries.flatMap(runnerRegistry =>
+    runnerRegistry.list().map(tool => tool.name),
+  ));
+  checks.push(check(
+    'lower',
+    'Runner tool registry',
+    runnerIssues.length === 0 && runnerTools.has('browser') && runnerTools.has('computer')
+      ? 'pass'
+      : 'fail',
+    runnerIssues.length === 0
+      ? `registered runner tools=${[...runnerTools].sort().join(', ')}`
+      : `validation issues=${runnerIssues.map(issue => `${issue.tool}:${issue.problem}`).join(', ')}`,
+  ));
 
   const agentTables = [
     'agent_tool_calls',
