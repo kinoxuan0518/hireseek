@@ -353,6 +353,8 @@ const BOSS_STAGE_PREREQUISITES: Record<string, string[]> = {
 const PREPARE_SIDE_EFFECT_STAGES = new Set(['job-positioning', 'prefilter']);
 const BROWSER_SIDE_EFFECT_ACTIONS = new Set<BrowserAction['action']>(['click', 'type', 'press', 'goto', 'back']);
 const BOSS_CONTACT_LABEL = /打招呼|立即沟通|继续沟通|和\s*Ta\s*聊聊|聊一聊|发送|消息|聊天|沟通记录|新招呼|回复|送达|已读|未读|class="[^"]*(?:chat|message|editor|push-text|text-content|geek-item|gray)/i;
+const BOSS_GREETING_LABEL = /打招呼|立即沟通|和\s*Ta\s*聊聊|聊一聊/i;
+const BOSS_ALREADY_CONTACTED_LABEL = /继续沟通|已沟通/i;
 const BOSS_PREPARE_JOB_CONTROL = /职位管理|推荐牛人|职位下拉|切换职位|招聘职位|我的职位|职位列表|class="[^"]*dropmenu-label/i;
 const BOSS_PREPARE_FILTER_CONTROL = /筛选|工作经验|经验|学历|院校|学校|关键词|活跃|未看|近\s*14\s*天|1\s*[-~到]\s*3\s*年|3\s*[-~到]\s*5\s*年|本科|硕士|博士|985|211|大模型|Agent|应用|确定|确认|取消|清除|重置|展开|收起|更多选项/i;
 const BOSS_PREPARE_NAV_STRUCTURE = /<(?:button|a)\b|class="[^"]*(?:menu|nav|job|position|recommend|sidebar|dropdown|dropmenu|select)/i;
@@ -465,12 +467,35 @@ export const bossBrowserActionPolicy: BrowserActionPolicy = (
     }
   }
 
+  if (context.executionMode === 'execute' && action.action === 'click' && context.actionLabel) {
+    if (BOSS_ALREADY_CONTACTED_LABEL.test(context.actionLabel)) {
+      return { allowed: false, reason: '该候选人已经沟通过，禁止重复触达。' };
+    }
+    if (BOSS_GREETING_LABEL.test(context.actionLabel)) {
+      if (!context.pendingContactName) {
+        return { allowed: false, reason: '触达门禁：点击打招呼前必须先调用 prepare_contact 建立候选人证据检查点。' };
+      }
+      if (context.pendingContactAwaitingRecord) {
+        return { allowed: false, reason: '触达门禁：上一位候选人已点击沟通但尚未 record_contacted。' };
+      }
+      if (!context.actionLabel.includes(context.pendingContactName)) {
+        return {
+          allowed: false,
+          reason: `触达门禁：当前按钮上下文与检查点候选人“${context.pendingContactName}”不一致。`,
+        };
+      }
+    }
+  }
+
   return { allowed: true };
 };
 
 const BOSS_FILTER_SUBMIT_LABEL = /(?:确定|应用|确认)(?!取消)/i;
 
 export const bossRunCompletionPolicy: RunCompletionPolicy = context => {
+  if (context.executionMode === 'execute' && context.pendingContactAwaitingRecord) {
+    return { allowed: false, reason: `候选人 ${context.pendingContactName ?? ''} 已点击沟通但尚未 record_contacted。` };
+  }
   if (context.executionMode !== 'prepare') return { allowed: true };
 
   const successful = context.trace.filter(step => step.ok);

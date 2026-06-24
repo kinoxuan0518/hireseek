@@ -141,6 +141,35 @@ const RECORD_CONTACTED_TOOL: OpenAI.ChatCompletionTool = {
         greeting_sent:{ type: 'boolean', description: '是否真的发出了打招呼（false=看了但跳过）' },
         greeting_text:{ type: 'string', description: '实际发出的打招呼文案' },
         profile_url:  { type: 'string', description: '候选人详情页 URL（如能取到）' },
+        contact_token:{ type: 'string', description: 'prepare_contact 返回的 token；greeting_sent=true 时必填且必须一致' },
+      },
+    },
+  },
+};
+
+const PREPARE_CONTACT_TOOL: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'prepare_contact',
+    description:
+      '在点击“打招呼”之前建立候选人证据检查点。只有本工具返回 contact_token 后，代码才允许点击该候选人的沟通按钮。' +
+      '每次只准备一个候选人；点击后必须立即用同一 token 调用 record_contacted。',
+    parameters: {
+      type: 'object',
+      required: ['name', 'evidence', 'personalization_evidence', 'message_intent', 'greeting_text', 'fit_score'],
+      properties: {
+        name: { type: 'string', description: '当前候选人姓名，必须来自页面可见证据' },
+        company: { type: 'string', description: '当前/最近公司' },
+        title: { type: 'string', description: '当前/最近职位' },
+        location: { type: 'string', description: '所在城市/地区' },
+        evidence: { type: 'string', description: '联系依据，必须引用页面可见的具体经历或技能' },
+        personalization_evidence: { type: 'string', description: '招呼语实际使用的候选人具体信息点' },
+        message_intent: { type: 'string', description: '希望候选人回应的理由' },
+        greeting_text: { type: 'string', description: '准备发送或平台实际采用的招呼文案' },
+        fit_score: { type: 'number', description: '匹配分 0-100' },
+        risk_flags: { type: 'array', items: { type: 'string' } },
+        fit_tags: { type: 'array', items: { type: 'string' } },
+        profile_url: { type: 'string' },
       },
     },
   },
@@ -148,6 +177,7 @@ const RECORD_CONTACTED_TOOL: OpenAI.ChatCompletionTool = {
 
 export const DOM_RUNNER_TOOL_REGISTRY = createToolRegistry([
   BROWSER_TOOL,
+  PREPARE_CONTACT_TOOL,
   RECORD_CONTACTED_TOOL,
 ]);
 const DOM_RUNNER_TOOLS = DOM_RUNNER_TOOL_REGISTRY.list().map(tool => tool.schema);
@@ -168,7 +198,7 @@ const DOM_GUIDE = `
 5. 列表页内容不全时用 scroll(direction="down") 加载更多
 6. 页面跳转后旧 ref 全部失效，必须依据新快照操作
 7. 如果任务提示包含 stage manifest，browser 调用应带上当前阶段的 stage_id，方便流程审计。
-8. **每联系完一个候选人，立刻调用 record_contacted 登记**（姓名/公司/职位/自评分/是否已打招呼/招呼文案等）。已打招呼时必须包含：evidence、personalization_evidence、message_intent、greeting_text。这是产出的唯一权威来源——别攒到最后才在总结里写名单。
+8. **触达必须走两阶段握手**：先调用 prepare_contact 提交候选人证据并拿到 contact_token；再点击同一候选人的打招呼按钮；点击成功后立刻用同一 token 调用 record_contacted。禁止先点后补记录。
 9. **任务完成后**：直接回复文字总结，不再调用工具
 
 输出总结时必须包含（注意：结构化名单已由 record_contacted 逐条登记，总结里的名单只是给人看的摘要）：
@@ -262,6 +292,17 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
         '[onclick]',
       ].join(',');
 
+      const elementContext = (el: Element, ownText: string): string => {
+        let parent = el.parentElement;
+        for (let depth = 0; parent && depth < 6; depth++, parent = parent.parentElement) {
+          const text = (parent.textContent || '').trim().replace(/\s+/g, ' ');
+          if (text && text !== ownText && text.length <= 360) {
+            return text.slice(0, 220).replace(/"/g, "'");
+          }
+        }
+        return '';
+      };
+
       document.querySelectorAll('[data-hs-ref]').forEach(el => el.removeAttribute('data-hs-ref'));
       const elements = Array.from(document.querySelectorAll('*')).filter(el => {
         if (!isVisible(el)) return false;
@@ -303,6 +344,8 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
           const value = el.getAttribute(state);
           if (value != null) parts.push(`${state}="${value}"`);
         }
+        const context = elementContext(el, text);
+        if (context) parts.push(`context="${context}"`);
 
         lines.push(parts.join(' '));
       }
@@ -482,6 +525,14 @@ export class DomRunner implements LLMRunner {
     ];
 
     const guard: RiskGuard = { lastGreetingAt: 0 };
+    type PendingContact = {
+      token: string;
+      data: Record<string, unknown>;
+      name: string;
+      greetingClicked: boolean;
+    };
+    let pendingContact: PendingContact | null = null;
+    let contactSequence = 0;
     let hardStopped = false;
     let prepareSideEffectCount = 0;
     const prepareActionAttempts = new Map<string, number>();
@@ -526,6 +577,8 @@ export class DomRunner implements LLMRunner {
           trace: result.trace ?? [],
           pageSnapshot: currentSnapshot,
           targetJobTitle: options.targetJobTitle,
+          pendingContactName: pendingContact?.name,
+          pendingContactAwaitingRecord: pendingContact?.greetingClicked ?? false,
         });
         if (completionDecision && !completionDecision.allowed) {
           const reason = completionDecision.reason ?? '当前运行状态尚未满足完成条件。';
@@ -578,6 +631,79 @@ export class DomRunner implements LLMRunner {
           continue;
         }
 
+        if (toolCall.function.name === 'prepare_contact') {
+          let ok = true;
+          let error: string | null = null;
+          let output: string;
+          let parsed: Record<string, unknown> = {};
+          const requiredStages = ['prefilter', 'dom-probe', 'candidate-screen'];
+          const observedStages = new Set(successfulStageIds(result.trace));
+          const missingStages = requiredStages.filter(stageId => !observedStages.has(stageId));
+          try {
+            parsed = JSON.parse(toolCall.function.arguments || '{}') as Record<string, unknown>;
+          } catch (err) {
+            ok = false;
+            error = `prepare_contact 参数不是合法 JSON：${err instanceof Error ? err.message : String(err)}`;
+          }
+          const requiredFields = ['name', 'evidence', 'personalization_evidence', 'message_intent', 'greeting_text', 'fit_score'];
+          const missingFields = requiredFields.filter(key => !String(parsed[key] ?? '').trim());
+          if (ok && executionMode !== 'execute') {
+            ok = false;
+            error = `当前是 ${executionMode} 模式，禁止建立真实触达检查点。`;
+          } else if (ok && missingStages.length > 0) {
+            ok = false;
+            error = `prepare_contact 缺少协议阶段证据：${missingStages.join(', ')}。`;
+          } else if (ok && missingFields.length > 0) {
+            ok = false;
+            error = `prepare_contact 缺少字段：${missingFields.join(', ')}。`;
+          } else if (ok && pendingContact?.greetingClicked) {
+            ok = false;
+            error = `上一位候选人 ${pendingContact.name} 已点击沟通但尚未 record_contacted，禁止准备下一位。`;
+          }
+
+          if (ok) {
+            const name = String(parsed.name);
+            const token = `contact-${options.runId ?? 'session'}-${++contactSequence}`;
+            pendingContact = { token, data: parsed, name, greetingClicked: false };
+            output = JSON.stringify({
+              ok: true,
+              contact_token: token,
+              instruction: `只允许点击快照上下文中包含“${name}”的打招呼按钮；点击后立即 record_contacted。`,
+            });
+          } else {
+            output = JSON.stringify({ ok: false, error: { code: 'contact_checkpoint_rejected', message: error } });
+          }
+          messages.push({ role: 'tool', tool_call_id: toolCall.id, content: output });
+          result.trace!.push({
+            seq: result.trace!.length + 1,
+            action: 'prepare_contact',
+            target: parsed.name ? String(parsed.name) : undefined,
+            ok,
+            at: new Date().toISOString(),
+            toolName: 'prepare_contact',
+            inputSummary: toolCall.function.arguments,
+            outputSummary: output,
+            error: error ?? undefined,
+            sideEffect: false,
+            mode: executionMode,
+            stageId: 'candidate-screen',
+          });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'prepare_contact',
+            input: toolCall.function.arguments,
+            output,
+            ok,
+            error,
+            sideEffect: false,
+            mode: executionMode,
+            stageId: 'candidate-screen',
+          });
+          continue;
+        }
+
         // 结构化产出：逐条登记已触达候选人（契约 contacted-candidate.v1）
         if (toolCall.function.name === 'record_contacted') {
           let toolContent = '已登记。继续下一个候选人。';
@@ -605,29 +731,45 @@ export class DomRunner implements LLMRunner {
               if (missing.length > 0) {
                 recordOk = false;
                 toolContent = `登记失败：已打招呼候选人缺少 ${missing.join(', ')}。请重新调用 record_contacted 补齐这些字段。`;
+              } else if (!pendingContact) {
+                recordOk = false;
+                toolContent = '登记失败：没有有效的 prepare_contact 检查点。';
+              } else if (!pendingContact.greetingClicked) {
+                recordOk = false;
+                toolContent = `登记失败：候选人 ${pendingContact.name} 的打招呼按钮尚未成功点击。`;
+              } else if (String(a.contact_token ?? '') !== pendingContact.token) {
+                recordOk = false;
+                toolContent = '登记失败：contact_token 与当前候选人检查点不一致。';
+              } else if (String(a.name) !== pendingContact.name) {
+                recordOk = false;
+                toolContent = `登记失败：候选人姓名与检查点不一致（应为 ${pendingContact.name}）。`;
               }
             }
 
             if (recordOk) {
-              const riskFlags = Array.isArray(a.risk_flags) ? a.risk_flags.map(String).filter(Boolean) : undefined;
-              const fitTags = Array.isArray(a.fit_tags) ? a.fit_tags.map(String).filter(Boolean) : undefined;
-              const rawScore = Number(a.fit_score);
+              const canonical = a.greeting_sent === false || !pendingContact
+                ? a
+                : { ...a, ...pendingContact.data, name: pendingContact.name, greeting_sent: true };
+              const riskFlags = Array.isArray(canonical.risk_flags) ? canonical.risk_flags.map(String).filter(Boolean) : undefined;
+              const fitTags = Array.isArray(canonical.fit_tags) ? canonical.fit_tags.map(String).filter(Boolean) : undefined;
+              const rawScore = Number(canonical.fit_score);
               (result.contactedList ??= []).push({
-                name: String(a.name),
-                company: a.company ? String(a.company) : undefined,
-                title: a.title ? String(a.title) : undefined,
-                location: a.location ? String(a.location) : undefined,
-                evidence: a.evidence ? String(a.evidence) : undefined,
-                personalizationEvidence: a.personalization_evidence ? String(a.personalization_evidence) : undefined,
-                messageIntent: a.message_intent ? String(a.message_intent) : undefined,
+                name: String(canonical.name),
+                company: canonical.company ? String(canonical.company) : undefined,
+                title: canonical.title ? String(canonical.title) : undefined,
+                location: canonical.location ? String(canonical.location) : undefined,
+                evidence: canonical.evidence ? String(canonical.evidence) : undefined,
+                personalizationEvidence: canonical.personalization_evidence ? String(canonical.personalization_evidence) : undefined,
+                messageIntent: canonical.message_intent ? String(canonical.message_intent) : undefined,
                 riskFlags,
                 fitTags,
                 score: Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : undefined,
-                greetingSent: a.greeting_sent !== false,
-                greetingText: a.greeting_text ? String(a.greeting_text) : undefined,
-                profileUrl: a.profile_url ? String(a.profile_url) : undefined,
+                greetingSent: canonical.greeting_sent !== false,
+                greetingText: canonical.greeting_text ? String(canonical.greeting_text) : undefined,
+                profileUrl: canonical.profile_url ? String(canonical.profile_url) : undefined,
                 // sourceChannel 由 orchestrator 的 channel 参数权威决定，runner 不臆测
               });
+              if (canonical.greeting_sent !== false) pendingContact = null;
             }
           } catch (err) {
             recordOk = false;
@@ -818,6 +960,8 @@ export class DomRunner implements LLMRunner {
           actionLabel,
           pageSnapshot: currentSnapshot,
           targetJobTitle: options.targetJobTitle,
+          pendingContactName: pendingContact?.name,
+          pendingContactAwaitingRecord: pendingContact?.greetingClicked ?? false,
         });
         if (policyDecision && !policyDecision.allowed) {
           const blocked = policyDecision.reason ?? `当前平台协议禁止执行 ${input.action}`;
@@ -921,6 +1065,16 @@ export class DomRunner implements LLMRunner {
           mode: browserActionMode(input, executionMode),
           stageId,
         });
+        if (
+          stepOk &&
+          executionMode === 'execute' &&
+          input.action === 'click' &&
+          !!actionLabel &&
+          GREETING_PATTERN.test(actionLabel) &&
+          pendingContact
+        ) {
+          pendingContact.greetingClicked = true;
+        }
         currentSnapshot = snapshot;
 
         // 风控检测：基于页面快照文本（代码层判定，不依赖模型识别）

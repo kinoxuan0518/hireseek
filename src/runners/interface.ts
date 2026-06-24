@@ -15,6 +15,8 @@ export interface BrowserActionPolicyContext {
   actionLabel?: string;
   pageSnapshot?: string;
   targetJobTitle?: string;
+  pendingContactName?: string;
+  pendingContactAwaitingRecord?: boolean;
 }
 
 export type BrowserActionPolicy = (
@@ -27,6 +29,8 @@ export interface RunCompletionPolicyContext {
   trace: TraceStep[];
   pageSnapshot: string;
   targetJobTitle?: string;
+  pendingContactName?: string;
+  pendingContactAwaitingRecord?: boolean;
 }
 
 export type RunCompletionPolicy = (

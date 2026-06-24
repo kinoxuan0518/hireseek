@@ -13,6 +13,15 @@ export interface ToolCallRequest {
   toolName: string;
   args: any;
   description?: string;
+  /** tool-registry 的策略：该工具是否需要审批。为 true 时与旧危险列表一样进入闸门
+   *  （已保存规则 / 无头拒绝 / 交互询问）。让 registry 分类真正驱动 gate，而非只供 doctor 计数。 */
+  requiresApproval?: boolean;
+  /** 调用方【显式】指定的执行模式（context.mode，未设则 undefined）。
+   *  注意：只认显式值——不能用"默认解析出的 read"来免审批，否则 sideEffect=false 但
+   *  requiresApproval=true 的工具（如 run_shell）会因默认 read 而被错误放行。 */
+  explicitMode?: string;
+  /** tool-registry 声明该工具支持 dry-run（真 dry-run 时不产生副作用）。 */
+  supportsDryRun?: boolean;
 }
 
 export interface PermissionRule {
@@ -254,8 +263,16 @@ export function isHeadless(): boolean {
 export async function checkPermission(request: ToolCallRequest): Promise<boolean> {
   const { toolName, args } = request;
 
-  // 1. 检查是否是危险工具
-  if (!isDangerousTool(toolName, args)) {
+  // 0. 显式 dry-run / prepare 预览 + 工具声明支持 dry-run → 本次不产生真实副作用，免审批。
+  //    只认【显式】mode（调用方主动设的），不认默认解析出的 read——否则 run_shell 这种
+  //    sideEffect=false 但 requiresApproval=true 的工具会被默认 read 错误放行。
+  if ((request.explicitMode === 'dry_run' || request.explicitMode === 'prepare') && request.supportsDryRun) {
+    return true;
+  }
+
+  // 1. 闸门触发 = registry 标了需审批（广覆盖）  ||  旧危险列表/危险参数（含参数级，如 git_push --force）
+  //    两套统一成一个真相源：registry 分类即强制，不再只是 doctor 的计数。
+  if (!request.requiresApproval && !isDangerousTool(toolName, args)) {
     return true; // 安全工具，自动批准
   }
 

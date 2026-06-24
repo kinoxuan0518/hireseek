@@ -251,6 +251,45 @@ describe('boss platform protocol middle layer', () => {
     expect(accepted.allowed).toBe(true);
   });
 
+  it('requires a matching contact checkpoint before greeting and blocks duplicates', () => {
+    const action = { action: 'click', ref: 8, stage_id: 'single-contact' } as const;
+    const observedStageIds = ['session-precheck', 'job-positioning', 'prefilter', 'dom-probe', 'candidate-screen'];
+    const label = '[ref=8] <button> 打招呼 class="btn" context="测试候选人 2年 Agent 平台经验"';
+
+    const withoutCheckpoint = bossBrowserActionPolicy(action, {
+      executionMode: 'execute', observedStageIds, actionLabel: label,
+    });
+    const wrongCandidate = bossBrowserActionPolicy(action, {
+      executionMode: 'execute', observedStageIds, actionLabel: label, pendingContactName: '另一位候选人',
+    });
+    const allowed = bossBrowserActionPolicy(action, {
+      executionMode: 'execute', observedStageIds, actionLabel: label, pendingContactName: '测试候选人',
+    });
+    const duplicate = bossBrowserActionPolicy(action, {
+      executionMode: 'execute',
+      observedStageIds,
+      actionLabel: '[ref=8] <button> 继续沟通 context="测试候选人"',
+      pendingContactName: '测试候选人',
+    });
+    const unfinished = bossRunCompletionPolicy({
+      executionMode: 'execute',
+      trace: [],
+      pageSnapshot: '',
+      pendingContactName: '测试候选人',
+      pendingContactAwaitingRecord: true,
+    });
+
+    expect(withoutCheckpoint.allowed).toBe(false);
+    expect(withoutCheckpoint.reason).toContain('prepare_contact');
+    expect(wrongCandidate.allowed).toBe(false);
+    expect(wrongCandidate.reason).toContain('不一致');
+    expect(allowed.allowed).toBe(true);
+    expect(duplicate.allowed).toBe(false);
+    expect(duplicate.reason).toContain('重复触达');
+    expect(unfinished.allowed).toBe(false);
+    expect(unfinished.reason).toContain('record_contacted');
+  });
+
   it('registers BOSS protocol as the channel contract owner', () => {
     const protocol = getPlatformProtocol('boss');
 
@@ -265,7 +304,7 @@ describe('boss platform protocol middle layer', () => {
     expect(runSkillOptionsForChannel('boss', 123, true, true).initialStageId).toBe('session-precheck');
     expect(runSkillOptionsForChannel('boss', 124, true, false, true, 'Agent工程师')).toMatchObject({
       executionMode: 'prepare',
-      requiredStagesBeforeContact: ['prefilter', 'candidate-screen'],
+      requiredStagesBeforeContact: ['prefilter', 'dom-probe', 'candidate-screen'],
       targetJobTitle: 'Agent工程师',
     });
   });

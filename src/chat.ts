@@ -1234,6 +1234,28 @@ export async function executeTool(
   }
 
   const mode = context.mode ?? (registered.policy.sideEffect ? 'execute' : 'read');
+
+  // 单一闸门 chokepoint（含 mode 维度）：registry 的 requiresApproval 驱动审批；
+  // 显式 dry-run + 工具支持 dry-run 则免审批（预览无副作用）。无头自主回路默认拒绝。
+  const { checkPermission } = await import('./permissions');
+  const approved = await checkPermission({
+    toolName: name,
+    args,
+    description: registered.schema.function.description,
+    requiresApproval: registered.policy.requiresApproval,
+    explicitMode: context.mode,
+    supportsDryRun: registered.policy.supportsDryRun,
+  });
+  if (!approved) {
+    const denied = `工具调用被拒绝：${name}（需审批；无头/自主回路默认拒绝，本地终端可确认，或预先在 workspace/.permissions.json 加 allow 规则）`;
+    recordToolCall({
+      runId: context.runId, sessionId: context.sessionId, toolCallId: context.toolCallId,
+      toolName: name, input: args, output: denied, ok: false, error: 'approval denied',
+      sideEffect: registered.policy.sideEffect, mode,
+    });
+    return denied;
+  }
+
   let ok = true;
   let error: string | null = null;
   let output = '';
@@ -1273,18 +1295,7 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
     return tasksPanel();
   }
 
-  // 权限检查
-  const { checkPermission } = await import('./permissions');
-  const approved = await checkPermission({
-    toolName: name,
-    args,
-    description: CHAT_TOOLS.find(t => t.function.name === name)?.function.description,
-  });
-
-  if (!approved) {
-    return `工具调用被拒绝: ${name}`;
-  }
-
+  // 权限/审批闸门已上移到 executeTool 的单一 chokepoint（含 mode 维度），此处直接执行。
   switch (name) {
     case 'analyze_image': {
       const imagePath = args.image_path;

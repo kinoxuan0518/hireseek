@@ -131,6 +131,14 @@ const SNAPSHOT_JS = `
   }
   var sel = 'a,button,input,textarea,select,[role="button"],[role="link"],[role="tab"],[role="option"],[role="menuitem"],[role="checkbox"],[contenteditable="true"],[onclick]';
   var lines = [], texts = [], n = 0, frameSeen = 0, frameRead = 0;
+  function elementContext(el, ownText) {
+    var parent = el.parentElement;
+    for (var depth = 0; parent && depth < 6; depth++, parent = parent.parentElement) {
+      var text = (parent.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (text && text !== ownText && text.length <= 360) return text.slice(0, 220).replace(/"/g, "'");
+    }
+    return '';
+  }
   function collect(doc, depth) {
     var els;
     try {
@@ -174,6 +182,8 @@ const SNAPSHOT_JS = `
         var value = el.getAttribute(state);
         if (value !== null) parts.push(state + '="' + value + '"');
       });
+      var context = elementContext(el, t);
+      if (context) parts.push('context="' + context + '"');
       lines.push(parts.join(' '));
     }
     try { if (doc.body && doc.body.innerText) texts.push(doc.body.innerText); } catch (e) {}

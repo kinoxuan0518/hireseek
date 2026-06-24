@@ -49,6 +49,7 @@ export const CORE_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
   browser_act: { category: 'browser', sideEffect: true },
   computer: { category: 'browser', sideEffect: true, supportsDryRun: true },
   record_contacted: { category: 'db', sideEffect: false, supportsDryRun: true },
+  prepare_contact: { category: 'workflow', sideEffect: false, supportsDryRun: false },
   run_shell: { category: 'shell', sideEffect: false, requiresApproval: true },
   read_file: { category: 'file', sideEffect: false },
   read_code: { category: 'file', sideEffect: false },

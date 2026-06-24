@@ -232,7 +232,7 @@ export function runSkillOptionsForChannel(
     runId: runId ?? undefined,
     executionMode: prepare ? 'prepare' : dryRun ? 'dry_run' : 'execute',
     initialStageId: protocol?.stageManifest?.()[0]?.id,
-    requiredStagesBeforeContact: channel === 'boss' ? ['prefilter', 'candidate-screen'] : [],
+    requiredStagesBeforeContact: channel === 'boss' ? ['prefilter', 'dom-probe', 'candidate-screen'] : [],
     targetJobTitle: activeJobTitle,
     completionPolicy: protocol?.completionPolicy,
   };
