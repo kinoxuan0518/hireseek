@@ -269,6 +269,10 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
             type: 'boolean',
             description: '预检模式：接管真实页面但禁止打招呼、输入、点击副作用。用于真实执行前验页面/岗位/登录态。',
           },
+          prepare: {
+            type: 'boolean',
+            description: 'BOSS 安全验收模式：允许站内切换目标职位和设置筛选，但禁止查看/触达候选人。',
+          },
         },
       },
     },
@@ -1429,6 +1433,7 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
         await runChannel(channel, undefined, {
           fromCurrent,
           dryRun: args.dry_run === true,
+          prepare: args.prepare === true,
           progress: msg => console.log(chalk.gray(`  ${msg}`)),
         });
       } else {

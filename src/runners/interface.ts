@@ -1,5 +1,5 @@
 import type { BrowserAction, BrowserTarget } from '../browser-session';
-import type { SkillResult } from '../types';
+import type { SkillResult, TraceStep } from '../types';
 import type { ToolExecutionMode } from '../agent-core/tool-registry';
 
 export interface BrowserActionPolicyDecision {
@@ -10,6 +10,11 @@ export interface BrowserActionPolicyDecision {
 export interface BrowserActionPolicyContext {
   runId?: number;
   sessionId?: string;
+  executionMode?: Extract<ToolExecutionMode, 'execute' | 'dry_run' | 'prepare'>;
+  observedStageIds?: string[];
+  actionLabel?: string;
+  pageSnapshot?: string;
+  targetJobTitle?: string;
 }
 
 export type BrowserActionPolicy = (
@@ -17,18 +22,35 @@ export type BrowserActionPolicy = (
   context: BrowserActionPolicyContext,
 ) => BrowserActionPolicyDecision;
 
+export interface RunCompletionPolicyContext {
+  executionMode: Extract<ToolExecutionMode, 'execute' | 'dry_run' | 'prepare'>;
+  trace: TraceStep[];
+  pageSnapshot: string;
+  targetJobTitle?: string;
+}
+
+export type RunCompletionPolicy = (
+  context: RunCompletionPolicyContext,
+) => BrowserActionPolicyDecision;
+
 export interface RunSkillOptions {
   /** execute=真实执行；dry_run=只观察/预检，禁止外部副作用。 */
-  executionMode?: Extract<ToolExecutionMode, 'execute' | 'dry_run'>;
+  executionMode?: Extract<ToolExecutionMode, 'execute' | 'dry_run' | 'prepare'>;
   blockedBrowserActions?: BrowserAction['action'][];
   /** 中层平台协议可在这里约束浏览器动作；runner 只执行通用策略结果。 */
   browserActionPolicy?: BrowserActionPolicy;
+  /** 中层协议决定何时可以把本轮标记为完成；runner 只机械执行判定。 */
+  completionPolicy?: RunCompletionPolicy;
   /** 当前 task_runs.id，用于 agent-core 通用工具 trace；没有时仍保留内存 trace。 */
   runId?: number;
   /** 当前对话/任务 session id，用于会话级工具 trace。 */
   sessionId?: string;
   /** 平台协议声明的首个阶段 id；runner 只把初始快照归档到该阶段。 */
   initialStageId?: string;
+  /** 结构化触达登记前必须已经在 run trace 中观测到的协议阶段。 */
+  requiredStagesBeforeContact?: string[];
+  /** 平台协议可用于校验职位定位，但 runner 不解释职位语义。 */
+  targetJobTitle?: string;
 }
 
 /**

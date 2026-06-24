@@ -143,7 +143,8 @@ function loadToolStageCounts(runId: number): Map<string, number> {
   return counts;
 }
 
-export function inspectStageCoverage(channel: Channel, runId: number, trace: TraceStep[], opts: { runMode?: 'execute' | 'dry_run' } = {}): StageCoverageAudit {
+export function inspectStageCoverage(channel: Channel, runId: number, trace: TraceStep[], opts: { runMode?: 'execute' | 'dry_run' | 'prepare' } = {}): StageCoverageAudit {
+  const runMode = opts.runMode ?? 'execute';
   const stages = getPlatformProtocol(channel)?.stageManifest?.() ?? [];
   if (stages.length === 0) {
     return { channel, declared: 0, stages: [], unknownStageIds: [], instrumented: false, violations: [] };
@@ -173,7 +174,7 @@ export function inspectStageCoverage(channel: Channel, runId: number, trace: Tra
   const instrumented = rows.some(row => row.observed) || unknown.length > 0;
   const violations: Violation[] = [];
 
-  if (opts.runMode !== 'dry_run') {
+  if (runMode === 'execute') {
     if (unknown.length > 0) {
       violations.push({
         rule: `发现未声明的阶段标记`,
@@ -216,7 +217,7 @@ export function inspectStageCoverage(channel: Channel, runId: number, trace: Tra
   return { channel, declared: stages.length, stages: rows, unknownStageIds: unknown, instrumented, violations };
 }
 
-export function summarizeStageCoverage(channel: Channel, runId: number, trace: TraceStep[], opts: { runMode?: 'execute' | 'dry_run' } = {}): string {
+export function summarizeStageCoverage(channel: Channel, runId: number, trace: TraceStep[], opts: { runMode?: 'execute' | 'dry_run' | 'prepare' } = {}): string {
   const audit = inspectStageCoverage(channel, runId, trace, opts);
   if (audit.declared === 0) return '此渠道未声明 stage manifest。';
 
@@ -246,7 +247,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   const runRow = db.prepare(`SELECT job_id, channel, mode FROM task_runs WHERE id = ?`).get(runId) as { job_id: string; channel: string; mode?: string } | undefined;
   const channelRow = db.prepare(`SELECT channel FROM run_actions WHERE run_id = ? LIMIT 1`).get(runId) as { channel: string } | undefined;
   const channel = (runRow?.channel ?? channelRow?.channel ?? 'boss') as Channel;
-  const runMode = runRow?.mode === 'dry_run' ? 'dry_run' : 'execute';
+  const runMode = runRow?.mode === 'dry_run' ? 'dry_run' : runRow?.mode === 'prepare' ? 'prepare' : 'execute';
   const jobId = runRow?.job_id ?? runtime.activeJobId;
   const stageAudit = inspectStageCoverage(channel, runId, trace, { runMode });
 
@@ -255,7 +256,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   const contractViolations: Violation[] = [];
   try {
     const contractName = contractNameForChannel(channel);
-    const promised = runMode === 'dry_run' ? [] : contractWritesForChannel(channel);
+    const promised = runMode === 'execute' ? contractWritesForChannel(channel) : [];
     const wrote: Record<string, number> = {
       contacted_candidates: (db.prepare(`SELECT COUNT(*) n FROM run_candidates WHERE run_id = ?`).get(runId) as { n: number }).n,
       run_trace: trace.length,
@@ -270,7 +271,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
         });
       }
     }
-    if (runMode !== 'dry_run') {
+    if (runMode === 'execute') {
       const incompleteOutreach = (db.prepare(`
         SELECT COUNT(*) n FROM run_candidates
         WHERE run_id = ?

@@ -22,6 +22,8 @@ import { buildRecruitingCapabilityContext } from './capabilities';
 import type { RunSkillOptions } from './runners/interface';
 import { saveRunTrace } from './agent-core/run-trace-store';
 
+type ChannelRunMode = 'execute' | 'dry_run' | 'prepare';
+
 /**
  * 履约 canonical 契约 boss-greeting.v1 的 writes: [contacted_candidates, run_trace, interaction_log]。
  * 三样产物都按 runId 落库，让 verifier/compliance 能按 runId 审【本轮】。
@@ -31,11 +33,11 @@ export function persistRunResult(
   jobId: string,
   channel: Channel,
   result: SkillResult,
-  opts: { mode?: 'execute' | 'dry_run' } = {},
+  opts: { mode?: ChannelRunMode } = {},
 ): void {
-  // dry-run 只保留过程轨迹。即便模型总结被误解析成候选人，也不能污染主档、
+  // 非 execute 模式只保留过程轨迹。即便模型总结被误解析成候选人，也不能污染主档、
   // run_candidates 或 interaction_log。
-  const list = opts.mode === 'dry_run' ? [] : result.contactedList ?? [];
+  const list = opts.mode && opts.mode !== 'execute' ? [] : result.contactedList ?? [];
   const now = dayjs().toISOString();
 
   // ① 结构化候选人落库：主档 upsert + run 级快照（fingerprint = 姓名|公司|渠道）
@@ -120,7 +122,7 @@ export function persistRunResult(
 
 export function normalizeResultForRunMode(
   result: SkillResult,
-  mode: 'execute' | 'dry_run',
+  mode: ChannelRunMode,
 ): SkillResult {
   if (mode === 'execute') return result;
   return {
@@ -186,12 +188,25 @@ function taskPromptForChannel(
   label: string,
   fromCurrent = false,
   dryRun = false,
+  prepare = false,
   activeJob?: JobConfig | null,
 ): string {
   const protocol = getPlatformProtocol(channel);
   const base = protocol
     ? protocol.buildTaskPrompt({ channelLabel: label, fromCurrent, activeJob })
     : fromCurrent ? TASK_PROMPT_HERE(label) : TASK_PROMPT(label);
+  if (prepare) {
+    return [
+      base,
+      [
+        '## Prepare 安全验收约束',
+        '',
+        '本轮必须自行通过 BOSS 页面内交互切到 active job，并完成筛选面板逐项设置与激活态验收。',
+        '如果筛选面板显示“确定/应用/确认”，必须成功点击提交；仅看到 active 状态不能算完成。',
+        '完成筛选后立即停止；禁止进入候选人处理、禁止打招呼、禁止发送消息、禁止调用 record_contacted。',
+      ].join('\n'),
+    ].join('\n\n---\n\n');
+  }
   if (!dryRun) return base;
   return [
     base,
@@ -209,12 +224,17 @@ export function runSkillOptionsForChannel(
   runId: number | null,
   fromCurrent = false,
   dryRun = false,
+  prepare = false,
+  activeJobTitle?: string,
 ): RunSkillOptions {
   const protocol = getPlatformProtocol(channel);
   const base: RunSkillOptions = {
     runId: runId ?? undefined,
-    executionMode: dryRun ? 'dry_run' : 'execute',
+    executionMode: prepare ? 'prepare' : dryRun ? 'dry_run' : 'execute',
     initialStageId: protocol?.stageManifest?.()[0]?.id,
+    requiredStagesBeforeContact: channel === 'boss' ? ['prefilter', 'candidate-screen'] : [],
+    targetJobTitle: activeJobTitle,
+    completionPolicy: protocol?.completionPolicy,
   };
   if (protocol?.browserActionPolicy) {
     return {
@@ -324,7 +344,7 @@ async function ensurePlatformSession(target: BrowserTarget, channel: Channel): P
 export async function runChannel(
   channel: Channel,
   jobId?: string,
-  opts: { fromCurrent?: boolean; dryRun?: boolean; progress?: (msg: string) => void } = {}
+  opts: { fromCurrent?: boolean; dryRun?: boolean; prepare?: boolean; progress?: (msg: string) => void } = {}
 ): Promise<number> {
   // 默认绑定当前 active job，而不是字面量 'default'。否则心跳/CLI 不传 jobId 时，
   // 候选人落到 job_id='default'，而 verifier 按 active job 查 → 永远查不到（落库错位）。
@@ -333,8 +353,12 @@ export async function runChannel(
   if (!jobId) jobId = runtime.activeJobId;
   const label = CHANNEL_LABEL[channel];
   const dryRun = !!opts.dryRun;
-  console.log(`\n[Orchestrator] ▶ 开始 ${label} sourcing${dryRun ? '（dry-run 预检）' : ''}`);
-  emitLog(`▶ 开始 ${label} sourcing${dryRun ? '（dry-run 预检）' : ''}`);
+  const prepare = !!opts.prepare;
+  if (dryRun && prepare) throw new Error('dry-run 与 prepare 不能同时启用');
+  const runMode: ChannelRunMode = prepare ? 'prepare' : dryRun ? 'dry_run' : 'execute';
+  const modeLabel = runMode === 'dry_run' ? '（dry-run 预检）' : runMode === 'prepare' ? '（prepare 安全验收）' : '';
+  console.log(`\n[Orchestrator] ▶ 开始 ${label} sourcing${modeLabel}`);
+  emitLog(`▶ 开始 ${label} sourcing${modeLabel}`);
   emitStatus('running');
 
   const startMs = Date.now();
@@ -355,7 +379,7 @@ export async function runChannel(
     }
 
     const startedAt = dayjs().toISOString();
-    const runResult = taskRunOps.start.run({ job_id: jobId, channel, mode: dryRun ? 'dry_run' : 'execute', started_at: startedAt });
+    const runResult = taskRunOps.start.run({ job_id: jobId, channel, mode: runMode, started_at: startedAt });
     runId = runResult.lastInsertRowid as number;
 
     // 组装系统提示：SOUL + 职位上下文 + 中层能力 + 记忆 + Skill资产
@@ -375,11 +399,11 @@ export async function runChannel(
     const rawResult = await runner.runSkill(
       page,
       systemPrompt,
-      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, activeJob),
+      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, activeJob),
       opts.progress ?? ((msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))),
-      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun),
+      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun, prepare, activeJob?.title),
     );
-    const result = normalizeResultForRunMode(rawResult, dryRun ? 'dry_run' : 'execute');
+    const result = normalizeResultForRunMode(rawResult, runMode);
 
     const durationSec = Math.round((Date.now() - startMs) / 1000);
 
@@ -397,9 +421,9 @@ export async function runChannel(
     });
 
     // 统一落库：结构化候选人（verifier 数据来源）+ 执行轨迹（合规审计来源）
-    persistRunResult(runId, jobId, channel, result, { mode: dryRun ? 'dry_run' : 'execute' });
+    persistRunResult(runId, jobId, channel, result, { mode: runMode });
 
-    if (!dryRun) {
+    if (runMode === 'execute') {
       // 生成反思并存储
       try {
         const reflectionPrompt = buildReflectionPrompt(label, result.contacted, result.skipped, result.summary);
@@ -423,7 +447,7 @@ export async function runChannel(
         durationSec,
       });
     } else {
-      console.log(`[Orchestrator] dry-run 预检完成：未发送报告、未生成反思、未触达候选人`);
+      console.log(`[Orchestrator] ${runMode} 完成：未发送报告、未生成反思、未触达候选人`);
     }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
@@ -444,7 +468,7 @@ export async function runChannel(
       error,
     });
 
-    if (!dryRun) {
+    if (runMode === 'execute') {
       await sendReport({
         channel,
         contacted: 0,
@@ -738,7 +762,7 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
         return await runner.runSkill(
           page,
           systemPrompt,
-          taskPromptForChannel(channel, label, false, false, job),
+          taskPromptForChannel(channel, label, false, false, false, job),
           (msg) => {
             console.log(`[${label}] ${msg}`);
             emitLog(`[${label}] ${msg}`);

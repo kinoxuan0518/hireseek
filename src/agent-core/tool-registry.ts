@@ -14,7 +14,7 @@ export type ToolCategory =
   | 'mcp'
   | 'other';
 
-export type ToolExecutionMode = 'read' | 'dry_run' | 'execute';
+export type ToolExecutionMode = 'read' | 'dry_run' | 'prepare' | 'execute';
 
 export interface ToolPolicy {
   category: ToolCategory;

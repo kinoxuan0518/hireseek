@@ -5,6 +5,7 @@ import { contractNameForChannel } from '../src/contracts';
 import { formatPlatformProtocols, getPlatformProtocol } from '../src/platform-protocols';
 import {
   bossBrowserActionPolicy,
+  bossRunCompletionPolicy,
   bossProcessRules,
   bossProtocolStages,
   buildBossPrefilterPlan,
@@ -89,15 +90,128 @@ describe('boss platform protocol middle layer', () => {
       { action: 'goto', url: 'https://www.zhipin.com/web/chat/recommend' },
       {},
     );
-    const allowedClick = bossBrowserActionPolicy({ action: 'click', ref: 12 }, {});
+    const allowedClick = bossBrowserActionPolicy(
+      { action: 'click', ref: 12, stage_id: 'job-positioning' },
+      { observedStageIds: ['session-precheck'], executionMode: 'execute' },
+    );
     const allowedSnapshot = bossBrowserActionPolicy({ action: 'snapshot' }, {});
     const allowedScroll = bossBrowserActionPolicy({ action: 'scroll', direction: 'down' }, {});
+    const missingStage = bossBrowserActionPolicy({ action: 'click', ref: 12 }, {
+      observedStageIds: ['session-precheck'],
+      executionMode: 'execute',
+    });
+    const skippedJobPositioning = bossBrowserActionPolicy(
+      { action: 'click', ref: 20, stage_id: 'prefilter' },
+      { observedStageIds: ['session-precheck'], executionMode: 'execute' },
+    );
+    const allowedPrefilter = bossBrowserActionPolicy(
+      { action: 'click', ref: 20, stage_id: 'prefilter' },
+      {
+        observedStageIds: ['session-precheck', 'job-positioning'],
+        executionMode: 'prepare',
+        actionLabel: '[ref=20] <button> 1-3年',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
+    const blockedPrepareContact = bossBrowserActionPolicy(
+      { action: 'click', ref: 30, stage_id: 'job-positioning' },
+      {
+        observedStageIds: ['session-precheck'],
+        executionMode: 'prepare',
+        actionLabel: '[ref=30] <button> 打招呼',
+      },
+    );
+    const blockedPrepareCandidateStage = bossBrowserActionPolicy(
+      { action: 'click', ref: 31, stage_id: 'candidate-screen' },
+      {
+        observedStageIds: ['session-precheck', 'job-positioning', 'prefilter', 'dom-probe'],
+        executionMode: 'prepare',
+      },
+    );
+    const blockedPrepareType = bossBrowserActionPolicy(
+      { action: 'type', ref: 10, text: '推荐牛人', stage_id: 'job-positioning' },
+      {
+        observedStageIds: ['session-precheck'],
+        executionMode: 'prepare',
+        actionLabel: '[ref=10] <div> placeholder="输入消息"',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
+    const blockedPreparePress = bossBrowserActionPolicy(
+      { action: 'press', text: 'Enter', stage_id: 'job-positioning' },
+      { observedStageIds: ['session-precheck'], executionMode: 'prepare' },
+    );
+    const blockedUnknownPrepareClick = bossBrowserActionPolicy(
+      { action: 'click', ref: 12, stage_id: 'job-positioning' },
+      {
+        observedStageIds: ['session-precheck'],
+        executionMode: 'prepare',
+        actionLabel: '[ref=12] <div> 牛人管理',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
+    const allowedTargetJobClick = bossBrowserActionPolicy(
+      { action: 'click', ref: 13, stage_id: 'job-positioning' },
+      {
+        observedStageIds: ['session-precheck'],
+        executionMode: 'prepare',
+        actionLabel: '[ref=13] <div> Agent 开发工程师 class="job-item" pointer=true',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
+    const allowedRecommendMenuClick = bossBrowserActionPolicy(
+      { action: 'click', ref: 3, stage_id: 'job-positioning' },
+      {
+        observedStageIds: ['session-precheck'],
+        executionMode: 'prepare',
+        actionLabel: '[ref=3] <dl> 推荐牛人 class="menu-recommend" pointer=true',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
+    const blockedRecommendChatBubble = bossBrowserActionPolicy(
+      { action: 'click', ref: 82, stage_id: 'job-positioning' },
+      {
+        observedStageIds: ['session-precheck'],
+        executionMode: 'prepare',
+        actionLabel: '[ref=82] <span> 推荐牛人 class="push-text" pointer=true',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
+    const allowedCurrentJobDropdown = bossBrowserActionPolicy(
+      { action: 'click', ref: 29, stage_id: 'job-positioning' },
+      {
+        observedStageIds: ['session-precheck'],
+        executionMode: 'prepare',
+        actionLabel: '[ref=29] <div> 高级AI产品经理 _ 上海 30-35K class="ui-dropmenu-label" pointer=true',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
 
     expect(denied.allowed).toBe(false);
     expect(denied.reason).toContain('直接跳转 URL');
     expect(allowedClick.allowed).toBe(true);
     expect(allowedSnapshot.allowed).toBe(true);
     expect(allowedScroll.allowed).toBe(true);
+    expect(missingStage.allowed).toBe(false);
+    expect(missingStage.reason).toContain('stage_id');
+    expect(skippedJobPositioning.allowed).toBe(false);
+    expect(skippedJobPositioning.reason).toContain('job-positioning');
+    expect(allowedPrefilter.allowed).toBe(true);
+    expect(blockedPrepareContact.allowed).toBe(false);
+    expect(blockedPrepareContact.reason).toContain('禁止打招呼');
+    expect(blockedPrepareCandidateStage.allowed).toBe(false);
+    expect(blockedPrepareCandidateStage.reason).toContain('prepare 模式只允许');
+    expect(blockedPrepareType.allowed).toBe(false);
+    expect(blockedPrepareType.reason).toContain('禁止 type');
+    expect(blockedPreparePress.allowed).toBe(false);
+    expect(blockedPreparePress.reason).toContain('禁止 press');
+    expect(blockedUnknownPrepareClick.allowed).toBe(false);
+    expect(blockedUnknownPrepareClick.reason).toContain('只允许点击目标职位导航或筛选控件');
+    expect(allowedTargetJobClick.allowed).toBe(true);
+    expect(allowedRecommendMenuClick.allowed).toBe(true);
+    expect(blockedRecommendChatBubble.allowed).toBe(false);
+    expect(blockedRecommendChatBubble.reason).toContain('消息或候选人沟通控件');
+    expect(allowedCurrentJobDropdown.allowed).toBe(true);
   });
 
   it('keeps BOSS process rules in the protocol layer', () => {
@@ -114,6 +228,29 @@ describe('boss platform protocol middle layer', () => {
     expect(rules).toContain('record_contacted');
   });
 
+  it('requires visible filter controls to be submitted before prepare completes', () => {
+    const trace = [
+      { seq: 1, action: 'click', ok: true, sideEffect: true, stageId: 'job-positioning', actionLabel: 'Agent 开发工程师' },
+      { seq: 2, action: 'click', ok: true, sideEffect: true, stageId: 'prefilter', actionLabel: '1-3年' },
+    ];
+    const pending = bossRunCompletionPolicy({
+      executionMode: 'prepare',
+      trace,
+      pageSnapshot: 'URL: https://www.zhipin.com/web/chat/recommend\n[ref=1] <div> Agent 开发工程师\n[ref=2] <div> 确定 class="btn"',
+      targetJobTitle: 'Agent工程师',
+    });
+    const accepted = bossRunCompletionPolicy({
+      executionMode: 'prepare',
+      trace: [...trace, { seq: 3, action: 'click', ok: true, sideEffect: true, stageId: 'prefilter', actionLabel: '[ref=2] <div> 确定 class="btn"' }],
+      pageSnapshot: 'URL: https://www.zhipin.com/web/chat/recommend\nAgent 开发工程师\n筛选条件 1-3年',
+      targetJobTitle: 'Agent工程师',
+    });
+
+    expect(pending.allowed).toBe(false);
+    expect(pending.reason).toContain('成功提交筛选');
+    expect(accepted.allowed).toBe(true);
+  });
+
   it('registers BOSS protocol as the channel contract owner', () => {
     const protocol = getPlatformProtocol('boss');
 
@@ -121,10 +258,16 @@ describe('boss platform protocol middle layer', () => {
     expect(protocol?.contractName).toBe('boss-greeting.v1');
     expect(contractNameForChannel('boss')).toBe('boss-greeting.v1');
     expect(protocol?.buildSystemContext?.()).toContain('优先级高于外部 skill 资产');
+    expect(protocol?.completionPolicy).toBe(bossRunCompletionPolicy);
     expect(formatPlatformProtocols()).toContain('boss-platform.v1');
     expect(formatPlatformProtocols()).toContain('产品中层协议');
     expect(formatPlatformProtocols()).toContain('Stage manifest: 7 stages');
     expect(runSkillOptionsForChannel('boss', 123, true, true).initialStageId).toBe('session-precheck');
+    expect(runSkillOptionsForChannel('boss', 124, true, false, true, 'Agent工程师')).toMatchObject({
+      executionMode: 'prepare',
+      requiredStagesBeforeContact: ['prefilter', 'candidate-screen'],
+      targetJobTitle: 'Agent工程师',
+    });
   });
 
   it('keeps legacy skill assets below product protocols', () => {

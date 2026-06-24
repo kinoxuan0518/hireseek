@@ -1,6 +1,6 @@
 import type { ToolExecutionMode } from './tool-registry';
 
-export type AgentRunMode = 'execute' | 'dry_run';
+export type AgentRunMode = 'execute' | 'dry_run' | 'prepare';
 
 const READ_ONLY_ACTIONS = new Set(['screenshot', 'move', 'mouse_move', 'scroll']);
 
@@ -9,7 +9,7 @@ export function computerActionHasSideEffect(action: string): boolean {
 }
 
 export function computerActionMode(action: string, runMode: AgentRunMode): ToolExecutionMode {
-  if (runMode === 'dry_run') return 'dry_run';
+  if (runMode !== 'execute') return runMode;
   return computerActionHasSideEffect(action) ? 'execute' : 'read';
 }
 

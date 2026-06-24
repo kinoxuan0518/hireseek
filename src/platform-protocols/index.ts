@@ -1,8 +1,9 @@
 import type { Channel } from '../types';
-import type { BrowserActionPolicy } from '../runners/interface';
+import type { BrowserActionPolicy, RunCompletionPolicy } from '../runners/interface';
 import type { JobConfig } from '../skills/loader';
 import {
   bossBrowserActionPolicy,
+  bossRunCompletionPolicy,
   bossProcessRules,
   bossProtocolStages,
   buildBossSystemContext,
@@ -23,6 +24,7 @@ export interface PlatformProtocol {
   buildSystemContext?: () => string;
   buildTaskPrompt: (opts?: PlatformTaskPromptOptions) => string;
   browserActionPolicy?: BrowserActionPolicy;
+  completionPolicy?: RunCompletionPolicy;
   processRules?: () => string;
 }
 
@@ -35,6 +37,7 @@ const PROTOCOLS: Partial<Record<Channel, PlatformProtocol>> = {
     buildSystemContext: buildBossSystemContext,
     buildTaskPrompt: buildBossTaskPrompt,
     browserActionPolicy: bossBrowserActionPolicy,
+    completionPolicy: bossRunCompletionPolicy,
     processRules: bossProcessRules,
   },
 };

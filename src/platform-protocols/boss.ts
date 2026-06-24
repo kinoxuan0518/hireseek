@@ -1,5 +1,5 @@
 import type { BrowserAction } from '../browser-session';
-import type { BrowserActionPolicy, BrowserActionPolicyDecision } from '../runners/interface';
+import type { BrowserActionPolicy, BrowserActionPolicyDecision, RunCompletionPolicy } from '../runners/interface';
 import type { JobConfig } from '../skills/loader';
 
 export interface BossTaskPromptOptions {
@@ -342,13 +342,159 @@ ${BOSS_STOP_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\n')}
 `.trim();
 }
 
+const BOSS_STAGE_IDS = new Set(BOSS_PROTOCOL_STAGES.map(stage => stage.id));
+const BOSS_STAGE_PREREQUISITES: Record<string, string[]> = {
+  'job-positioning': ['session-precheck'],
+  prefilter: ['job-positioning'],
+  'dom-probe': ['prefilter'],
+  'candidate-screen': ['dom-probe'],
+  'single-contact': ['prefilter', 'candidate-screen'],
+};
+const PREPARE_SIDE_EFFECT_STAGES = new Set(['job-positioning', 'prefilter']);
+const BROWSER_SIDE_EFFECT_ACTIONS = new Set<BrowserAction['action']>(['click', 'type', 'press', 'goto', 'back']);
+const BOSS_CONTACT_LABEL = /打招呼|立即沟通|继续沟通|和\s*Ta\s*聊聊|聊一聊|发送|消息|聊天|沟通记录|新招呼|回复|送达|已读|未读|class="[^"]*(?:chat|message|editor|push-text|text-content|geek-item|gray)/i;
+const BOSS_PREPARE_JOB_CONTROL = /职位管理|推荐牛人|职位下拉|切换职位|招聘职位|我的职位|职位列表|class="[^"]*dropmenu-label/i;
+const BOSS_PREPARE_FILTER_CONTROL = /筛选|工作经验|经验|学历|院校|学校|关键词|活跃|未看|近\s*14\s*天|1\s*[-~到]\s*3\s*年|3\s*[-~到]\s*5\s*年|本科|硕士|博士|985|211|大模型|Agent|应用|确定|确认|取消|清除|重置|展开|收起|更多选项/i;
+const BOSS_PREPARE_NAV_STRUCTURE = /<(?:button|a)\b|class="[^"]*(?:menu|nav|job|position|recommend|sidebar|dropdown|dropmenu|select)/i;
+const BOSS_PREPARE_FILTER_STRUCTURE = /<(?:button|input|select)\b|class="[^"]*(?:filter|option|select|checkbox|radio|dropdown|panel|condition|tag|active|btn|cancel)/i;
+
+function normalizedJobSignal(title: string | undefined): string {
+  if (!title) return '';
+  return title
+    .toLowerCase()
+    .replace(/[（(].*?[）)]/g, '')
+    .replace(/高级|资深|中级|初级|开发|工程师|专家|经理|负责人|岗位|职位/g, '')
+    .replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+}
+
+function labelMatchesTargetJob(label: string, targetJobTitle: string | undefined): boolean {
+  const signal = normalizedJobSignal(targetJobTitle);
+  if (signal.length < 2) return false;
+  return label.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '').includes(signal);
+}
+
+function prepareClickAllowed(stageId: string | undefined, label: string, targetJobTitle: string | undefined): boolean {
+  if (stageId === 'job-positioning') {
+    const hasJobIntent = BOSS_PREPARE_JOB_CONTROL.test(label) || labelMatchesTargetJob(label, targetJobTitle);
+    return hasJobIntent && BOSS_PREPARE_NAV_STRUCTURE.test(label);
+  }
+  if (stageId === 'prefilter') {
+    return BOSS_PREPARE_FILTER_CONTROL.test(label) && BOSS_PREPARE_FILTER_STRUCTURE.test(label);
+  }
+  return false;
+}
+
+function browserActionStage(action: BrowserAction): string | undefined {
+  const value = action.stage_id ?? action.stageId;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 export const bossBrowserActionPolicy: BrowserActionPolicy = (
   action: BrowserAction,
+  context,
 ): BrowserActionPolicyDecision => {
   if (action.action === 'goto') {
     return {
       allowed: false,
       reason: 'BOSS 协议禁止在任务执行中直接跳转 URL；请通过当前页面内的职位入口、推荐牛人入口或搜索筛选控件完成站内流转。',
+    };
+  }
+
+  const stageId = browserActionStage(action);
+  const hasSideEffect = BROWSER_SIDE_EFFECT_ACTIONS.has(action.action);
+  if (hasSideEffect && !stageId) {
+    return {
+      allowed: false,
+      reason: `BOSS 协议要求 ${action.action} 动作携带 stage_id；请先确认当前协议阶段再重试。`,
+    };
+  }
+  if (stageId && !BOSS_STAGE_IDS.has(stageId)) {
+    return {
+      allowed: false,
+      reason: `未知 BOSS stage_id=${stageId}；只能使用 stage manifest 中声明的阶段。`,
+    };
+  }
+
+  const observed = new Set(context.observedStageIds ?? []);
+  for (const prerequisite of stageId ? BOSS_STAGE_PREREQUISITES[stageId] ?? [] : []) {
+    if (!observed.has(prerequisite)) {
+      return {
+        allowed: false,
+        reason: `BOSS 阶段门禁：${stageId} 之前必须先完成并留痕 ${prerequisite}。`,
+      };
+    }
+  }
+
+  if (context.executionMode === 'prepare' && hasSideEffect) {
+    if (!stageId || !PREPARE_SIDE_EFFECT_STAGES.has(stageId)) {
+      return {
+        allowed: false,
+        reason: `prepare 模式只允许职位定位和筛选前置动作，禁止阶段 ${stageId ?? 'unknown'} 的副作用操作。`,
+      };
+    }
+    if (action.action === 'type' || action.action === 'press') {
+      return {
+        allowed: false,
+        reason: `prepare 模式禁止 ${action.action}：安全验收不能向任何输入框写入内容或触发键盘发送。`,
+      };
+    }
+    if (action.action === 'back') return { allowed: stageId === 'job-positioning', reason: 'prepare 模式只允许在职位定位阶段返回上一页。' };
+    if (action.action !== 'click') {
+      return {
+        allowed: false,
+        reason: `prepare 模式不允许 ${action.action} 副作用动作。`,
+      };
+    }
+    if (!context.actionLabel) {
+      return {
+        allowed: false,
+        reason: 'prepare 模式拒绝无法识别语义的点击控件。',
+      };
+    }
+    if (BOSS_CONTACT_LABEL.test(context.actionLabel)) {
+      return {
+        allowed: false,
+        reason: 'prepare 模式检测到消息或候选人沟通控件，禁止打招呼或发送消息。',
+      };
+    }
+    if (!prepareClickAllowed(stageId, context.actionLabel, context.targetJobTitle)) {
+      return {
+        allowed: false,
+        reason: `prepare 模式只允许点击目标职位导航或筛选控件，已拒绝：${context.actionLabel.slice(0, 140)}`,
+      };
+    }
+  }
+
+  return { allowed: true };
+};
+
+const BOSS_FILTER_SUBMIT_LABEL = /(?:确定|应用|确认)(?!取消)/i;
+
+export const bossRunCompletionPolicy: RunCompletionPolicy = context => {
+  if (context.executionMode !== 'prepare') return { allowed: true };
+
+  const successful = context.trace.filter(step => step.ok);
+  const positioned = labelMatchesTargetJob(context.pageSnapshot, context.targetJobTitle);
+  const filtered = successful.some(step => step.stageId === 'prefilter' && step.sideEffect);
+  if (!positioned) {
+    return { allowed: false, reason: '当前页面没有可验证的目标职位信号，prepare 尚未完成职位定位。' };
+  }
+  if (!filtered) {
+    return { allowed: false, reason: 'prepare 尚未留下成功的筛选动作。' };
+  }
+  const visibleSubmit = context.pageSnapshot
+    .split('\n')
+    .some(line => line.startsWith('[ref=') && BOSS_FILTER_SUBMIT_LABEL.test(line));
+  const submitted = successful.some(step =>
+    step.stageId === 'prefilter' &&
+    step.action === 'click' &&
+    !!step.actionLabel &&
+    BOSS_FILTER_SUBMIT_LABEL.test(step.actionLabel),
+  );
+  if (visibleSubmit && !submitted) {
+    return {
+      allowed: false,
+      reason: '筛选面板仍显示“确定/应用”控件；必须成功提交筛选后才能完成 prepare。',
     };
   }
 

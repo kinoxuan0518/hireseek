@@ -129,11 +129,31 @@ const SNAPSHOT_JS = `
       return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
     } catch (e) { return false; }
   }
-  var sel = 'a[href],button,input,textarea,select,[role="button"],[role="link"],[role="tab"],[role="option"],[role="menuitem"],[role="checkbox"],[contenteditable="true"],[onclick]';
+  var sel = 'a,button,input,textarea,select,[role="button"],[role="link"],[role="tab"],[role="option"],[role="menuitem"],[role="checkbox"],[contenteditable="true"],[onclick]';
   var lines = [], texts = [], n = 0, frameSeen = 0, frameRead = 0;
   function collect(doc, depth) {
     var els;
-    try { els = Array.prototype.filter.call(doc.querySelectorAll(sel), visible); } catch (e) { return; }
+    try {
+      Array.prototype.forEach.call(doc.querySelectorAll('[data-hs-ref]'), function(el) { el.removeAttribute('data-hs-ref'); });
+      els = Array.prototype.filter.call(doc.querySelectorAll('*'), function(el) {
+        if (!visible(el)) return false;
+        try { if (el.matches(sel)) return true; } catch (e) {}
+        if (el === doc.body || el === doc.documentElement) return false;
+        var text = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+        var win = (doc && doc.defaultView) || window;
+        if (!text || text.length > 120 || win.getComputedStyle(el).cursor !== 'pointer') return false;
+        var interactiveChild = null;
+        try { interactiveChild = el.querySelector(sel); } catch (e) {}
+        if (interactiveChild && visible(interactiveChild)) {
+          var childText = (interactiveChild.textContent || '').replace(/\\s+/g, ' ').trim();
+          if (childText === text) return false;
+        }
+        var parent = el.parentElement;
+        if (!parent || parent === doc.body || !visible(parent)) return true;
+        var parentText = (parent.textContent || '').replace(/\\s+/g, ' ').trim();
+        return win.getComputedStyle(parent).cursor !== 'pointer' || parentText !== text;
+      });
+    } catch (e) { return; }
     for (var i = 0; i < els.length && n < MAX_EL; i++) {
       var el = els[i]; n++;
       try { el.setAttribute('data-hs-ref', String(n)); } catch (e) {}
@@ -145,6 +165,15 @@ const SNAPSHOT_JS = `
       if (el.value && tag === 'input') parts.push('value="' + String(el.value).slice(0, 40) + '"');
       var aria = el.getAttribute('aria-label');
       if (aria) parts.push('aria="' + aria + '"');
+      if (typeof el.className === 'string' && el.className) parts.push('class="' + el.className.slice(0, 80) + '"');
+      try {
+        var win = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+        if (win.getComputedStyle(el).cursor === 'pointer') parts.push('pointer=true');
+      } catch (e) {}
+      ['aria-selected', 'aria-pressed', 'aria-checked'].forEach(function(state) {
+        var value = el.getAttribute(state);
+        if (value !== null) parts.push(state + '="' + value + '"');
+      });
       lines.push(parts.join(' '));
     }
     try { if (doc.body && doc.body.innerText) texts.push(doc.body.innerText); } catch (e) {}

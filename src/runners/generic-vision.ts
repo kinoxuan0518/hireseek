@@ -241,7 +241,7 @@ export class GenericVisionRunner implements LLMRunner {
       ok: true,
       toolName: 'computer',
       sideEffect: false,
-      mode: executionMode === 'dry_run' ? 'dry_run' : 'read',
+      mode: executionMode === 'execute' ? 'read' : executionMode,
       stageId: options.initialStageId,
     });
     recordToolCall({
@@ -252,7 +252,7 @@ export class GenericVisionRunner implements LLMRunner {
       output: 'screenshot captured',
       ok: true,
       sideEffect: false,
-      mode: executionMode === 'dry_run' ? 'dry_run' : 'read',
+      mode: executionMode === 'execute' ? 'read' : executionMode,
       stageId: options.initialStageId,
     });
 
@@ -350,7 +350,7 @@ export class GenericVisionRunner implements LLMRunner {
             ok: false,
             error,
             sideEffect: true,
-            mode: executionMode === 'dry_run' ? 'dry_run' : 'execute',
+            mode: executionMode === 'execute' ? 'execute' : executionMode,
           });
           continue;
         }
@@ -359,7 +359,7 @@ export class GenericVisionRunner implements LLMRunner {
         const mode = computerActionMode(input.action, executionMode);
         const stageId = input.stage_id ?? options.initialStageId;
 
-        if (executionMode === 'dry_run' && dryRunBlocksComputerAction(input.action)) {
+        if (executionMode !== 'execute' && dryRunBlocksComputerAction(input.action)) {
           const blocked = `dry-run 预检模式禁止执行 ${input.action}，已阻止真实 computer 动作。`;
           toolResults.push({ role: 'tool', tool_call_id: toolCall.id, content: blocked });
           recordToolCall({

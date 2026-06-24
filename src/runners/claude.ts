@@ -62,7 +62,7 @@ export class ClaudeRunner implements LLMRunner {
       ok: true,
       toolName: 'computer',
       sideEffect: false,
-      mode: executionMode === 'dry_run' ? 'dry_run' : 'read',
+      mode: executionMode === 'execute' ? 'read' : executionMode,
       stageId: options.initialStageId,
     });
     recordToolCall({
@@ -73,7 +73,7 @@ export class ClaudeRunner implements LLMRunner {
       output: 'screenshot captured',
       ok: true,
       sideEffect: false,
-      mode: executionMode === 'dry_run' ? 'dry_run' : 'read',
+      mode: executionMode === 'execute' ? 'read' : executionMode,
       stageId: options.initialStageId,
     });
 
@@ -121,7 +121,7 @@ export class ClaudeRunner implements LLMRunner {
         let stepOk = true;
         let stepError: string | null = null;
 
-        if (executionMode === 'dry_run' && dryRunBlocksComputerAction(action)) {
+        if (executionMode !== 'execute' && dryRunBlocksComputerAction(action)) {
           stepOk = false;
           stepError = `dry-run 预检模式禁止执行 ${action}，已阻止真实 computer 动作。`;
           const img = await takeScreenshot(page);

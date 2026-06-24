@@ -77,6 +77,11 @@ export interface BossDryRunEvidence {
   sideEffects: number;
 }
 
+export interface BossPrepareEvidence extends BossDryRunEvidence {
+  successfulSideEffects: number;
+  unsafeSuccessfulActions: number;
+}
+
 export function hasPassingBossDryRunEvidence(evidence: BossDryRunEvidence | null): boolean {
   return !!evidence
     && evidence.status === 'completed'
@@ -105,6 +110,50 @@ function latestBossDryRunEvidence(): BossDryRunEvidence | null {
       ORDER BY id DESC
       LIMIT 1
     `).get() as BossDryRunEvidence | undefined ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function hasPassingBossPrepareEvidence(evidence: BossPrepareEvidence | null): boolean {
+  return !!evidence
+    && evidence.status === 'completed'
+    && evidence.contactedCount === 0
+    && evidence.runCandidates === 0
+    && evidence.interactions === 0
+    && evidence.runActions > 0
+    && evidence.toolCalls > 0
+    && evidence.successfulSideEffects > 0
+    && evidence.unsafeSuccessfulActions === 0;
+}
+
+function latestBossPrepareEvidence(): BossPrepareEvidence | null {
+  try {
+    return db.prepare(`
+      SELECT
+        task_runs.id,
+        task_runs.status,
+        task_runs.contacted_count AS contactedCount,
+        (SELECT COUNT(*) FROM run_candidates WHERE run_id = task_runs.id) AS runCandidates,
+        (SELECT COUNT(*) FROM interaction_log WHERE run_id = task_runs.id) AS interactions,
+        (SELECT COUNT(*) FROM run_actions WHERE run_id = task_runs.id) AS runActions,
+        (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id) AS toolCalls,
+        (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id AND side_effect = 1) AS sideEffects,
+        (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id AND side_effect = 1 AND ok = 1) AS successfulSideEffects,
+        (
+          SELECT COUNT(*) FROM agent_tool_calls
+          WHERE run_id = task_runs.id AND ok = 1 AND (
+            tool_name = 'record_contacted' OR (
+              tool_name = 'browser' AND json_valid(input_summary) = 1
+              AND json_extract(input_summary, '$.action') IN ('type', 'press', 'goto')
+            )
+          )
+        ) AS unsafeSuccessfulActions
+      FROM task_runs
+      WHERE channel = 'boss' AND mode = 'prepare'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get() as BossPrepareEvidence | undefined ?? null;
   } catch {
     return null;
   }
@@ -220,6 +269,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     if (!boss.contractName) missing.push('contract');
     if (!boss.buildSystemContext) missing.push('system context');
     if (!boss.browserActionPolicy) missing.push('browser action policy');
+    if (!boss.completionPolicy) missing.push('completion policy');
     if (!boss.processRules) missing.push('process rules');
     if (stageCount === 0) missing.push('stage manifest');
     checks.push(check(
@@ -242,6 +292,17 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     capabilities.length
       ? `${capabilities.length} capability module(s); missing sources=${missingSources.length ? missingSources.join(', ') : 'none'}`
       : 'no capability modules registered',
+  ));
+
+  const prepare = latestBossPrepareEvidence();
+  const preparePassed = hasPassingBossPrepareEvidence(prepare);
+  checks.push(check(
+    'upper',
+    'Live BOSS prepare',
+    preparePassed ? 'pass' : 'warn',
+    prepare
+      ? `latest prepare #${prepare.id}: status=${prepare.status}, contacted=${prepare.contactedCount}, candidates=${prepare.runCandidates}, interactions=${prepare.interactions}, actions=${prepare.runActions}, toolCalls=${prepare.toolCalls}, successfulSideEffects=${prepare.successfulSideEffects}, unsafeSuccessfulActions=${prepare.unsafeSuccessfulActions}`
+      : 'no BOSS prepare evidence; run hireseek run boss --here --prepare before real outreach',
   ));
 
   const dryRun = latestBossDryRunEvidence();
@@ -285,6 +346,9 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   if (status === 'fail') nextSteps.push('先修复 fail 项，再跑真实渠道任务。');
   if (checks.some(c => c.name === 'Live BOSS run' && c.status === 'warn')) {
     nextSteps.push('真实页面验收从 `hireseek run boss --here --dry-run` 开始，不要直接真实触达。');
+  }
+  if (checks.some(c => c.name === 'Live BOSS prepare' && c.status === 'warn')) {
+    nextSteps.push('真实触达前运行 `hireseek run boss --here --prepare`，确认自动切职位和筛选提交安全通过。');
   }
   if (checks.some(c => c.layer === 'middle' && c.status !== 'pass')) {
     nextSteps.push('中层协议/能力不完整时，先补产品协议，不回退到复制 skill。');

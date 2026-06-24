@@ -42,7 +42,8 @@ const USAGE = `
   hireseek run --plan          计划模式：先分析生成计划，用户确认后执行
   hireseek run <渠道>          指定渠道立即执行
   hireseek run <渠道> --dry-run  预检模式：接管真实页面但禁止打招呼/输入/点击副作用
-  hireseek run boss --here     就地接管：你先把 Chrome 开到推荐牛人页(选好职位)，agent 不导航直接看人打招呼
+  hireseek run boss --here --prepare  安全验收：自动切到目标职位并设置筛选，但绝不触达候选人
+  hireseek run boss --here     就地接管当前 BOSS 页面，由产品协议自行定位目标职位并执行
   hireseek scan                扫描收件箱，更新已回复候选人
   hireseek update <姓名> <状态>  手动更新候选人状态
   hireseek funnel              查看招聘漏斗
@@ -261,10 +262,12 @@ async function main(): Promise<void> {
   } else if (command === 'run') {
     // 检查是否使用计划模式
     const usePlan = args.includes('--plan') || args.includes('-p');
-    // 就地接管：用户已把 Chrome 开到正确的候选人列表页，agent 不导航、直接从当前页干活
+    // 就地接管当前 BOSS 页面；目标职位定位由产品中层协议负责。
     const fromCurrent = args.includes('--here');
     // 干跑预检：真实接管当前页面/平台，但工具层禁止 click/type/press/goto/back 等外部副作用
     const dryRun = args.includes('--dry-run') || args.includes('--preview') || args.includes('--check');
+    // 安全验收：允许 BOSS 站内职位定位与筛选动作，但代码层禁止候选人触达。
+    const prepare = args.includes('--prepare');
     // 跳过命令名本身（args[0]='run'），否则自主模式会把 run 当渠道名
     const channelArg = args.slice(1).find(a => !a.startsWith('-'));
 
@@ -292,14 +295,14 @@ async function main(): Promise<void> {
       }
       let runId: number;
       try {
-        runId = await runChannel(channelArg as Channel, undefined, { fromCurrent, dryRun });
+        runId = await runChannel(channelArg as Channel, undefined, { fromCurrent, dryRun, prepare });
       } catch (err) {
         console.error(chalk.red(`\n[HireSeek] sourcing 未启动: ${err instanceof Error ? err.message : err}`));
         db.close();
         process.exit(1);
       }
-      if (dryRun) {
-        console.log(chalk.gray(`\n── dry-run 预检完成（runId=${runId}）──`));
+      if (dryRun || prepare) {
+        console.log(chalk.gray(`\n── ${prepare ? 'prepare 安全验收' : 'dry-run 预检'}完成（runId=${runId}）──`));
         console.log(chalk.gray('本轮没有真实触达，不运行候选人质检/触达契约审计。正式执行前可查看上方预检总结。'));
         db.close();
         process.exit(0);

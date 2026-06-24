@@ -97,7 +97,7 @@ export class OpenAIRunner implements LLMRunner {
         let stepError: string | null = null;
         let imgData = '';
 
-        if (executionMode === 'dry_run' && dryRunBlocksComputerAction(actionName)) {
+        if (executionMode !== 'execute' && dryRunBlocksComputerAction(actionName)) {
           stepOk = false;
           stepError = `dry-run 预检模式禁止执行 ${actionName}，已阻止真实 computer 动作。`;
           blockedNotices.push(stepError);

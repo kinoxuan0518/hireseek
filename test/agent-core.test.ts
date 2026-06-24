@@ -273,8 +273,21 @@ describe('agent core lower layer', () => {
     expect(dryRunBlocksBrowserAction({ action: 'scroll', direction: 'down' })).toBe(false);
 
     expect(browserActionMode({ action: 'click', ref: 1 }, 'dry_run')).toBe('dry_run');
+    expect(browserActionMode({ action: 'click', ref: 1 }, 'prepare')).toBe('prepare');
     expect(browserActionHasSideEffect({ action: 'scroll', direction: 'down' }, 'dry_run')).toBe(false);
+    expect(browserActionHasSideEffect({ action: 'scroll', direction: 'down' }, 'prepare')).toBe(false);
     expect(browserActionHasSideEffect({ action: 'click', ref: 1 }, 'dry_run')).toBe(true);
+    expect(browserActionHasSideEffect({ action: 'click', ref: 1 }, 'prepare')).toBe(true);
+  });
+
+  it('does not treat failed or blocked actions as completed protocol stages', async () => {
+    const { successfulStageIds } = await import('../src/runners/dom-runner');
+
+    expect(successfulStageIds([
+      { seq: 1, action: 'snapshot', ok: true, stageId: 'session-precheck' },
+      { seq: 2, action: 'click', ok: false, stageId: 'job-positioning' },
+      { seq: 3, action: 'click', ok: true, stageId: 'prefilter' },
+    ])).toEqual(['session-precheck', 'prefilter']);
   });
 
   it('saves repaired session message history', async () => {
@@ -478,6 +491,24 @@ describe('agent core lower layer', () => {
     expect((db.prepare(`SELECT COUNT(*) n FROM run_candidates WHERE run_id = ?`).get(runId) as { n: number }).n).toBe(0);
     expect((db.prepare(`SELECT COUNT(*) n FROM interaction_log WHERE run_id = ?`).get(runId) as { n: number }).n).toBe(0);
     expect((db.prepare(`SELECT COUNT(*) n FROM run_actions WHERE run_id = ?`).get(runId) as { n: number }).n).toBe(1);
+
+    const prepareRunId = 305;
+    db.prepare(`DELETE FROM interaction_log WHERE run_id = ?`).run(prepareRunId);
+    db.prepare(`DELETE FROM run_actions WHERE run_id = ?`).run(prepareRunId);
+    db.prepare(`DELETE FROM run_candidates WHERE run_id = ?`).run(prepareRunId);
+    const prepareResult = normalizeResultForRunMode({
+      contacted: 1,
+      skipped: 0,
+      candidates: [],
+      summary: 'prepare report',
+      contactedList: [{ name: 'Prepare Candidate', greetingSent: true }],
+      trace: [{ seq: 1, action: 'click', ok: true, stageId: 'prefilter', mode: 'prepare' }],
+    }, 'prepare');
+    persistRunResult(prepareRunId, 'Agent工程师', 'boss', prepareResult, { mode: 'prepare' });
+    expect(prepareResult.contacted).toBe(0);
+    expect((db.prepare(`SELECT COUNT(*) n FROM run_candidates WHERE run_id = ?`).get(prepareRunId) as { n: number }).n).toBe(0);
+    expect((db.prepare(`SELECT COUNT(*) n FROM interaction_log WHERE run_id = ?`).get(prepareRunId) as { n: number }).n).toBe(0);
+    expect((db.prepare(`SELECT COUNT(*) n FROM run_actions WHERE run_id = ?`).get(prepareRunId) as { n: number }).n).toBe(1);
   });
 
   it('fails compliance when contacted candidates miss outreach output fields', async () => {
@@ -518,7 +549,7 @@ describe('agent core lower layer', () => {
     expect(saved.detail).toContain('outreach-output.v1');
   });
 
-  it('does not treat dry-run task runs as formal outreach contract failures', async () => {
+  it('does not treat non-execute task runs as formal outreach contract failures', async () => {
     const { complianceCheck } = await import('../src/compliance');
     const { db, taskRunOps } = await import('../src/db');
 
@@ -544,6 +575,25 @@ describe('agent core lower layer', () => {
     const result = await complianceCheck({ runId });
     expect(result.verdict).toBe('skip');
     expect(result.violations).toHaveLength(0);
+
+    const prepareInserted = taskRunOps.start.run({
+      job_id: 'Agent工程师',
+      channel: 'boss',
+      mode: 'prepare',
+      started_at: new Date().toISOString(),
+    });
+    const prepareRunId = Number(prepareInserted.lastInsertRowid);
+    taskRunOps.complete.run({
+      id: prepareRunId,
+      finished_at: new Date().toISOString(),
+      status: 'completed',
+      contacted_count: 0,
+      skipped_count: 0,
+      error: null,
+    });
+    const prepareCheck = await complianceCheck({ runId: prepareRunId });
+    expect(prepareCheck.verdict).toBe('skip');
+    expect(prepareCheck.violations).toHaveLength(0);
   });
 
   it('formats read-only core status for observability', async () => {
@@ -634,6 +684,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('BOSS protocol wiring');
     expect(text).toContain('Recruiting capabilities');
     expect(text).toContain('Live BOSS run');
+    expect(text).toContain('Live BOSS prepare');
     expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Runner tool registry' && c.status === 'pass')).toBe(true);
   });

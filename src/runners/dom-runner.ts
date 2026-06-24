@@ -32,7 +32,7 @@ const MAX_TURNS = 150;
 const MAX_BODY_TEXT = 6000;
 const MAX_ELEMENTS = 120;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
-type SkillExecutionMode = 'execute' | 'dry_run';
+type SkillExecutionMode = 'execute' | 'dry_run' | 'prepare';
 
 // ── 风控规则（代码层硬约束，不依赖模型遵守 prompt）──────────────────────
 /** 打招呼类按钮的最小点击间隔（毫秒） */
@@ -189,6 +189,19 @@ const DRY_RUN_GUIDE = `
 - 任务结束时输出：当前页面状态、目标岗位是否匹配、下一步正式执行前需要做什么。
 `.trim();
 
+const PREPARE_GUIDE = `
+## Prepare 安全验收模式（代码硬约束）
+
+本轮只允许完成 BOSS 的目标职位定位与筛选面板前置，不允许查看或联系候选人：
+- 只能通过当前页面内 click/scroll 切换到 active job，并逐项设置筛选条件。
+- type 和 press 在 prepare 中一律禁止，避免误把导航词写入聊天框或触发发送。
+- 所有有副作用动作必须填写 stage_id，且只能使用 job-positioning 或 prefilter。
+- 点击只允许目标职位导航和筛选控件；无法识别语义的控件会被拒绝。
+- 禁止点击打招呼/立即沟通/发送消息等候选人沟通控件。
+- 如果筛选面板显示“确定/应用/确认”，必须成功点击提交；不能只凭 active 文案宣称完成。
+- 完成目标职位确认和筛选激活态验收后立即输出总结，不进入 candidate-screen/single-contact。
+`.trim();
+
 const DRY_RUN_ALLOWED_BROWSER_ACTIONS = new Set<BrowserAction['action']>(['snapshot', 'wait', 'scroll']);
 
 export function dryRunBlocksBrowserAction(input: BrowserAction): boolean {
@@ -196,19 +209,34 @@ export function dryRunBlocksBrowserAction(input: BrowserAction): boolean {
 }
 
 export function browserActionMode(input: BrowserAction, executionMode: SkillExecutionMode = 'execute'): ToolExecutionMode {
-  if (executionMode === 'dry_run') return 'dry_run';
+  if (executionMode !== 'execute') return executionMode;
   return input.action === 'snapshot' ? 'read' : 'execute';
 }
 
 export function browserActionHasSideEffect(input: BrowserAction, executionMode: SkillExecutionMode = 'execute'): boolean {
   if (executionMode === 'dry_run') return dryRunBlocksBrowserAction(input);
-  return input.action !== 'snapshot' && input.action !== 'wait';
+  return !['snapshot', 'wait', 'scroll'].includes(input.action);
 }
 
 function browserActionStageId(input: BrowserAction): string | undefined {
   const raw = input.stage_id ?? input.stageId;
   const text = typeof raw === 'string' ? raw.trim() : '';
   return text ? text.slice(0, 80) : undefined;
+}
+
+function snapshotRefLabel(snapshot: string, ref: number | undefined): string | undefined {
+  if (ref == null) return undefined;
+  return snapshot.split('\n').find(line => line.trimStart().startsWith(`[ref=${ref}]`))?.trim();
+}
+
+function snapshotUrl(snapshot: string): string {
+  return snapshot.split('\n').find(line => line.startsWith('URL: '))?.slice(5).trim() ?? 'unknown';
+}
+
+export function successfulStageIds(trace: SkillResult['trace'] = []): string[] {
+  return Array.from(new Set(
+    (trace ?? []).filter(step => step.ok).map(step => step.stageId).filter((value): value is string => !!value),
+  ));
 }
 
 /**
@@ -228,13 +256,29 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
       };
 
       const selector = [
-        'a[href]', 'button', 'input', 'textarea', 'select',
+        'a', 'button', 'input', 'textarea', 'select',
         '[role="button"]', '[role="link"]', '[role="tab"]', '[role="option"]',
         '[role="menuitem"]', '[role="checkbox"]', '[contenteditable="true"]',
         '[onclick]',
       ].join(',');
 
-      const elements = Array.from(document.querySelectorAll(selector)).filter(isVisible);
+      document.querySelectorAll('[data-hs-ref]').forEach(el => el.removeAttribute('data-hs-ref'));
+      const elements = Array.from(document.querySelectorAll('*')).filter(el => {
+        if (!isVisible(el)) return false;
+        if (el.matches(selector)) return true;
+        if (el === document.body || el === document.documentElement) return false;
+        const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
+        if (!text || text.length > 120 || window.getComputedStyle(el).cursor !== 'pointer') return false;
+        const interactiveChild = el.querySelector(selector);
+        if (interactiveChild && isVisible(interactiveChild)) {
+          const childText = (interactiveChild.textContent || '').trim().replace(/\s+/g, ' ');
+          if (childText === text) return false;
+        }
+        const parent = el.parentElement;
+        if (!parent || parent === document.body || !isVisible(parent)) return true;
+        const parentText = (parent.textContent || '').trim().replace(/\s+/g, ' ');
+        return window.getComputedStyle(parent).cursor !== 'pointer' || parentText !== text;
+      });
 
       const lines: string[] = [];
       let refCounter = 0;
@@ -253,6 +297,12 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
         if (input.placeholder) parts.push(`placeholder="${input.placeholder}"`);
         if (input.value && tag === 'input') parts.push(`value="${String(input.value).slice(0, 40)}"`);
         if (el.getAttribute('aria-label')) parts.push(`aria="${el.getAttribute('aria-label')}"`);
+        if (el.className && typeof el.className === 'string') parts.push(`class="${el.className.slice(0, 80)}"`);
+        if (window.getComputedStyle(el).cursor === 'pointer') parts.push('pointer=true');
+        for (const state of ['aria-selected', 'aria-pressed', 'aria-checked']) {
+          const value = el.getAttribute(state);
+          if (value != null) parts.push(`${state}="${value}"`);
+        }
 
         lines.push(parts.join(' '));
       }
@@ -388,12 +438,18 @@ export class DomRunner implements LLMRunner {
     options: RunSkillOptions = {},
   ): Promise<SkillResult> {
     const executionMode = options.executionMode ?? 'execute';
-    const system = [DOM_GUIDE, executionMode === 'dry_run' ? DRY_RUN_GUIDE : '', systemPrompt]
+    const system = [
+      DOM_GUIDE,
+      executionMode === 'dry_run' ? DRY_RUN_GUIDE : '',
+      executionMode === 'prepare' ? PREPARE_GUIDE : '',
+      systemPrompt,
+    ]
       .filter(Boolean)
       .join('\n\n---\n\n');
     const result: SkillResult = { contacted: 0, skipped: 0, candidates: [], summary: '', trace: [] };
     const initSnapshot = isDomBrowserSession(page) ? await page.snapshot() : await takeDomSnapshot(page);
-    const initialMode = executionMode === 'dry_run' ? 'dry_run' : 'read';
+    let currentSnapshot = initSnapshot;
+    const initialMode = executionMode === 'execute' ? 'read' : executionMode;
     result.trace!.push({
       seq: 1,
       action: 'snapshot',
@@ -427,8 +483,11 @@ export class DomRunner implements LLMRunner {
 
     const guard: RiskGuard = { lastGreetingAt: 0 };
     let hardStopped = false;
+    let prepareSideEffectCount = 0;
+    const prepareActionAttempts = new Map<string, number>();
+    const maxTurns = executionMode === 'prepare' ? 40 : MAX_TURNS;
 
-    for (let turn = 0; turn < MAX_TURNS; turn++) {
+    for (let turn = 0; turn < maxTurns; turn++) {
       const intervention = popIntervention();
       if (intervention) {
         const msg = `[用户介入] ${intervention}`;
@@ -462,11 +521,25 @@ export class DomRunner implements LLMRunner {
       // 没有工具调用 → 任务完成
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
         const finalText = msg.content ?? '';
+        const completionDecision = options.completionPolicy?.({
+          executionMode,
+          trace: result.trace ?? [],
+          pageSnapshot: currentSnapshot,
+          targetJobTitle: options.targetJobTitle,
+        });
+        if (completionDecision && !completionDecision.allowed) {
+          const reason = completionDecision.reason ?? '当前运行状态尚未满足完成条件。';
+          const feedback = `[产品协议验收未通过] ${reason}\n请继续使用允许的工具完成缺失动作；不要仅输出文字总结。`;
+          onProgress?.(`⚠️ ${feedback}`);
+          emitLog(`⚠️ ${feedback}`);
+          messages.push({ role: 'user', content: feedback });
+          continue;
+        }
         result.summary = finalText;
         const parsed = parseSkillSummary(finalText);
         result.contacted = parsed.contacted;
         result.skipped = parsed.skipped;
-        if (executionMode === 'dry_run') {
+        if (executionMode !== 'execute') {
           // 预检报告常包含候选人项目符号，不能让旧文本兜底把它们误认成已触达。
           result.contacted = 0;
           result.contactedList = (result.contactedList ?? []).map(candidate => ({
@@ -509,14 +582,23 @@ export class DomRunner implements LLMRunner {
         if (toolCall.function.name === 'record_contacted') {
           let toolContent = '已登记。继续下一个候选人。';
           let recordOk = true;
+          const observedStages = new Set(successfulStageIds(result.trace));
+          const missingStages = (options.requiredStagesBeforeContact ?? [])
+            .filter(stageId => !observedStages.has(stageId));
+          if (missingStages.length > 0) {
+            recordOk = false;
+            toolContent = `登记失败：触达前缺少协议阶段 ${missingStages.join(', ')} 的运行证据。`;
+          }
           try {
             const a = JSON.parse(toolCall.function.arguments || '{}');
-            if (!a.name) {
+            if (!recordOk) {
+              // 阶段门禁已拒绝，仍解析参数以保证错误路径稳定，但不写候选人。
+            } else if (!a.name) {
               recordOk = false;
               toolContent = '登记失败：缺少 name。请重新调用 record_contacted，补上候选人姓名。';
-            } else if (executionMode === 'dry_run' && a.greeting_sent !== false) {
+            } else if (executionMode !== 'execute' && a.greeting_sent !== false) {
               recordOk = false;
-              toolContent = '登记失败：当前是 dry-run 预检模式，不能登记为已真实打招呼。请改为 greeting_sent=false 或直接输出预检总结。';
+              toolContent = `登记失败：当前是 ${executionMode} 模式，不能登记为已真实打招呼。请直接输出本轮安全验收总结。`;
             } else if (a.greeting_sent !== false) {
               const missing = ['evidence', 'personalization_evidence', 'message_intent', 'greeting_text']
                 .filter(key => !String(a[key] ?? '').trim());
@@ -562,7 +644,7 @@ export class DomRunner implements LLMRunner {
             ok: recordOk,
             error: recordOk ? null : toolContent,
             sideEffect: false,
-            mode: executionMode === 'dry_run' ? 'dry_run' : 'execute',
+            mode: executionMode === 'execute' ? 'execute' : executionMode,
             stageId: 'single-contact',
           });
           continue;
@@ -602,7 +684,7 @@ export class DomRunner implements LLMRunner {
             ok: false,
             error: content,
             sideEffect: true,
-            mode: executionMode === 'dry_run' ? 'dry_run' : 'execute',
+            mode: executionMode === 'execute' ? 'execute' : executionMode,
           });
           continue;
         }
@@ -612,7 +694,7 @@ export class DomRunner implements LLMRunner {
           input = JSON.parse(toolCall.function.arguments || '{}') as BrowserAction;
         } catch (err) {
           const message = `browser 参数不是合法 JSON：${err instanceof Error ? err.message : String(err)}`;
-          const mode = executionMode === 'dry_run' ? 'dry_run' : 'execute';
+          const mode = executionMode === 'execute' ? 'execute' : executionMode;
           messages.push({ role: 'tool', tool_call_id: toolCall.id, content: message });
           recordToolCall({
             runId: options.runId,
@@ -632,8 +714,22 @@ export class DomRunner implements LLMRunner {
           input.url ? ` ${input.url}` : ''
         }`;
         const stageId = browserActionStageId(input);
+        const actionLabel = snapshotRefLabel(currentSnapshot, input.ref);
         onProgress?.(actionLog);
         emitLog(actionLog);
+
+        if (executionMode === 'prepare' && browserActionHasSideEffect(input, executionMode)) {
+          prepareSideEffectCount++;
+          const key = `${input.action}:${snapshotUrl(currentSnapshot)}:${actionLabel ?? input.ref ?? ''}:${input.text ?? ''}`;
+          const attempts = (prepareActionAttempts.get(key) ?? 0) + 1;
+          prepareActionAttempts.set(key, attempts);
+          if (prepareSideEffectCount > 12) {
+            throw new Error('prepare safety budget exceeded: more than 12 side-effect attempts');
+          }
+          if (attempts > 2) {
+            throw new Error(`prepare repeated-action circuit breaker: ${input.action} ref=${input.ref ?? 'none'}`);
+          }
+        }
 
         if (executionMode === 'dry_run' && dryRunBlocksBrowserAction(input)) {
           const blocked = `dry-run 预检模式禁止执行 ${input.action}，已阻止真实浏览器动作。请只用 snapshot/wait/scroll 观察页面，或输出预检总结。`;
@@ -713,9 +809,15 @@ export class DomRunner implements LLMRunner {
           continue;
         }
 
+        const observedStageIds = successfulStageIds(result.trace);
         const policyDecision = options.browserActionPolicy?.(input, {
           runId: options.runId,
           sessionId: options.sessionId,
+          executionMode,
+          observedStageIds,
+          actionLabel,
+          pageSnapshot: currentSnapshot,
+          targetJobTitle: options.targetJobTitle,
         });
         if (policyDecision && !policyDecision.allowed) {
           const blocked = policyDecision.reason ?? `当前平台协议禁止执行 ${input.action}`;
@@ -754,6 +856,7 @@ export class DomRunner implements LLMRunner {
               sideEffect,
               mode,
               stageId,
+              actionLabel,
             });
           } catch { /* 轨迹记录失败绝不影响 sourcing */ }
           continue;
@@ -802,6 +905,7 @@ export class DomRunner implements LLMRunner {
             sideEffect: browserActionHasSideEffect(input, executionMode),
             mode: browserActionMode(input, executionMode),
             stageId,
+            actionLabel,
           });
         } catch { /* 轨迹记录失败绝不影响 sourcing */ }
         recordToolCall({
@@ -817,6 +921,7 @@ export class DomRunner implements LLMRunner {
           mode: browserActionMode(input, executionMode),
           stageId,
         });
+        currentSnapshot = snapshot;
 
         // 风控检测：基于页面快照文本（代码层判定，不依赖模型识别）
         if (DAILY_LIMIT_PATTERN.test(snapshot)) {
