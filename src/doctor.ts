@@ -82,6 +82,10 @@ export interface BossPrepareEvidence extends BossDryRunEvidence {
   unsafeSuccessfulActions: number;
 }
 
+export interface BossScreenEvidence extends BossPrepareEvidence {
+  candidateScreenActions: number;
+}
+
 export function hasPassingBossDryRunEvidence(evidence: BossDryRunEvidence | null): boolean {
   return !!evidence
     && evidence.status === 'completed'
@@ -154,6 +158,58 @@ function latestBossPrepareEvidence(): BossPrepareEvidence | null {
       ORDER BY id DESC
       LIMIT 1
     `).get() as BossPrepareEvidence | undefined ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function hasPassingBossScreenEvidence(evidence: BossScreenEvidence | null): boolean {
+  return !!evidence
+    && evidence.status === 'completed'
+    && evidence.contactedCount === 0
+    && evidence.runCandidates === 0
+    && evidence.interactions === 0
+    && evidence.runActions > 0
+    && evidence.toolCalls > 0
+    && evidence.candidateScreenActions > 0
+    && evidence.successfulSideEffects > 0
+    && evidence.unsafeSuccessfulActions === 0;
+}
+
+function latestBossScreenEvidence(): BossScreenEvidence | null {
+  try {
+    return db.prepare(`
+      SELECT
+        task_runs.id,
+        task_runs.status,
+        task_runs.contacted_count AS contactedCount,
+        (SELECT COUNT(*) FROM run_candidates WHERE run_id = task_runs.id) AS runCandidates,
+        (SELECT COUNT(*) FROM interaction_log WHERE run_id = task_runs.id) AS interactions,
+        (SELECT COUNT(*) FROM run_actions WHERE run_id = task_runs.id) AS runActions,
+        (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id) AS toolCalls,
+        (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id AND side_effect = 1) AS sideEffects,
+        (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id AND side_effect = 1 AND ok = 1) AS successfulSideEffects,
+        (SELECT COUNT(*) FROM run_actions WHERE run_id = task_runs.id AND stage_id = 'candidate-screen' AND ok = 1) AS candidateScreenActions,
+        (
+          SELECT COUNT(*) FROM agent_tool_calls
+          WHERE run_id = task_runs.id AND ok = 1 AND (
+            tool_name = 'prepare_contact' OR
+            (
+              tool_name = 'record_contacted' AND (
+                json_valid(input_summary) = 0 OR COALESCE(json_extract(input_summary, '$.greeting_sent'), 1) != 0
+              )
+            ) OR
+            (tool_name != 'record_contacted' AND stage_id = 'single-contact') OR (
+              tool_name = 'browser' AND json_valid(input_summary) = 1
+              AND json_extract(input_summary, '$.action') IN ('type', 'press', 'goto')
+            )
+          )
+        ) AS unsafeSuccessfulActions
+      FROM task_runs
+      WHERE channel = 'boss' AND mode = 'screen'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get() as BossScreenEvidence | undefined ?? null;
   } catch {
     return null;
   }
@@ -305,6 +361,17 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
       : 'no BOSS prepare evidence; run hireseek run boss --here --prepare before real outreach',
   ));
 
+  const screen = latestBossScreenEvidence();
+  const screenPassed = hasPassingBossScreenEvidence(screen);
+  checks.push(check(
+    'upper',
+    'Live BOSS screen',
+    screenPassed ? 'pass' : 'warn',
+    screen
+      ? `latest screen #${screen.id}: status=${screen.status}, contacted=${screen.contactedCount}, candidates=${screen.runCandidates}, interactions=${screen.interactions}, actions=${screen.runActions}, toolCalls=${screen.toolCalls}, candidateScreenActions=${screen.candidateScreenActions}, successfulSideEffects=${screen.successfulSideEffects}, unsafeSuccessfulActions=${screen.unsafeSuccessfulActions}`
+      : 'no BOSS screen evidence; run hireseek run boss --here --screen before real outreach',
+  ));
+
   const dryRun = latestBossDryRunEvidence();
   const dryRunPassed = hasPassingBossDryRunEvidence(dryRun);
   checks.push(check(
@@ -349,6 +416,9 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   }
   if (checks.some(c => c.name === 'Live BOSS prepare' && c.status === 'warn')) {
     nextSteps.push('真实触达前运行 `hireseek run boss --here --prepare`，确认自动切职位和筛选提交安全通过。');
+  }
+  if (checks.some(c => c.name === 'Live BOSS screen' && c.status === 'warn')) {
+    nextSteps.push('真实触达前运行 `hireseek run boss --here --screen`，确认候选人查看与筛选判断安全通过。');
   }
   if (checks.some(c => c.layer === 'middle' && c.status !== 'pass')) {
     nextSteps.push('中层协议/能力不完整时，先补产品协议，不回退到复制 skill。');

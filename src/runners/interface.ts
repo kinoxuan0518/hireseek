@@ -10,7 +10,7 @@ export interface BrowserActionPolicyDecision {
 export interface BrowserActionPolicyContext {
   runId?: number;
   sessionId?: string;
-  executionMode?: Extract<ToolExecutionMode, 'execute' | 'dry_run' | 'prepare'>;
+  executionMode?: Extract<ToolExecutionMode, 'execute' | 'dry_run' | 'prepare' | 'screen'>;
   observedStageIds?: string[];
   actionLabel?: string;
   pageSnapshot?: string;
@@ -25,7 +25,7 @@ export type BrowserActionPolicy = (
 ) => BrowserActionPolicyDecision;
 
 export interface RunCompletionPolicyContext {
-  executionMode: Extract<ToolExecutionMode, 'execute' | 'dry_run' | 'prepare'>;
+  executionMode: Extract<ToolExecutionMode, 'execute' | 'dry_run' | 'prepare' | 'screen'>;
   trace: TraceStep[];
   pageSnapshot: string;
   targetJobTitle?: string;
@@ -39,7 +39,7 @@ export type RunCompletionPolicy = (
 
 export interface RunSkillOptions {
   /** execute=真实执行；dry_run=只观察/预检，禁止外部副作用。 */
-  executionMode?: Extract<ToolExecutionMode, 'execute' | 'dry_run' | 'prepare'>;
+  executionMode?: Extract<ToolExecutionMode, 'execute' | 'dry_run' | 'prepare' | 'screen'>;
   blockedBrowserActions?: BrowserAction['action'][];
   /** 中层平台协议可在这里约束浏览器动作；runner 只执行通用策略结果。 */
   browserActionPolicy?: BrowserActionPolicy;

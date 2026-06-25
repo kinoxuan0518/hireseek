@@ -264,6 +264,7 @@ describe('agent core lower layer', () => {
       browserActionHasSideEffect,
       browserActionMode,
       dryRunBlocksBrowserAction,
+      screenBlocksBrowserAction,
     } = await import('../src/runners/dom-runner');
 
     expect(dryRunBlocksBrowserAction({ action: 'click', ref: 1 })).toBe(true);
@@ -271,13 +272,21 @@ describe('agent core lower layer', () => {
     expect(dryRunBlocksBrowserAction({ action: 'goto', url: 'https://example.com' })).toBe(true);
     expect(dryRunBlocksBrowserAction({ action: 'snapshot' })).toBe(false);
     expect(dryRunBlocksBrowserAction({ action: 'scroll', direction: 'down' })).toBe(false);
+    expect(screenBlocksBrowserAction({ action: 'type', ref: 1, text: 'hello' })).toBe(true);
+    expect(screenBlocksBrowserAction({ action: 'press', text: 'Enter' })).toBe(true);
+    expect(screenBlocksBrowserAction({ action: 'goto', url: 'https://example.com' })).toBe(true);
+    expect(screenBlocksBrowserAction({ action: 'click', ref: 1 })).toBe(false);
+    expect(screenBlocksBrowserAction({ action: 'back' })).toBe(false);
 
     expect(browserActionMode({ action: 'click', ref: 1 }, 'dry_run')).toBe('dry_run');
     expect(browserActionMode({ action: 'click', ref: 1 }, 'prepare')).toBe('prepare');
+    expect(browserActionMode({ action: 'click', ref: 1 }, 'screen')).toBe('screen');
     expect(browserActionHasSideEffect({ action: 'scroll', direction: 'down' }, 'dry_run')).toBe(false);
     expect(browserActionHasSideEffect({ action: 'scroll', direction: 'down' }, 'prepare')).toBe(false);
+    expect(browserActionHasSideEffect({ action: 'scroll', direction: 'down' }, 'screen')).toBe(false);
     expect(browserActionHasSideEffect({ action: 'click', ref: 1 }, 'dry_run')).toBe(true);
     expect(browserActionHasSideEffect({ action: 'click', ref: 1 }, 'prepare')).toBe(true);
+    expect(browserActionHasSideEffect({ action: 'click', ref: 1 }, 'screen')).toBe(true);
   });
 
   it('does not treat failed or blocked actions as completed protocol stages', async () => {
@@ -625,6 +634,25 @@ describe('agent core lower layer', () => {
     expect((db.prepare(`SELECT COUNT(*) n FROM run_candidates WHERE run_id = ?`).get(prepareRunId) as { n: number }).n).toBe(0);
     expect((db.prepare(`SELECT COUNT(*) n FROM interaction_log WHERE run_id = ?`).get(prepareRunId) as { n: number }).n).toBe(0);
     expect((db.prepare(`SELECT COUNT(*) n FROM run_actions WHERE run_id = ?`).get(prepareRunId) as { n: number }).n).toBe(1);
+
+    const screenRunId = 306;
+    db.prepare(`DELETE FROM interaction_log WHERE run_id = ?`).run(screenRunId);
+    db.prepare(`DELETE FROM run_actions WHERE run_id = ?`).run(screenRunId);
+    db.prepare(`DELETE FROM run_candidates WHERE run_id = ?`).run(screenRunId);
+    const screenResult = normalizeResultForRunMode({
+      contacted: 1,
+      skipped: 1,
+      candidates: [],
+      summary: 'screen report',
+      contactedList: [{ name: 'Screen Candidate', greetingSent: true }],
+      trace: [{ seq: 1, action: 'click', ok: true, stageId: 'candidate-screen', mode: 'screen' }],
+    }, 'screen');
+    persistRunResult(screenRunId, 'Agent工程师', 'boss', screenResult, { mode: 'screen' });
+    expect(screenResult.contacted).toBe(0);
+    expect(screenResult.contactedList?.[0]?.greetingSent).toBe(false);
+    expect((db.prepare(`SELECT COUNT(*) n FROM run_candidates WHERE run_id = ?`).get(screenRunId) as { n: number }).n).toBe(0);
+    expect((db.prepare(`SELECT COUNT(*) n FROM interaction_log WHERE run_id = ?`).get(screenRunId) as { n: number }).n).toBe(0);
+    expect((db.prepare(`SELECT COUNT(*) n FROM run_actions WHERE run_id = ?`).get(screenRunId) as { n: number }).n).toBe(1);
   });
 
   it('fails compliance when contacted candidates miss outreach output fields', async () => {
@@ -801,6 +829,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Recruiting capabilities');
     expect(text).toContain('Live BOSS run');
     expect(text).toContain('Live BOSS prepare');
+    expect(text).toContain('Live BOSS screen');
     expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Runner tool registry' && c.status === 'pass')).toBe(true);
   });

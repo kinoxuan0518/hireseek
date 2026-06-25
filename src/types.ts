@@ -34,7 +34,7 @@ export interface TaskRun {
   id?: number;
   job_id: string;
   channel: Channel;
-  mode?: 'execute' | 'dry_run' | 'prepare';
+  mode?: 'execute' | 'dry_run' | 'prepare' | 'screen';
   started_at: string;
   finished_at?: string;
   status: 'running' | 'completed' | 'failed';
@@ -56,7 +56,7 @@ export interface TraceStep {
   outputSummary?: string;     // 工具输出摘要
   error?: string;             // 失败原因
   sideEffect?: boolean;       // 是否真实影响外部世界
-  mode?: 'read' | 'dry_run' | 'prepare' | 'execute';
+  mode?: 'read' | 'dry_run' | 'prepare' | 'screen' | 'execute';
   stageId?: string;           // 可选：中层协议阶段 id（如下层只记录，不解释业务含义）
   actionLabel?: string;       // 动作执行前的控件语义（仅内存验收使用，不默认持久化）
 }

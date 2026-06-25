@@ -386,7 +386,7 @@ export const memoryOps = {
 
 // ── 任务记录操作 ──────────────────────────────────────────
 export const taskRunOps = {
-  start: db.prepare<Pick<TaskRun, 'job_id' | 'channel' | 'started_at'> & { mode?: 'execute' | 'dry_run' | 'prepare' }>(`
+  start: db.prepare<Pick<TaskRun, 'job_id' | 'channel' | 'started_at'> & { mode?: 'execute' | 'dry_run' | 'prepare' | 'screen' }>(`
     INSERT INTO task_runs (job_id, channel, mode, started_at)
     VALUES (@job_id, @channel, COALESCE(@mode, 'execute'), @started_at)
   `),

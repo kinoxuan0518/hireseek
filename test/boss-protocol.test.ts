@@ -300,6 +300,58 @@ describe('boss platform protocol middle layer', () => {
     expect(unfinished.reason).toContain('record_contacted');
   });
 
+  it('allows screen-mode candidate inspection but blocks communication controls', () => {
+    const observedStageIds = ['session-precheck', 'job-positioning', 'prefilter', 'dom-probe'];
+    const candidateCard = bossBrowserActionPolicy(
+      { action: 'click', ref: 41, stage_id: 'candidate-screen' },
+      {
+        executionMode: 'screen',
+        observedStageIds,
+        actionLabel: '[ref=41] <div> 测试候选人 2年 Agent 平台经验 class="geek-item" pointer=true',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
+    const greetingButton = bossBrowserActionPolicy(
+      { action: 'click', ref: 42, stage_id: 'candidate-screen' },
+      {
+        executionMode: 'screen',
+        observedStageIds,
+        actionLabel: '[ref=42] <button> 打招呼 context="测试候选人"',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
+    const singleContact = bossBrowserActionPolicy(
+      { action: 'click', ref: 43, stage_id: 'single-contact' },
+      {
+        executionMode: 'screen',
+        observedStageIds: [...observedStageIds, 'candidate-screen'],
+        actionLabel: '[ref=43] <button> 打招呼 context="测试候选人"',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
+    const unfinishedScreen = bossRunCompletionPolicy({
+      executionMode: 'screen',
+      trace: [],
+      pageSnapshot: '',
+      targetJobTitle: 'Agent工程师',
+    });
+    const finishedScreen = bossRunCompletionPolicy({
+      executionMode: 'screen',
+      trace: [{ seq: 1, action: 'click', ok: true, stageId: 'candidate-screen' }],
+      pageSnapshot: '',
+      targetJobTitle: 'Agent工程师',
+    });
+
+    expect(candidateCard.allowed).toBe(true);
+    expect(greetingButton.allowed).toBe(false);
+    expect(greetingButton.reason).toContain('沟通控件');
+    expect(singleContact.allowed).toBe(false);
+    expect(singleContact.reason).toContain('single-contact');
+    expect(unfinishedScreen.allowed).toBe(false);
+    expect(unfinishedScreen.reason).toContain('candidate-screen');
+    expect(finishedScreen.allowed).toBe(true);
+  });
+
   it('registers BOSS protocol as the channel contract owner', () => {
     const protocol = getPlatformProtocol('boss');
 
@@ -312,9 +364,14 @@ describe('boss platform protocol middle layer', () => {
     expect(formatPlatformProtocols()).toContain('产品中层协议');
     expect(formatPlatformProtocols()).toContain('Stage manifest: 7 stages');
     expect(runSkillOptionsForChannel('boss', 123, true, true).initialStageId).toBe('session-precheck');
-    expect(runSkillOptionsForChannel('boss', 124, true, false, true, 'Agent工程师')).toMatchObject({
+    expect(runSkillOptionsForChannel('boss', 124, true, false, true, false, 'Agent工程师')).toMatchObject({
       executionMode: 'prepare',
       requiredStagesBeforeContact: ['prefilter', 'dom-probe', 'candidate-screen'],
+      targetJobTitle: 'Agent工程师',
+    });
+    expect(runSkillOptionsForChannel('boss', 125, true, false, false, true, 'Agent工程师')).toMatchObject({
+      executionMode: 'screen',
+      initialStageId: 'session-precheck',
       targetJobTitle: 'Agent工程师',
     });
   });

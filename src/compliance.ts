@@ -143,7 +143,7 @@ function loadToolStageCounts(runId: number): Map<string, number> {
   return counts;
 }
 
-export function inspectStageCoverage(channel: Channel, runId: number, trace: TraceStep[], opts: { runMode?: 'execute' | 'dry_run' | 'prepare' } = {}): StageCoverageAudit {
+export function inspectStageCoverage(channel: Channel, runId: number, trace: TraceStep[], opts: { runMode?: 'execute' | 'dry_run' | 'prepare' | 'screen' } = {}): StageCoverageAudit {
   const runMode = opts.runMode ?? 'execute';
   const stages = getPlatformProtocol(channel)?.stageManifest?.() ?? [];
   if (stages.length === 0) {
@@ -217,7 +217,7 @@ export function inspectStageCoverage(channel: Channel, runId: number, trace: Tra
   return { channel, declared: stages.length, stages: rows, unknownStageIds: unknown, instrumented, violations };
 }
 
-export function summarizeStageCoverage(channel: Channel, runId: number, trace: TraceStep[], opts: { runMode?: 'execute' | 'dry_run' | 'prepare' } = {}): string {
+export function summarizeStageCoverage(channel: Channel, runId: number, trace: TraceStep[], opts: { runMode?: 'execute' | 'dry_run' | 'prepare' | 'screen' } = {}): string {
   const audit = inspectStageCoverage(channel, runId, trace, opts);
   if (audit.declared === 0) return '此渠道未声明 stage manifest。';
 
@@ -247,7 +247,7 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
   const runRow = db.prepare(`SELECT job_id, channel, mode FROM task_runs WHERE id = ?`).get(runId) as { job_id: string; channel: string; mode?: string } | undefined;
   const channelRow = db.prepare(`SELECT channel FROM run_actions WHERE run_id = ? LIMIT 1`).get(runId) as { channel: string } | undefined;
   const channel = (runRow?.channel ?? channelRow?.channel ?? 'boss') as Channel;
-  const runMode = runRow?.mode === 'dry_run' ? 'dry_run' : runRow?.mode === 'prepare' ? 'prepare' : 'execute';
+  const runMode = runRow?.mode === 'dry_run' ? 'dry_run' : runRow?.mode === 'prepare' ? 'prepare' : runRow?.mode === 'screen' ? 'screen' : 'execute';
   const jobId = runRow?.job_id ?? runtime.activeJobId;
   const stageAudit = inspectStageCoverage(channel, runId, trace, { runMode });
 

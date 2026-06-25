@@ -353,6 +353,7 @@ const BOSS_STAGE_PREREQUISITES: Record<string, string[]> = {
 const PREPARE_SIDE_EFFECT_STAGES = new Set(['job-positioning', 'prefilter']);
 const BROWSER_SIDE_EFFECT_ACTIONS = new Set<BrowserAction['action']>(['click', 'type', 'press', 'goto', 'back']);
 const BOSS_CONTACT_LABEL = /打招呼|立即沟通|继续沟通|和\s*Ta\s*聊聊|聊一聊|发送|消息|聊天|沟通记录|新招呼|回复|送达|已读|未读|class="[^"]*(?:chat|message|editor|push-text|text-content|geek-item|gray)/i;
+const BOSS_COMMUNICATION_CONTROL_LABEL = /打招呼|立即沟通|继续沟通|和\s*Ta\s*聊聊|聊一聊|发送|消息|聊天|沟通记录|新招呼|回复|送达|已读|未读|class="[^"]*(?:chat|message|editor)/i;
 const BOSS_GREETING_LABEL = /打招呼|立即沟通|和\s*Ta\s*聊聊|聊一聊/i;
 const BOSS_ALREADY_CONTACTED_LABEL = /继续沟通|已沟通/i;
 const BOSS_PREPARE_JOB_CONTROL = /职位管理|推荐牛人|职位下拉|切换职位|招聘职位|我的职位|职位列表|选择职位|当前职位|目标职位|aria="[^"]*(?:职位|岗位)|title="[^"]*(?:职位|岗位)|role="combobox"|class="[^"]*dropmenu-label/i;
@@ -467,6 +468,23 @@ export const bossBrowserActionPolicy: BrowserActionPolicy = (
     }
   }
 
+  if (context.executionMode === 'screen' && hasSideEffect) {
+    if (action.action === 'type' || action.action === 'press') {
+      return {
+        allowed: false,
+        reason: `screen 模式禁止 ${action.action}：候选人筛选验收不能向页面输入或发送内容。`,
+      };
+    }
+    if (action.action === 'click') {
+      if (stageId === 'single-contact') {
+        return { allowed: false, reason: 'screen 模式禁止进入 single-contact；只能查看候选人并输出判断。' };
+      }
+      if (context.actionLabel && BOSS_COMMUNICATION_CONTROL_LABEL.test(context.actionLabel)) {
+        return { allowed: false, reason: 'screen 模式检测到沟通控件，禁止打招呼、发送消息或进入聊天。' };
+      }
+    }
+  }
+
   if (context.executionMode === 'execute' && action.action === 'click' && context.actionLabel) {
     if (BOSS_ALREADY_CONTACTED_LABEL.test(context.actionLabel)) {
       return { allowed: false, reason: '该候选人已经沟通过，禁止重复触达。' };
@@ -495,6 +513,13 @@ const BOSS_FILTER_SUBMIT_LABEL = /(?:确定|应用|确认)(?!取消)/i;
 export const bossRunCompletionPolicy: RunCompletionPolicy = context => {
   if (context.executionMode === 'execute' && context.pendingContactAwaitingRecord) {
     return { allowed: false, reason: `候选人 ${context.pendingContactName ?? ''} 已点击沟通但尚未 record_contacted。` };
+  }
+  if (context.executionMode === 'screen') {
+    const observed = new Set(context.trace.filter(step => step.ok && step.stageId).map(step => step.stageId));
+    if (!observed.has('candidate-screen')) {
+      return { allowed: false, reason: 'screen 尚未留下候选人查看阶段 candidate-screen 的成功证据。' };
+    }
+    return { allowed: true };
   }
   if (context.executionMode !== 'prepare') return { allowed: true };
 

@@ -1,6 +1,6 @@
 import type { ToolExecutionMode } from './tool-registry';
 
-export type AgentRunMode = 'execute' | 'dry_run' | 'prepare';
+export type AgentRunMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
 
 const READ_ONLY_ACTIONS = new Set(['screenshot', 'move', 'mouse_move', 'scroll']);
 

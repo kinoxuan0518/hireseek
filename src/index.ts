@@ -43,6 +43,7 @@ const USAGE = `
   hireseek run <渠道>          指定渠道立即执行
   hireseek run <渠道> --dry-run  预检模式：接管真实页面但禁止打招呼/输入/点击副作用
   hireseek run boss --here --prepare  安全验收：自动切到目标职位并设置筛选，但绝不触达候选人
+  hireseek run boss --here --screen   候选人筛选验收：可查看候选人，但禁止打招呼/发消息
   hireseek run boss --here     就地接管当前 BOSS 页面，由产品协议自行定位目标职位并执行
   hireseek scan                扫描收件箱，更新已回复候选人
   hireseek update <姓名> <状态>  手动更新候选人状态
@@ -268,6 +269,8 @@ async function main(): Promise<void> {
     const dryRun = args.includes('--dry-run') || args.includes('--preview') || args.includes('--check');
     // 安全验收：允许 BOSS 站内职位定位与筛选动作，但代码层禁止候选人触达。
     const prepare = args.includes('--prepare');
+    // 候选人筛选验收：允许查看候选人卡片/详情，但代码层禁止触达。
+    const screen = args.includes('--screen') || args.includes('--screen-only');
     // 跳过命令名本身（args[0]='run'），否则自主模式会把 run 当渠道名
     const channelArg = args.slice(1).find(a => !a.startsWith('-'));
 
@@ -295,14 +298,15 @@ async function main(): Promise<void> {
       }
       let runId: number;
       try {
-        runId = await runChannel(channelArg as Channel, undefined, { fromCurrent, dryRun, prepare });
+        runId = await runChannel(channelArg as Channel, undefined, { fromCurrent, dryRun, prepare, screen });
       } catch (err) {
         console.error(chalk.red(`\n[HireSeek] sourcing 未启动: ${err instanceof Error ? err.message : err}`));
         db.close();
         process.exit(1);
       }
-      if (dryRun || prepare) {
-        console.log(chalk.gray(`\n── ${prepare ? 'prepare 安全验收' : 'dry-run 预检'}完成（runId=${runId}）──`));
+      if (dryRun || prepare || screen) {
+        const safeModeLabel = prepare ? 'prepare 安全验收' : screen ? 'screen 候选人筛选验收' : 'dry-run 预检';
+        console.log(chalk.gray(`\n── ${safeModeLabel}完成（runId=${runId}）──`));
         console.log(chalk.gray('本轮没有真实触达，不运行候选人质检/触达契约审计。正式执行前可查看上方预检总结。'));
         db.close();
         process.exit(0);

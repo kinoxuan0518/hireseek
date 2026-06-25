@@ -22,7 +22,7 @@ import { buildRecruitingCapabilityContext } from './capabilities';
 import type { RunSkillOptions } from './runners/interface';
 import { saveRunTrace } from './agent-core/run-trace-store';
 
-type ChannelRunMode = 'execute' | 'dry_run' | 'prepare';
+type ChannelRunMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
 
 /**
  * 履约 canonical 契约 boss-greeting.v1 的 writes: [contacted_candidates, run_trace, interaction_log]。
@@ -189,6 +189,7 @@ function taskPromptForChannel(
   fromCurrent = false,
   dryRun = false,
   prepare = false,
+  screen = false,
   activeJob?: JobConfig | null,
 ): string {
   const protocol = getPlatformProtocol(channel);
@@ -204,6 +205,20 @@ function taskPromptForChannel(
         '本轮必须自行通过 BOSS 页面内交互切到 active job，并完成筛选面板逐项设置与激活态验收。',
         '如果筛选面板显示“确定/应用/确认”，必须成功点击提交；仅看到 active 状态不能算完成。',
         '完成筛选后立即停止；禁止进入候选人处理、禁止打招呼、禁止发送消息、禁止调用 record_contacted。',
+      ].join('\n'),
+    ].join('\n\n---\n\n');
+  }
+  if (screen) {
+    return [
+      base,
+      [
+        '## Screen 候选人筛选验收约束',
+        '',
+        '本轮只验证候选人查看和筛选判断，禁止任何真实触达。',
+        '先用 snapshot 依次留下 session-precheck、job-positioning、prefilter、dom-probe 的阶段证据；如果当前页面已经完成职位和筛选，也要用只读 snapshot 说明。',
+        '随后进入 candidate-screen：可以点击候选人卡片或详情查看证据、滚动加载更多、必要时 back 返回列表。',
+        '禁止点击打招呼/立即沟通/发送消息/聊天等沟通控件，禁止调用 prepare_contact。',
+        '结束时输出：查看候选人数量、建议正式触达名单、跳过名单、证据、风险点。',
       ].join('\n'),
     ].join('\n\n---\n\n');
   }
@@ -225,12 +240,13 @@ export function runSkillOptionsForChannel(
   fromCurrent = false,
   dryRun = false,
   prepare = false,
+  screen = false,
   activeJobTitle?: string,
 ): RunSkillOptions {
   const protocol = getPlatformProtocol(channel);
   const base: RunSkillOptions = {
     runId: runId ?? undefined,
-    executionMode: prepare ? 'prepare' : dryRun ? 'dry_run' : 'execute',
+    executionMode: prepare ? 'prepare' : screen ? 'screen' : dryRun ? 'dry_run' : 'execute',
     initialStageId: protocol?.stageManifest?.()[0]?.id,
     requiredStagesBeforeContact: channel === 'boss' ? ['prefilter', 'dom-probe', 'candidate-screen'] : [],
     targetJobTitle: activeJobTitle,
@@ -344,7 +360,7 @@ async function ensurePlatformSession(target: BrowserTarget, channel: Channel): P
 export async function runChannel(
   channel: Channel,
   jobId?: string,
-  opts: { fromCurrent?: boolean; dryRun?: boolean; prepare?: boolean; progress?: (msg: string) => void } = {}
+  opts: { fromCurrent?: boolean; dryRun?: boolean; prepare?: boolean; screen?: boolean; progress?: (msg: string) => void } = {}
 ): Promise<number> {
   // 默认绑定当前 active job，而不是字面量 'default'。否则心跳/CLI 不传 jobId 时，
   // 候选人落到 job_id='default'，而 verifier 按 active job 查 → 永远查不到（落库错位）。
@@ -354,9 +370,16 @@ export async function runChannel(
   const label = CHANNEL_LABEL[channel];
   const dryRun = !!opts.dryRun;
   const prepare = !!opts.prepare;
-  if (dryRun && prepare) throw new Error('dry-run 与 prepare 不能同时启用');
-  const runMode: ChannelRunMode = prepare ? 'prepare' : dryRun ? 'dry_run' : 'execute';
-  const modeLabel = runMode === 'dry_run' ? '（dry-run 预检）' : runMode === 'prepare' ? '（prepare 安全验收）' : '';
+  const screen = !!opts.screen;
+  if ([dryRun, prepare, screen].filter(Boolean).length > 1) throw new Error('dry-run、prepare 与 screen 不能同时启用');
+  const runMode: ChannelRunMode = prepare ? 'prepare' : screen ? 'screen' : dryRun ? 'dry_run' : 'execute';
+  const modeLabel = runMode === 'dry_run'
+    ? '（dry-run 预检）'
+    : runMode === 'prepare'
+      ? '（prepare 安全验收）'
+      : runMode === 'screen'
+        ? '（screen 候选人筛选验收）'
+        : '';
   console.log(`\n[Orchestrator] ▶ 开始 ${label} sourcing${modeLabel}`);
   emitLog(`▶ 开始 ${label} sourcing${modeLabel}`);
   emitStatus('running');
@@ -399,9 +422,9 @@ export async function runChannel(
     const rawResult = await runner.runSkill(
       page,
       systemPrompt,
-      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, activeJob),
+      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, screen, activeJob),
       opts.progress ?? ((msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))),
-      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun, prepare, activeJob?.title),
+      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun, prepare, screen, activeJob?.title),
     );
     const result = normalizeResultForRunMode(rawResult, runMode);
 
@@ -762,7 +785,7 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
         return await runner.runSkill(
           page,
           systemPrompt,
-          taskPromptForChannel(channel, label, false, false, false, job),
+          taskPromptForChannel(channel, label, false, false, false, false, job),
           (msg) => {
             console.log(`[${label}] ${msg}`);
             emitLog(`[${label}] ${msg}`);

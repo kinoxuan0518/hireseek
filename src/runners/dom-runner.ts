@@ -32,7 +32,7 @@ const MAX_TURNS = 150;
 const MAX_BODY_TEXT = 6000;
 const MAX_ELEMENTS = 120;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
-type SkillExecutionMode = 'execute' | 'dry_run' | 'prepare';
+type SkillExecutionMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
 
 // ── 风控规则（代码层硬约束，不依赖模型遵守 prompt）──────────────────────
 /** 打招呼类按钮的最小点击间隔（毫秒） */
@@ -232,10 +232,27 @@ const PREPARE_GUIDE = `
 - 完成目标职位确认和筛选激活态验收后立即输出总结，不进入 candidate-screen/single-contact。
 `.trim();
 
+const SCREEN_GUIDE = `
+## Screen 候选人筛选验收模式（代码硬约束）
+
+本轮只允许查看候选人并输出筛选判断，不允许联系候选人：
+- 可以通过当前页面内 click/scroll/back 查看候选人卡片或详情，动作必须携带 stage_id。
+- 禁止 type / press / goto，避免写入聊天框、发送消息或跳过站内流程。
+- 禁止点击打招呼/立即沟通/发送消息等沟通控件；代码层会拒绝。
+- 禁止调用 prepare_contact 建立真实触达检查点。
+- record_contacted 只能用于 greeting_sent=false 的观察记录；本轮不会写入候选人主档或 interaction_log。
+- 结束时输出：查看了哪些候选人、谁值得正式触达、谁应跳过、证据和风险点。
+`.trim();
+
 const DRY_RUN_ALLOWED_BROWSER_ACTIONS = new Set<BrowserAction['action']>(['snapshot', 'wait', 'scroll']);
+const SCREEN_BLOCKED_BROWSER_ACTIONS = new Set<BrowserAction['action']>(['type', 'press', 'goto']);
 
 export function dryRunBlocksBrowserAction(input: BrowserAction): boolean {
   return !DRY_RUN_ALLOWED_BROWSER_ACTIONS.has(input.action);
+}
+
+export function screenBlocksBrowserAction(input: BrowserAction): boolean {
+  return SCREEN_BLOCKED_BROWSER_ACTIONS.has(input.action);
 }
 
 export function browserActionMode(input: BrowserAction, executionMode: SkillExecutionMode = 'execute'): ToolExecutionMode {
@@ -491,6 +508,7 @@ export class DomRunner implements LLMRunner {
       DOM_GUIDE,
       executionMode === 'dry_run' ? DRY_RUN_GUIDE : '',
       executionMode === 'prepare' ? PREPARE_GUIDE : '',
+      executionMode === 'screen' ? SCREEN_GUIDE : '',
       systemPrompt,
     ]
       .filter(Boolean)
@@ -913,6 +931,46 @@ export class DomRunner implements LLMRunner {
               error: blocked,
               sideEffect: true,
               mode: 'dry_run',
+              stageId,
+            });
+          } catch { /* 轨迹记录失败绝不影响 sourcing */ }
+          continue;
+        }
+
+        if (executionMode === 'screen' && screenBlocksBrowserAction(input)) {
+          const blocked = `screen 候选人筛选模式禁止执行 ${input.action}，已阻止真实浏览器动作。请只用 snapshot/click/scroll/back/wait 查看候选人，禁止输入、发送或跳转。`;
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: blocked,
+          });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'browser',
+            input,
+            output: blocked,
+            ok: false,
+            error: blocked,
+            sideEffect: true,
+            mode: 'screen',
+            stageId,
+          });
+          try {
+            result.trace!.push({
+              seq: result.trace!.length + 1,
+              action: input.action,
+              target: input.url ?? (input.ref != null ? `ref=${input.ref}` : undefined),
+              detail: 'blocked by screen mode',
+              ok: false,
+              at: new Date().toISOString(),
+              toolName: 'browser',
+              inputSummary: toolCall.function.arguments,
+              outputSummary: blocked,
+              error: blocked,
+              sideEffect: true,
+              mode: 'screen',
               stageId,
             });
           } catch { /* 轨迹记录失败绝不影响 sourcing */ }
