@@ -398,8 +398,12 @@ describe('agent core lower layer', () => {
 
     expect(domRunnerSource).toContain('elementContext');
     expect(domRunnerSource).toContain('context="${context}"');
+    expect(domRunnerSource).toContain('role="${el.getAttribute');
+    expect(domRunnerSource).toContain('tabindex="${el.getAttribute');
     expect(appleScriptSource).toContain('function elementContext');
     expect(appleScriptSource).toContain('context="');
+    expect(appleScriptSource).toContain('role="');
+    expect(appleScriptSource).toContain('tabindex="');
   });
 
   it('saves repaired session message history', async () => {

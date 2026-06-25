@@ -186,6 +186,15 @@ describe('boss platform protocol middle layer', () => {
         targetJobTitle: 'Agent工程师',
       },
     );
+    const allowedRoleOnlyJobCombobox = bossBrowserActionPolicy(
+      { action: 'click', ref: 30, stage_id: 'job-positioning' },
+      {
+        observedStageIds: ['session-precheck'],
+        executionMode: 'prepare',
+        actionLabel: '[ref=30] <div> 高级AI产品经理 aria="选择职位" role="combobox" tabindex="0" pointer=true',
+        targetJobTitle: 'Agent工程师',
+      },
+    );
 
     expect(denied.allowed).toBe(false);
     expect(denied.reason).toContain('直接跳转 URL');
@@ -212,6 +221,7 @@ describe('boss platform protocol middle layer', () => {
     expect(blockedRecommendChatBubble.allowed).toBe(false);
     expect(blockedRecommendChatBubble.reason).toContain('消息或候选人沟通控件');
     expect(allowedCurrentJobDropdown.allowed).toBe(true);
+    expect(allowedRoleOnlyJobCombobox.allowed).toBe(true);
   });
 
   it('keeps BOSS process rules in the protocol layer', () => {

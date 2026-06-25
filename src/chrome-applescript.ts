@@ -177,6 +177,10 @@ const SNAPSHOT_JS = `
       if (aria) parts.push('aria="' + aria + '"');
       var titleAttr = el.getAttribute('title');
       if (titleAttr && !t) parts.push('title="' + titleAttr.slice(0, 60) + '"');
+      var roleAttr = el.getAttribute('role');
+      if (roleAttr) parts.push('role="' + roleAttr + '"');
+      var tabIndexAttr = el.getAttribute('tabindex');
+      if (tabIndexAttr !== null) parts.push('tabindex="' + tabIndexAttr + '"');
       if (typeof el.className === 'string' && el.className) parts.push('class="' + el.className.slice(0, 80) + '"');
       try {
         var win = (el.ownerDocument && el.ownerDocument.defaultView) || window;

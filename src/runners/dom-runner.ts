@@ -342,6 +342,8 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
         if (input.value && tag === 'input') parts.push(`value="${String(input.value).slice(0, 40)}"`);
         if (el.getAttribute('aria-label')) parts.push(`aria="${el.getAttribute('aria-label')}"`);
         if (el.getAttribute('title') && !text) parts.push(`title="${el.getAttribute('title')!.slice(0, 60)}"`);
+        if (el.getAttribute('role')) parts.push(`role="${el.getAttribute('role')}"`);
+        if (el.getAttribute('tabindex') != null) parts.push(`tabindex="${el.getAttribute('tabindex')}"`);
         if (el.className && typeof el.className === 'string') parts.push(`class="${el.className.slice(0, 80)}"`);
         if (window.getComputedStyle(el).cursor === 'pointer') parts.push('pointer=true');
         for (const state of ['aria-selected', 'aria-pressed', 'aria-checked']) {

@@ -355,10 +355,10 @@ const BROWSER_SIDE_EFFECT_ACTIONS = new Set<BrowserAction['action']>(['click', '
 const BOSS_CONTACT_LABEL = /打招呼|立即沟通|继续沟通|和\s*Ta\s*聊聊|聊一聊|发送|消息|聊天|沟通记录|新招呼|回复|送达|已读|未读|class="[^"]*(?:chat|message|editor|push-text|text-content|geek-item|gray)/i;
 const BOSS_GREETING_LABEL = /打招呼|立即沟通|和\s*Ta\s*聊聊|聊一聊/i;
 const BOSS_ALREADY_CONTACTED_LABEL = /继续沟通|已沟通/i;
-const BOSS_PREPARE_JOB_CONTROL = /职位管理|推荐牛人|职位下拉|切换职位|招聘职位|我的职位|职位列表|class="[^"]*dropmenu-label/i;
+const BOSS_PREPARE_JOB_CONTROL = /职位管理|推荐牛人|职位下拉|切换职位|招聘职位|我的职位|职位列表|选择职位|当前职位|目标职位|aria="[^"]*(?:职位|岗位)|title="[^"]*(?:职位|岗位)|role="combobox"|class="[^"]*dropmenu-label/i;
 const BOSS_PREPARE_FILTER_CONTROL = /筛选|工作经验|经验|学历|院校|学校|关键词|活跃|未看|近\s*14\s*天|1\s*[-~到]\s*3\s*年|3\s*[-~到]\s*5\s*年|本科|硕士|博士|985|211|大模型|Agent|应用|确定|确认|取消|清除|重置|展开|收起|更多选项/i;
-const BOSS_PREPARE_NAV_STRUCTURE = /<(?:button|a)\b|class="[^"]*(?:menu|nav|job|position|recommend|sidebar|dropdown|dropmenu|select)/i;
-const BOSS_PREPARE_FILTER_STRUCTURE = /<(?:button|input|select)\b|class="[^"]*(?:filter|option|select|checkbox|radio|dropdown|panel|condition|tag|active|btn|cancel)/i;
+const BOSS_PREPARE_NAV_STRUCTURE = /<(?:button|a)\b|role="(?:button|link|tab|option|menuitem|combobox|treeitem)"|tabindex="0"|class="[^"]*(?:menu|nav|job|position|recommend|sidebar|dropdown|dropmenu|select)/i;
+const BOSS_PREPARE_FILTER_STRUCTURE = /<(?:button|input|select)\b|role="(?:button|option|checkbox|radio|switch|combobox)"|tabindex="0"|class="[^"]*(?:filter|option|select|checkbox|radio|dropdown|panel|condition|tag|active|btn|cancel)/i;
 
 function normalizedJobSignal(title: string | undefined): string {
   if (!title) return '';
