@@ -129,7 +129,7 @@ const SNAPSHOT_JS = `
       return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
     } catch (e) { return false; }
   }
-  var sel = 'a,button,input,textarea,select,[role="button"],[role="link"],[role="tab"],[role="option"],[role="menuitem"],[role="checkbox"],[contenteditable="true"],[onclick]';
+  var sel = 'a,button,input,textarea,select,[role="button"],[role="link"],[role="tab"],[role="option"],[role="menuitem"],[role="checkbox"],[role="combobox"],[role="switch"],[role="radio"],[role="treeitem"],[contenteditable="true"],[onclick],[tabindex="0"]';
   var lines = [], texts = [], n = 0, frameSeen = 0, frameRead = 0;
   function elementContext(el, ownText) {
     var parent = el.parentElement;
@@ -149,7 +149,9 @@ const SNAPSHOT_JS = `
         if (el === doc.body || el === doc.documentElement) return false;
         var text = (el.textContent || '').replace(/\\s+/g, ' ').trim();
         var win = (doc && doc.defaultView) || window;
-        if (!text || text.length > 120 || win.getComputedStyle(el).cursor !== 'pointer') return false;
+        // 名字优先取文字；图标类可点元素（SPA 侧栏/选择器常见）没文字但有 aria-label/title，也要能拿到 ref
+        var name = text || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+        if (!name || name.length > 120 || win.getComputedStyle(el).cursor !== 'pointer') return false;
         var interactiveChild = null;
         try { interactiveChild = el.querySelector(sel); } catch (e) {}
         if (interactiveChild && visible(interactiveChild)) {
@@ -173,6 +175,8 @@ const SNAPSHOT_JS = `
       if (el.value && tag === 'input') parts.push('value="' + String(el.value).slice(0, 40) + '"');
       var aria = el.getAttribute('aria-label');
       if (aria) parts.push('aria="' + aria + '"');
+      var titleAttr = el.getAttribute('title');
+      if (titleAttr && !t) parts.push('title="' + titleAttr.slice(0, 60) + '"');
       if (typeof el.className === 'string' && el.className) parts.push('class="' + el.className.slice(0, 80) + '"');
       try {
         var win = (el.ownerDocument && el.ownerDocument.defaultView) || window;

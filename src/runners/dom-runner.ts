@@ -288,8 +288,9 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
       const selector = [
         'a', 'button', 'input', 'textarea', 'select',
         '[role="button"]', '[role="link"]', '[role="tab"]', '[role="option"]',
-        '[role="menuitem"]', '[role="checkbox"]', '[contenteditable="true"]',
-        '[onclick]',
+        '[role="menuitem"]', '[role="checkbox"]', '[role="combobox"]', '[role="switch"]',
+        '[role="radio"]', '[role="treeitem"]', '[contenteditable="true"]',
+        '[onclick]', '[tabindex="0"]',
       ].join(',');
 
       const elementContext = (el: Element, ownText: string): string => {
@@ -309,7 +310,9 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
         if (el.matches(selector)) return true;
         if (el === document.body || el === document.documentElement) return false;
         const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
-        if (!text || text.length > 120 || window.getComputedStyle(el).cursor !== 'pointer') return false;
+        // 图标类可点元素：无文字但有 aria-label/title，也要捕获（SPA 侧栏/选择器常见）
+        const name = text || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+        if (!name || name.length > 120 || window.getComputedStyle(el).cursor !== 'pointer') return false;
         const interactiveChild = el.querySelector(selector);
         if (interactiveChild && isVisible(interactiveChild)) {
           const childText = (interactiveChild.textContent || '').trim().replace(/\s+/g, ' ');
@@ -338,6 +341,7 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
         if (input.placeholder) parts.push(`placeholder="${input.placeholder}"`);
         if (input.value && tag === 'input') parts.push(`value="${String(input.value).slice(0, 40)}"`);
         if (el.getAttribute('aria-label')) parts.push(`aria="${el.getAttribute('aria-label')}"`);
+        if (el.getAttribute('title') && !text) parts.push(`title="${el.getAttribute('title')!.slice(0, 60)}"`);
         if (el.className && typeof el.className === 'string') parts.push(`class="${el.className.slice(0, 80)}"`);
         if (window.getComputedStyle(el).cursor === 'pointer') parts.push('pointer=true');
         for (const state of ['aria-selected', 'aria-pressed', 'aria-checked']) {

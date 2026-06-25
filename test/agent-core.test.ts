@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type OpenAI from 'openai';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hireseek-agent-core-'));
@@ -288,6 +288,118 @@ describe('agent core lower layer', () => {
       { seq: 2, action: 'click', ok: false, stageId: 'job-positioning' },
       { seq: 3, action: 'click', ok: true, stageId: 'prefilter' },
     ])).toEqual(['session-precheck', 'prefilter']);
+  });
+
+  it('binds a greeting click to a prepared candidate and matching record token', async () => {
+    const { DomRunner } = await import('../src/runners/dom-runner');
+    const { bossBrowserActionPolicy, bossRunCompletionPolicy } = await import('../src/platform-protocols/boss');
+    const runner = new DomRunner('https://example.invalid', 'test-key', 'test-model') as any;
+    const toolCall = (id: string, name: string, args: Record<string, unknown>) => ({
+      role: 'assistant',
+      content: null,
+      tool_calls: [{
+        id,
+        type: 'function',
+        function: { name, arguments: JSON.stringify(args) },
+      }],
+    });
+    const prepared = {
+      name: '测试候选人',
+      company: '示例公司',
+      title: 'Agent工程师',
+      evidence: '页面显示 2 年 Agent 平台经验',
+      personalization_evidence: '2 年 Agent 平台经验',
+      message_intent: '讨论 Agent 工程化挑战',
+      greeting_text: '您好，看到您有 Agent 平台经验，想和您聊聊工程化方向。',
+      fit_score: 86,
+    };
+    const responses = [
+      toolCall('tc-job', 'browser', { action: 'snapshot', stage_id: 'job-positioning' }),
+      toolCall('tc-filter', 'browser', { action: 'snapshot', stage_id: 'prefilter' }),
+      toolCall('tc-probe', 'browser', { action: 'snapshot', stage_id: 'dom-probe' }),
+      toolCall('tc-screen', 'browser', { action: 'click', ref: 1, stage_id: 'candidate-screen' }),
+      toolCall('tc-prepare', 'prepare_contact', prepared),
+      toolCall('tc-greet', 'browser', { action: 'click', ref: 2, stage_id: 'single-contact' }),
+      toolCall('tc-record', 'record_contacted', {
+        ...prepared,
+        greeting_sent: true,
+        contact_token: 'contact-900-1',
+      }),
+      { role: 'assistant', content: '触达人数: 1\n跳过人数: 0\n候选人摘要: 已完成单人握手' },
+    ];
+    const create = vi.fn(async () => ({ choices: [{ message: responses.shift() }] }));
+    runner.client = { chat: { completions: { create } } };
+
+    let snapshot = [
+      'URL: https://www.zhipin.com/web/chat/recommend',
+      '[ref=1] <div> 测试候选人 2年 Agent 平台经验 class="candidate-card" pointer=true',
+      'Agent 开发工程师',
+    ].join('\n');
+    const actions: Array<{ action: string; ref?: number; stage_id?: string }> = [];
+    const session = {
+      kind: 'chrome-applescript' as const,
+      label: 'fake BOSS session',
+      async goto() {},
+      async url() { return 'https://www.zhipin.com/web/chat/recommend'; },
+      async bodyText() { return snapshot; },
+      async snapshot() { return snapshot; },
+      async act(input: { action: string; ref?: number; stage_id?: string }) {
+        actions.push(input);
+        if (input.action === 'click' && input.ref === 1) {
+          snapshot = [
+            'URL: https://www.zhipin.com/web/chat/recommend',
+            '[ref=2] <button> 打招呼 class="btn" context="测试候选人 2年 Agent 平台经验"',
+            'Agent 开发工程师',
+          ].join('\n');
+        } else if (input.action === 'click' && input.ref === 2) {
+          snapshot = [
+            'URL: https://www.zhipin.com/web/chat/recommend',
+            '[ref=2] <button> 继续沟通 class="btn" context="测试候选人"',
+            'Agent 开发工程师',
+          ].join('\n');
+        }
+        return snapshot;
+      },
+    };
+
+    const result = await runner.runSkill(session, 'system', 'task', undefined, {
+      executionMode: 'execute',
+      runId: 900,
+      sessionId: 'contact-handshake-test',
+      initialStageId: 'session-precheck',
+      requiredStagesBeforeContact: ['prefilter', 'dom-probe', 'candidate-screen'],
+      browserActionPolicy: bossBrowserActionPolicy,
+      completionPolicy: bossRunCompletionPolicy,
+      targetJobTitle: 'Agent工程师',
+    });
+
+    expect(actions.filter(action => action.action === 'click')).toEqual([
+      { action: 'click', ref: 1, stage_id: 'candidate-screen' },
+      { action: 'click', ref: 2, stage_id: 'single-contact' },
+    ]);
+    expect(result.contacted).toBe(1);
+    expect(result.contactedList).toEqual([
+      expect.objectContaining({
+        name: '测试候选人',
+        greetingSent: true,
+        score: 86,
+        evidence: '页面显示 2 年 Agent 平台经验',
+      }),
+    ]);
+    expect(result.trace).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'prepare_contact', ok: true, stageId: 'candidate-screen' }),
+      expect.objectContaining({ action: 'click', target: 'ref=2', ok: true, stageId: 'single-contact' }),
+    ]));
+  });
+
+  it('keeps browser snapshots carrying parent element context for action policies', () => {
+    const domRunnerSource = fs.readFileSync(path.join(process.cwd(), 'src', 'runners', 'dom-runner.ts'), 'utf8');
+    const appleScriptSource = fs.readFileSync(path.join(process.cwd(), 'src', 'chrome-applescript.ts'), 'utf8');
+
+    expect(domRunnerSource).toContain('elementContext');
+    expect(domRunnerSource).toContain('context="${context}"');
+    expect(appleScriptSource).toContain('function elementContext');
+    expect(appleScriptSource).toContain('context="');
   });
 
   it('saves repaired session message history', async () => {
