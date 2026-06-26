@@ -1,5 +1,5 @@
 import { chromium, Browser, Page } from 'playwright';
-import type { BrowserAction, DomBrowserSession, RiskGuard } from './browser-session';
+import type { BrowserAction, BrowserLiveState, DomBrowserSession, RiskGuard } from './browser-session';
 import {
   executeDomAction,
   GREETING_MIN_INTERVAL_MS,
@@ -40,6 +40,13 @@ function wrapPlaywrightPage(page: Page): DomBrowserSession {
     },
     async bodyText() {
       return await pageBodyText(page);
+    },
+    async liveState(): Promise<BrowserLiveState> {
+      return {
+        url: page.url(),
+        title: await page.title().catch(() => ''),
+        active: true,
+      };
     },
     async snapshot() {
       return await takeDomSnapshot(page);
@@ -122,6 +129,14 @@ async function connectViaAppleScript(urlHint?: string): Promise<DomBrowserSessio
     },
     async bodyText() {
       return chrome.execJS(tab, "(document.body ? document.body.innerText : '').slice(0, 8000)");
+    },
+    async liveState() {
+      const state = chrome.tabState(tab);
+      return {
+        url: state.url,
+        title: state.title,
+        active: state.active,
+      };
     },
     async snapshot() {
       return chrome.takeSnapshot(tab);

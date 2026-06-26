@@ -31,6 +31,7 @@ export interface RunCompletionPolicyContext {
   targetJobTitle?: string;
   pendingContactName?: string;
   pendingContactAwaitingRecord?: boolean;
+  screenedCandidateCount?: number;
 }
 
 export type RunCompletionPolicy = (
@@ -55,6 +56,8 @@ export interface RunSkillOptions {
   requiredStagesBeforeContact?: string[];
   /** 平台协议可用于校验职位定位，但 runner 不解释职位语义。 */
   targetJobTitle?: string;
+  /** 正式触达前的候选人白名单；为空数组表示禁止建立触达检查点。 */
+  allowedContactNamesBeforeContact?: string[];
 }
 
 /**

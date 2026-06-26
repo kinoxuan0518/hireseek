@@ -15,7 +15,7 @@ import { getAccountId, hasStorageState } from './accounts';
 import { generatePlan, confirmPlan } from './planner';
 import { detectErrors } from './error-detector';
 import { retryWithBackoff, saveCheckpoint, loadCheckpoint, removeCheckpoint, waitForUserIntervention } from './retry-handler';
-import type { Channel, SkillResult } from './types';
+import type { Channel, ScreenedCandidate, SkillResult } from './types';
 import { createRuntimeContext } from './agent-core/runtime-context';
 import { getPlatformProtocol } from './platform-protocols';
 import { buildRecruitingCapabilityContext } from './capabilities';
@@ -23,6 +23,64 @@ import type { RunSkillOptions } from './runners/interface';
 import { saveRunTrace } from './agent-core/run-trace-store';
 
 type ChannelRunMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
+
+function latestScreenCandidatesForJob(channel: Channel, jobId: string): Array<ScreenedCandidate & { runId: number }> {
+  try {
+    return db.prepare(`
+      SELECT sc.run_id AS runId, sc.candidate_fingerprint AS fingerprint, sc.recommendation, sc.score,
+             sc.evidence, sc.risk_flags AS riskFlags, sc.fit_tags AS fitTags, sc.profile_url AS profileUrl
+      FROM screen_candidates sc
+      JOIN task_runs tr ON tr.id = sc.run_id
+      WHERE sc.channel = ? AND sc.job_id = ? AND tr.status = 'completed' AND tr.mode = 'screen'
+      ORDER BY sc.run_id DESC, COALESCE(sc.score, 0) DESC
+      LIMIT 60
+    `).all(channel, jobId).map((row: any) => {
+      const [name, company] = String(row.fingerprint ?? '').split('|');
+      const parseJsonArray = (value: unknown): string[] | undefined => {
+        if (!value) return undefined;
+        try {
+          const parsed = JSON.parse(String(value));
+          return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : undefined;
+        } catch {
+          return undefined;
+        }
+      };
+      return {
+        runId: Number(row.runId),
+        name,
+        company: company || undefined,
+        recommendation: row.recommendation,
+        score: row.score == null ? undefined : Number(row.score),
+        evidence: row.evidence ?? undefined,
+        riskFlags: parseJsonArray(row.riskFlags),
+        fitTags: parseJsonArray(row.fitTags),
+        profileUrl: row.profileUrl ?? undefined,
+      };
+    }) as Array<ScreenedCandidate & { runId: number }>;
+  } catch {
+    return [];
+  }
+}
+
+function formatScreenContactGate(candidates: Array<ScreenedCandidate & { runId: number }>): string {
+  const contact = candidates.filter(c => c.recommendation === 'contact');
+  if (contact.length === 0) {
+    return [
+      '## Screen 候选人白名单',
+      '',
+      '没有可用于正式触达的结构化 screen 候选人。',
+      '本轮禁止建立 prepare_contact；请先运行 `hireseek run boss --here --screen` 并用 record_screened_candidate 记录建议触达名单。',
+    ].join('\n');
+  }
+  return [
+    '## Screen 候选人白名单',
+    '',
+    '正式触达只能从以下最近 screen 建议正式触达候选人中选择；不要自由扩展到名单外候选人。',
+    ...contact.slice(0, 20).map((c, index) => (
+      `${index + 1}. ${c.name}${c.company ? ` | ${c.company}` : ''} | score=${c.score ?? 'NA'} | screenRun=${c.runId} | ${c.evidence ?? 'no evidence'}`
+    )),
+  ].join('\n');
+}
 
 /**
  * 履约 canonical 契约 boss-greeting.v1 的 writes: [contacted_candidates, run_trace, interaction_log]。
@@ -93,6 +151,42 @@ export function persistRunResult(
     }
   } catch (err) {
     emitLog(`⚠️ 候选人落库失败（不影响任务）：${err instanceof Error ? err.message : err}`);
+  }
+
+  // screen 模式的候选人判断单独落库：它是“看过并判断”，不是“已触达”。
+  if (opts.mode === 'screen' && result.screenedList?.length) {
+    try {
+      const screenStmt = db.prepare(`
+        INSERT INTO screen_candidates
+          (run_id, candidate_fingerprint, job_id, channel, recommendation, score, evidence, risk_flags, fit_tags, profile_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id, candidate_fingerprint) DO UPDATE SET
+          recommendation = excluded.recommendation,
+          score = excluded.score,
+          evidence = excluded.evidence,
+          risk_flags = excluded.risk_flags,
+          fit_tags = excluded.fit_tags,
+          profile_url = excluded.profile_url
+      `);
+      for (const c of result.screenedList) {
+        if (!c.name) continue;
+        const fingerprint = `${c.name}|${c.company ?? ''}|${channel}`;
+        screenStmt.run(
+          runId,
+          fingerprint,
+          jobId,
+          channel,
+          c.recommendation,
+          c.score ?? null,
+          c.evidence ?? null,
+          c.riskFlags?.length ? JSON.stringify(c.riskFlags) : null,
+          c.fitTags?.length ? JSON.stringify(c.fitTags) : null,
+          c.profileUrl ?? null,
+        );
+      }
+    } catch (err) {
+      emitLog(`⚠️ screen 候选人快照落库失败（不影响任务）：${err instanceof Error ? err.message : err}`);
+    }
   }
 
   // ② 交互记录落库（每个实际打了招呼的候选人一条；供合规验证器查群发感）
@@ -191,6 +285,7 @@ function taskPromptForChannel(
   prepare = false,
   screen = false,
   activeJob?: JobConfig | null,
+  screenGateContext = '',
 ): string {
   const protocol = getPlatformProtocol(channel);
   const base = protocol
@@ -225,7 +320,7 @@ function taskPromptForChannel(
       ].join('\n'),
     ].join('\n\n---\n\n');
   }
-  if (!dryRun) return base;
+  if (!dryRun) return [base, screenGateContext].filter(Boolean).join('\n\n---\n\n');
   return [
     base,
     [
@@ -245,6 +340,7 @@ export function runSkillOptionsForChannel(
   prepare = false,
   screen = false,
   activeJobTitle?: string,
+  allowedContactNamesBeforeContact?: string[],
 ): RunSkillOptions {
   const protocol = getPlatformProtocol(channel);
   const base: RunSkillOptions = {
@@ -253,6 +349,7 @@ export function runSkillOptionsForChannel(
     initialStageId: protocol?.stageManifest?.()[0]?.id,
     requiredStagesBeforeContact: channel === 'boss' ? ['prefilter', 'dom-probe', 'candidate-screen'] : [],
     targetJobTitle: activeJobTitle,
+    allowedContactNamesBeforeContact,
     completionPolicy: protocol?.completionPolicy,
   };
   if (protocol?.browserActionPolicy) {
@@ -407,6 +504,15 @@ export async function runChannel(
     const startedAt = dayjs().toISOString();
     const runResult = taskRunOps.start.run({ job_id: jobId, channel, mode: runMode, started_at: startedAt });
     runId = runResult.lastInsertRowid as number;
+    const screenCandidates = channel === 'boss' && runMode === 'execute'
+      ? latestScreenCandidatesForJob(channel, jobId)
+      : [];
+    const allowedContactNames = channel === 'boss' && runMode === 'execute'
+      ? screenCandidates.filter(c => c.recommendation === 'contact').map(c => c.name)
+      : undefined;
+    const screenGateContext = channel === 'boss' && runMode === 'execute'
+      ? formatScreenContactGate(screenCandidates)
+      : '';
 
     // 组装系统提示：SOUL + 职位上下文 + 中层能力 + 记忆 + Skill资产
     const soul      = loadWorkspaceFile('SOUL.md');
@@ -425,9 +531,9 @@ export async function runChannel(
     const rawResult = await runner.runSkill(
       page,
       systemPrompt,
-      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, screen, activeJob),
+      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, screen, activeJob, screenGateContext),
       opts.progress ?? ((msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))),
-      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun, prepare, screen, activeJob?.title),
+      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun, prepare, screen, activeJob?.title, allowedContactNames),
     );
     const result = normalizeResultForRunMode(rawResult, runMode);
 

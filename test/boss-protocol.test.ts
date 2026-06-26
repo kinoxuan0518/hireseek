@@ -356,6 +356,14 @@ describe('boss platform protocol middle layer', () => {
       trace: [{ seq: 1, action: 'click', ok: true, stageId: 'candidate-screen' }],
       pageSnapshot: '',
       targetJobTitle: 'Agent工程师',
+      screenedCandidateCount: 1,
+    });
+    const screenWithoutStructuredCandidates = bossRunCompletionPolicy({
+      executionMode: 'screen',
+      trace: [{ seq: 1, action: 'click', ok: true, stageId: 'candidate-screen' }],
+      pageSnapshot: '',
+      targetJobTitle: 'Agent工程师',
+      screenedCandidateCount: 0,
     });
 
     expect(candidateCard.allowed).toBe(true);
@@ -368,6 +376,8 @@ describe('boss platform protocol middle layer', () => {
     expect(allowedBackDuringCandidateScreen.allowed).toBe(true);
     expect(unfinishedScreen.allowed).toBe(false);
     expect(unfinishedScreen.reason).toContain('candidate-screen');
+    expect(screenWithoutStructuredCandidates.allowed).toBe(false);
+    expect(screenWithoutStructuredCandidates.reason).toContain('record_screened_candidate');
     expect(finishedScreen.allowed).toBe(true);
   });
 
@@ -392,6 +402,10 @@ describe('boss platform protocol middle layer', () => {
       executionMode: 'screen',
       initialStageId: 'session-precheck',
       targetJobTitle: 'Agent工程师',
+    });
+    expect(runSkillOptionsForChannel('boss', 126, true, false, false, false, 'Agent工程师', ['温磊'])).toMatchObject({
+      executionMode: 'execute',
+      allowedContactNamesBeforeContact: ['温磊'],
     });
   });
 

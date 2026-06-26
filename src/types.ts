@@ -84,6 +84,22 @@ export interface ContactedCandidate {
   reason?: string;          // 兼容旧字段（等同 evidence）
 }
 
+export type ScreenRecommendation = 'contact' | 'maybe' | 'skip';
+
+export interface ScreenedCandidate {
+  name: string;
+  company?: string;
+  title?: string;
+  location?: string;
+  evidence?: string;
+  riskFlags?: string[];
+  fitTags?: string[];
+  score?: number;
+  recommendation: ScreenRecommendation;
+  profileUrl?: string;
+  sourceChannel?: string;
+}
+
 export interface SkillResult {
   contacted: number;
   skipped: number;
@@ -93,6 +109,8 @@ export interface SkillResult {
   trace?: TraceStep[];
   /** 本轮已触达候选人结构化清单；DOM runner 从总结解析，供 verifier/漏斗使用 */
   contactedList?: ContactedCandidate[];
+  /** 本轮 screen 模式筛选过的候选人快照；不代表已触达，不进入 candidates 主档。 */
+  screenedList?: ScreenedCandidate[];
 }
 
 export interface ComputerAction {

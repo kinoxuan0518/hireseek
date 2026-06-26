@@ -77,7 +77,11 @@ describe('agent core lower layer', () => {
   });
 
   it('registers runner tools and blocks computer side effects in dry-run', async () => {
-    const { DOM_RUNNER_TOOL_REGISTRY } = await import('../src/runners/dom-runner');
+    const {
+      DOM_RUNNER_TOOL_REGISTRY,
+      detectExternalBrowserControl,
+      userInterventionRequestsBrowserPause,
+    } = await import('../src/runners/dom-runner');
     const { GENERIC_VISION_TOOL_REGISTRY } = await import('../src/runners/generic-vision');
     const {
       computerActionHasSideEffect,
@@ -88,6 +92,7 @@ describe('agent core lower layer', () => {
     expect(DOM_RUNNER_TOOL_REGISTRY.validate()).toEqual([]);
     expect(DOM_RUNNER_TOOL_REGISTRY.get('browser')?.policy.supportsDryRun).toBe(true);
     expect(DOM_RUNNER_TOOL_REGISTRY.get('record_contacted')?.policy.sideEffect).toBe(false);
+    expect(DOM_RUNNER_TOOL_REGISTRY.get('record_screened_candidate')?.policy.sideEffect).toBe(false);
     expect(GENERIC_VISION_TOOL_REGISTRY.validate()).toEqual([]);
     expect(GENERIC_VISION_TOOL_REGISTRY.get('computer')?.policy.sideEffect).toBe(true);
     expect(computerActionHasSideEffect('left_click')).toBe(true);
@@ -95,6 +100,25 @@ describe('agent core lower layer', () => {
     expect(dryRunBlocksComputerAction('type')).toBe(true);
     expect(dryRunBlocksComputerAction('scroll')).toBe(false);
     expect(computerActionMode('left_click', 'dry_run')).toBe('dry_run');
+
+    const observed = 'URL: https://www.zhipin.com/web/chat/recommend\n标题: 推荐牛人\n\n## 页面正文';
+    expect(detectExternalBrowserControl(observed, {
+      url: 'https://www.zhipin.com/web/chat/recommend',
+      title: '推荐牛人',
+      active: true,
+    }).suspected).toBe(false);
+    expect(detectExternalBrowserControl(observed, {
+      url: 'https://www.zhipin.com/web/chat/aiform',
+      title: 'AI 搜索',
+      active: true,
+    }).suspected).toBe(true);
+    expect(detectExternalBrowserControl(observed, {
+      url: 'https://www.zhipin.com/web/chat/recommend',
+      title: '推荐牛人',
+      active: false,
+    }).suspected).toBe(true);
+    expect(userInterventionRequestsBrowserPause('是我在用，不要接管')).toBe(true);
+    expect(userInterventionRequestsBrowserPause('只看上海')).toBe(false);
   });
 
   it('returns structured unknown-tool errors without throwing', async () => {
@@ -645,12 +669,21 @@ describe('agent core lower layer', () => {
     db.prepare(`DELETE FROM interaction_log WHERE run_id = ?`).run(screenRunId);
     db.prepare(`DELETE FROM run_actions WHERE run_id = ?`).run(screenRunId);
     db.prepare(`DELETE FROM run_candidates WHERE run_id = ?`).run(screenRunId);
+    db.prepare(`DELETE FROM screen_candidates WHERE run_id = ?`).run(screenRunId);
     const screenResult = normalizeResultForRunMode({
       contacted: 1,
       skipped: 1,
       candidates: [],
       summary: 'screen report',
       contactedList: [{ name: 'Screen Candidate', greetingSent: true }],
+      screenedList: [{
+        name: 'Screen Candidate',
+        company: 'ExampleAI',
+        recommendation: 'contact',
+        score: 81,
+        evidence: '2 years Agent platform work',
+        fitTags: ['Agent'],
+      }],
       trace: [{ seq: 1, action: 'click', ok: true, stageId: 'candidate-screen', mode: 'screen' }],
     }, 'screen');
     persistRunResult(screenRunId, 'Agent工程师', 'boss', screenResult, { mode: 'screen' });
@@ -658,6 +691,7 @@ describe('agent core lower layer', () => {
     expect(screenResult.contactedList?.[0]?.greetingSent).toBe(false);
     expect((db.prepare(`SELECT COUNT(*) n FROM run_candidates WHERE run_id = ?`).get(screenRunId) as { n: number }).n).toBe(0);
     expect((db.prepare(`SELECT COUNT(*) n FROM interaction_log WHERE run_id = ?`).get(screenRunId) as { n: number }).n).toBe(0);
+    expect((db.prepare(`SELECT COUNT(*) n FROM screen_candidates WHERE run_id = ?`).get(screenRunId) as { n: number }).n).toBe(1);
     expect((db.prepare(`SELECT COUNT(*) n FROM run_actions WHERE run_id = ?`).get(screenRunId) as { n: number }).n).toBe(1);
   });
 

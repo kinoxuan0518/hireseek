@@ -17,7 +17,7 @@ import { parseSkillSummary, parseContactedCandidates } from './interface';
 import type { LLMRunner, RunSkillOptions } from './interface';
 import type { SkillResult } from '../types';
 import { repairToolMessageHistoryInPlace } from '../message-integrity';
-import type { BrowserAction, BrowserTarget, RiskGuard } from '../browser-session';
+import type { BrowserAction, BrowserLiveState, BrowserTarget, RiskGuard } from '../browser-session';
 import { isDomBrowserSession } from '../browser-session';
 import { recordRejectedToolCall, recordToolCall } from '../agent-core/trace';
 import {
@@ -147,6 +147,37 @@ const RECORD_CONTACTED_TOOL: OpenAI.ChatCompletionTool = {
   },
 };
 
+const RECORD_SCREENED_CANDIDATE_TOOL: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'record_screened_candidate',
+    description:
+      '在 screen 候选人筛选验收模式下，每查看并判断一个候选人后调用本工具。' +
+      '它只记录筛选判断，不代表触达，不会写入候选人主档或 interaction_log。' +
+      '正式 execute 只能优先从这些结构化 screen 记录中选择候选人。',
+    parameters: {
+      type: 'object',
+      required: ['name', 'recommendation', 'evidence'],
+      properties: {
+        name: { type: 'string', description: '候选人姓名（页面所见）' },
+        company: { type: 'string', description: '当前/最近公司' },
+        title: { type: 'string', description: '当前/最近职位' },
+        location: { type: 'string', description: '所在城市/地区' },
+        recommendation: {
+          type: 'string',
+          enum: ['contact', 'maybe', 'skip'],
+          description: 'screen 判断：contact=建议正式触达；maybe=可考虑；skip=跳过。',
+        },
+        evidence: { type: 'string', description: '判断依据，必须引用页面可见的具体经历、公司、项目或技能' },
+        risk_flags: { type: 'array', items: { type: 'string' } },
+        fit_tags: { type: 'array', items: { type: 'string' } },
+        fit_score: { type: 'number', description: '匹配分 0-100' },
+        profile_url: { type: 'string' },
+      },
+    },
+  },
+};
+
 const PREPARE_CONTACT_TOOL: OpenAI.ChatCompletionTool = {
   type: 'function',
   function: {
@@ -179,6 +210,7 @@ export const DOM_RUNNER_TOOL_REGISTRY = createToolRegistry([
   BROWSER_TOOL,
   PREPARE_CONTACT_TOOL,
   RECORD_CONTACTED_TOOL,
+  RECORD_SCREENED_CANDIDATE_TOOL,
 ]);
 const DOM_RUNNER_TOOLS = DOM_RUNNER_TOOL_REGISTRY.list().map(tool => tool.schema);
 
@@ -243,7 +275,8 @@ const SCREEN_GUIDE = `
 - 从候选人详情回列表只能在 candidate-screen 阶段用 browser back，或使用页面内可见返回/推荐牛人入口；不要用 press Escape。
 - 职位定位/筛选阶段禁止用 back，避免回到旧职位或旧筛选状态。
 - 返回列表或切换 推荐/最新/精选 tab 前必须重新 snapshot，并确认目标 ref 的 scope/rect/context 是列表导航或页签，不是候选人卡片。
-- record_contacted 只能用于 greeting_sent=false 的观察记录；本轮不会写入候选人主档或 interaction_log。
+- 每查看并判断一个候选人后必须调用 record_screened_candidate，记录 contact/maybe/skip、证据和风险。
+- 不要用 record_contacted 做 screen 记录；record_contacted 只属于正式触达。
 - 结束时输出：查看了哪些候选人、谁值得正式触达、谁应跳过、证据和风险点。
 `.trim();
 
@@ -281,6 +314,67 @@ function snapshotRefLabel(snapshot: string, ref: number | undefined): string | u
 
 function snapshotUrl(snapshot: string): string {
   return snapshot.split('\n').find(line => line.startsWith('URL: '))?.slice(5).trim() ?? 'unknown';
+}
+
+function snapshotTitle(snapshot: string): string {
+  return snapshot.split('\n').find(line => line.startsWith('标题: '))?.slice(4).trim() ?? '';
+}
+
+function normalizeOwnershipUrl(url: string | undefined): string {
+  return (url ?? '').trim().replace(/\/$/, '');
+}
+
+export interface BrowserOwnershipDecision {
+  suspected: boolean;
+  reason?: string;
+}
+
+export function userInterventionRequestsBrowserPause(text: string): boolean {
+  return /停下|停止|暂停|接管|我在用|别动|不要接管|不是机器飘移|不是机器漂移|stop/i.test(text);
+}
+
+export function detectExternalBrowserControl(
+  observedSnapshot: string,
+  liveState: BrowserLiveState | null | undefined,
+): BrowserOwnershipDecision {
+  if (!liveState) return { suspected: false };
+  if (liveState.active === false) {
+    return {
+      suspected: true,
+      reason: '当前受控 Chrome 标签页已不再是激活标签，可能是用户正在使用浏览器。',
+    };
+  }
+
+  const observedUrl = normalizeOwnershipUrl(snapshotUrl(observedSnapshot));
+  const liveUrl = normalizeOwnershipUrl(liveState.url);
+  if (observedUrl && observedUrl !== 'unknown' && liveUrl && observedUrl !== liveUrl) {
+    return {
+      suspected: true,
+      reason: `页面 URL 已从 ${observedUrl} 变为 ${liveUrl}，变化不是本次工具动作产生的。`,
+    };
+  }
+
+  return { suspected: false };
+}
+
+async function readBrowserLiveState(page: BrowserTarget): Promise<BrowserLiveState | null> {
+  try {
+    if (isDomBrowserSession(page)) {
+      if (page.liveState) return await page.liveState();
+      return {
+        url: await page.url(),
+        title: snapshotTitle(await page.snapshot()),
+        active: true,
+      };
+    }
+    return {
+      url: page.url(),
+      title: await page.title().catch(() => ''),
+      active: true,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function successfulStageIds(trace: SkillResult['trace'] = []): string[] {
@@ -568,6 +662,7 @@ export class DomRunner implements LLMRunner {
     let pendingContact: PendingContact | null = null;
     let contactSequence = 0;
     let hardStopped = false;
+    let externalControlStopped = false;
     let prepareSideEffectCount = 0;
     const prepareActionAttempts = new Map<string, number>();
     const maxTurns = executionMode === 'prepare' ? 40 : MAX_TURNS;
@@ -579,6 +674,9 @@ export class DomRunner implements LLMRunner {
         onProgress?.(`📩 ${msg}`);
         emitLog(`📩 ${msg}`);
         messages.push({ role: 'user', content: msg });
+        if (userInterventionRequestsBrowserPause(intervention)) {
+          externalControlStopped = true;
+        }
       }
 
       // 兜底：循环里若有 tool_call 走了未知/非 function 分支没回 tool 响应，会留下
@@ -613,6 +711,7 @@ export class DomRunner implements LLMRunner {
           targetJobTitle: options.targetJobTitle,
           pendingContactName: pendingContact?.name,
           pendingContactAwaitingRecord: pendingContact?.greetingClicked ?? false,
+          screenedCandidateCount: result.screenedList?.length ?? 0,
         });
         if (completionDecision && !completionDecision.allowed) {
           const reason = completionDecision.reason ?? '当前运行状态尚未满足完成条件。';
@@ -681,15 +780,26 @@ export class DomRunner implements LLMRunner {
           }
           const requiredFields = ['name', 'evidence', 'personalization_evidence', 'message_intent', 'greeting_text', 'fit_score'];
           const missingFields = requiredFields.filter(key => !String(parsed[key] ?? '').trim());
+          const allowedContactNames = options.allowedContactNamesBeforeContact;
           if (ok && executionMode !== 'execute') {
             ok = false;
             error = `当前是 ${executionMode} 模式，禁止建立真实触达检查点。`;
+          } else if (ok && Array.isArray(allowedContactNames) && allowedContactNames.length === 0) {
+            ok = false;
+            error = '正式触达前缺少 screen 候选人白名单；请先运行 screen 候选人筛选验收。';
           } else if (ok && missingStages.length > 0) {
             ok = false;
             error = `prepare_contact 缺少协议阶段证据：${missingStages.join(', ')}。`;
           } else if (ok && missingFields.length > 0) {
             ok = false;
             error = `prepare_contact 缺少字段：${missingFields.join(', ')}。`;
+          } else if (
+            ok &&
+            Array.isArray(allowedContactNames) &&
+            !allowedContactNames.some(name => String(parsed.name) === name)
+          ) {
+            ok = false;
+            error = `候选人 ${String(parsed.name)} 不在最近 screen 建议正式触达名单中，禁止建立触达检查点。`;
           } else if (ok && pendingContact?.greetingClicked) {
             ok = false;
             error = `上一位候选人 ${pendingContact.name} 已点击沟通但尚未 record_contacted，禁止准备下一位。`;
@@ -738,6 +848,82 @@ export class DomRunner implements LLMRunner {
           continue;
         }
 
+        if (toolCall.function.name === 'record_screened_candidate') {
+          let ok = true;
+          let error: string | null = null;
+          let parsed: Record<string, unknown> = {};
+          try {
+            parsed = JSON.parse(toolCall.function.arguments || '{}') as Record<string, unknown>;
+          } catch (err) {
+            ok = false;
+            error = `record_screened_candidate 参数不是合法 JSON：${err instanceof Error ? err.message : String(err)}`;
+          }
+          const recommendation = String(parsed.recommendation ?? '');
+          const missingFields = ['name', 'recommendation', 'evidence']
+            .filter(key => !String(parsed[key] ?? '').trim());
+          if (ok && executionMode !== 'screen') {
+            ok = false;
+            error = `当前是 ${executionMode} 模式，record_screened_candidate 只能用于 screen 候选人筛选验收。`;
+          } else if (ok && missingFields.length > 0) {
+            ok = false;
+            error = `record_screened_candidate 缺少字段：${missingFields.join(', ')}。`;
+          } else if (ok && !['contact', 'maybe', 'skip'].includes(recommendation)) {
+            ok = false;
+            error = 'record_screened_candidate 的 recommendation 只能是 contact / maybe / skip。';
+          }
+
+          if (ok) {
+            const riskFlags = Array.isArray(parsed.risk_flags) ? parsed.risk_flags.map(String).filter(Boolean) : undefined;
+            const fitTags = Array.isArray(parsed.fit_tags) ? parsed.fit_tags.map(String).filter(Boolean) : undefined;
+            const rawScore = Number(parsed.fit_score);
+            (result.screenedList ??= []).push({
+              name: String(parsed.name),
+              company: parsed.company ? String(parsed.company) : undefined,
+              title: parsed.title ? String(parsed.title) : undefined,
+              location: parsed.location ? String(parsed.location) : undefined,
+              evidence: parsed.evidence ? String(parsed.evidence) : undefined,
+              riskFlags,
+              fitTags,
+              score: Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : undefined,
+              recommendation: recommendation as 'contact' | 'maybe' | 'skip',
+              profileUrl: parsed.profile_url ? String(parsed.profile_url) : undefined,
+            });
+          }
+
+          const output = ok
+            ? `已记录 screen 候选人：${String(parsed.name)} (${recommendation})。`
+            : JSON.stringify({ ok: false, error: { code: 'screen_candidate_rejected', message: error } });
+          messages.push({ role: 'tool', tool_call_id: toolCall.id, content: output });
+          result.trace!.push({
+            seq: result.trace!.length + 1,
+            action: 'record_screened_candidate',
+            target: parsed.name ? String(parsed.name) : undefined,
+            ok,
+            at: new Date().toISOString(),
+            toolName: 'record_screened_candidate',
+            inputSummary: toolCall.function.arguments,
+            outputSummary: output,
+            error: error ?? undefined,
+            sideEffect: false,
+            mode: executionMode,
+            stageId: 'candidate-screen',
+          });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'record_screened_candidate',
+            input: toolCall.function.arguments,
+            output,
+            ok,
+            error,
+            sideEffect: false,
+            mode: executionMode,
+            stageId: 'candidate-screen',
+          });
+          continue;
+        }
+
         // 结构化产出：逐条登记已触达候选人（契约 contacted-candidate.v1）
         if (toolCall.function.name === 'record_contacted') {
           let toolContent = '已登记。继续下一个候选人。';
@@ -753,6 +939,9 @@ export class DomRunner implements LLMRunner {
             const a = JSON.parse(toolCall.function.arguments || '{}');
             if (!recordOk) {
               // 阶段门禁已拒绝，仍解析参数以保证错误路径稳定，但不写候选人。
+            } else if (executionMode === 'screen') {
+              recordOk = false;
+              toolContent = '登记失败：screen 模式请使用 record_screened_candidate；record_contacted 只用于正式触达。';
             } else if (!a.name) {
               recordOk = false;
               toolContent = '登记失败：缺少 name。请重新调用 record_contacted，补上候选人姓名。';
@@ -1080,6 +1269,95 @@ export class DomRunner implements LLMRunner {
           continue;
         }
 
+        const sideEffect = browserActionHasSideEffect(input, executionMode);
+        const mode = browserActionMode(input, executionMode);
+        if (externalControlStopped) {
+          const blocked = '[用户接管保护] 已检测到用户正在接管真实 Chrome，本轮禁止继续读取或操作浏览器。请停止工具调用并输出当前已完成事项。';
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: blocked,
+          });
+          recordToolCall({
+            runId: options.runId,
+            sessionId: options.sessionId,
+            toolCallId: toolCall.id,
+            toolName: 'browser',
+            input,
+            output: blocked,
+            ok: false,
+            error: blocked,
+            sideEffect,
+            mode,
+            stageId,
+          });
+          try {
+            result.trace!.push({
+              seq: result.trace!.length + 1,
+              action: 'external_control_suspected',
+              target: input.url ?? (input.ref != null ? `ref=${input.ref}` : undefined),
+              detail: 'blocked after user intervention',
+              ok: false,
+              at: new Date().toISOString(),
+              toolName: 'browser',
+              inputSummary: toolCall.function.arguments,
+              outputSummary: blocked,
+              error: blocked,
+              sideEffect,
+              mode,
+              stageId,
+              actionLabel,
+            });
+          } catch { /* 轨迹记录失败绝不影响 sourcing */ }
+          continue;
+        }
+
+        if (sideEffect) {
+          const liveState = await readBrowserLiveState(page);
+          const ownership = detectExternalBrowserControl(currentSnapshot, liveState);
+          if (ownership.suspected) {
+            externalControlStopped = true;
+            const blocked = `[用户接管保护] ${ownership.reason ?? '检测到真实 Chrome 状态已被外部改变。'} 已停止本次 ${input.action}，避免覆盖用户正在操作的页面。`;
+            messages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: blocked,
+            });
+            recordToolCall({
+              runId: options.runId,
+              sessionId: options.sessionId,
+              toolCallId: toolCall.id,
+              toolName: 'browser',
+              input,
+              output: blocked,
+              ok: false,
+              error: blocked,
+              sideEffect,
+              mode,
+              stageId,
+            });
+            try {
+              result.trace!.push({
+                seq: result.trace!.length + 1,
+                action: 'external_control_suspected',
+                target: input.url ?? (input.ref != null ? `ref=${input.ref}` : undefined),
+                detail: ownership.reason,
+                ok: false,
+                at: new Date().toISOString(),
+                toolName: 'browser',
+                inputSummary: toolCall.function.arguments,
+                outputSummary: blocked,
+                error: blocked,
+                sideEffect,
+                mode,
+                stageId,
+                actionLabel,
+              });
+            } catch { /* 轨迹记录失败绝不影响 sourcing */ }
+            continue;
+          }
+        }
+
         let snapshot: string;
         let stepOk = true;
         let stepError: string | null = null;
@@ -1120,8 +1398,8 @@ export class DomRunner implements LLMRunner {
             inputSummary: toolCall.function.arguments,
             outputSummary: snapshot.slice(0, 700),
             error: stepError ?? undefined,
-            sideEffect: browserActionHasSideEffect(input, executionMode),
-            mode: browserActionMode(input, executionMode),
+            sideEffect,
+            mode,
             stageId,
             actionLabel,
           });
@@ -1135,8 +1413,8 @@ export class DomRunner implements LLMRunner {
           output: snapshot,
           ok: stepOk,
           error: stepError,
-          sideEffect: browserActionHasSideEffect(input, executionMode),
-          mode: browserActionMode(input, executionMode),
+          sideEffect,
+          mode,
           stageId,
         });
         if (

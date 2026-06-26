@@ -84,6 +84,8 @@ export interface BossPrepareEvidence extends BossDryRunEvidence {
 
 export interface BossScreenEvidence extends BossPrepareEvidence {
   candidateScreenActions: number;
+  screenCandidates: number;
+  recommendedContacts: number;
 }
 
 export function hasPassingBossDryRunEvidence(evidence: BossDryRunEvidence | null): boolean {
@@ -172,6 +174,8 @@ export function hasPassingBossScreenEvidence(evidence: BossScreenEvidence | null
     && evidence.runActions > 0
     && evidence.toolCalls > 0
     && evidence.candidateScreenActions > 0
+    && evidence.screenCandidates > 0
+    && evidence.recommendedContacts > 0
     && evidence.successfulSideEffects > 0
     && evidence.unsafeSuccessfulActions === 0;
 }
@@ -190,6 +194,8 @@ function latestBossScreenEvidence(): BossScreenEvidence | null {
         (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id AND side_effect = 1) AS sideEffects,
         (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id AND side_effect = 1 AND ok = 1) AS successfulSideEffects,
         (SELECT COUNT(*) FROM run_actions WHERE run_id = task_runs.id AND stage_id = 'candidate-screen' AND ok = 1) AS candidateScreenActions,
+        (SELECT COUNT(*) FROM screen_candidates WHERE run_id = task_runs.id) AS screenCandidates,
+        (SELECT COUNT(*) FROM screen_candidates WHERE run_id = task_runs.id AND recommendation = 'contact') AS recommendedContacts,
         (
           SELECT COUNT(*) FROM agent_tool_calls
           WHERE run_id = task_runs.id AND ok = 1 AND (
@@ -378,7 +384,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     'Live BOSS screen',
     screenPassed ? 'pass' : 'warn',
     screen
-      ? `latest screen #${screen.id}: status=${screen.status}, contacted=${screen.contactedCount}, candidates=${screen.runCandidates}, interactions=${screen.interactions}, actions=${screen.runActions}, toolCalls=${screen.toolCalls}, candidateScreenActions=${screen.candidateScreenActions}, successfulSideEffects=${screen.successfulSideEffects}, unsafeSuccessfulActions=${screen.unsafeSuccessfulActions}`
+      ? `latest screen #${screen.id}: status=${screen.status}, contacted=${screen.contactedCount}, candidates=${screen.runCandidates}, interactions=${screen.interactions}, actions=${screen.runActions}, toolCalls=${screen.toolCalls}, candidateScreenActions=${screen.candidateScreenActions}, screenCandidates=${screen.screenCandidates}, recommendedContacts=${screen.recommendedContacts}, successfulSideEffects=${screen.successfulSideEffects}, unsafeSuccessfulActions=${screen.unsafeSuccessfulActions}`
       : 'no BOSS screen evidence; run hireseek run boss --here --screen before real outreach',
   ));
 

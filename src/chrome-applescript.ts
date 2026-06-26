@@ -44,6 +44,15 @@ function run(argv) {
     chrome.windows[+argv[1]].activeTabIndex = +argv[2] + 1;
     return 'ok';
   }
+  if (mode === 'state') {
+    const win = chrome.windows[+argv[1]];
+    const tab = win.tabs[+argv[2]];
+    return JSON.stringify({
+      title: tab.title(),
+      url: tab.url(),
+      active: win.activeTabIndex() === +argv[2] + 1
+    });
+  }
   return 'unknown mode';
 }
 `;
@@ -107,6 +116,21 @@ export function activateTab(tab: ChromeTab): void {
   try {
     jxa(['activate', String(tab.wi), String(tab.ti)], 5000);
   } catch { /* 前置失败不影响 JS 操作 */ }
+}
+
+export function tabState(tab: ChromeTab): ChromeTab & { active: boolean } {
+  try {
+    const raw = jxa(['state', String(tab.wi), String(tab.ti)], 5000);
+    const state = JSON.parse(raw) as { title?: string; url?: string; active?: boolean };
+    return {
+      ...tab,
+      title: state.title ?? tab.title,
+      url: state.url ?? tab.url,
+      active: state.active ?? true,
+    };
+  } catch {
+    return { ...tab, active: true };
+  }
 }
 
 // ── 快照与动作（与 DOM Runner 同源的 ref 协议） ───────────────────────

@@ -525,6 +525,9 @@ export const bossRunCompletionPolicy: RunCompletionPolicy = context => {
     if (!observed.has('candidate-screen')) {
       return { allowed: false, reason: 'screen 尚未留下候选人查看阶段 candidate-screen 的成功证据。' };
     }
+    if ((context.screenedCandidateCount ?? 0) === 0) {
+      return { allowed: false, reason: 'screen 尚未调用 record_screened_candidate 写入结构化候选人判断。' };
+    }
     return { allowed: true };
   }
   if (context.executionMode !== 'prepare') return { allowed: true };

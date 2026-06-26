@@ -75,6 +75,22 @@ db.exec(`
     UNIQUE(run_id, candidate_fingerprint)
   );
 
+  CREATE TABLE IF NOT EXISTS screen_candidates (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id                INTEGER NOT NULL,
+    candidate_fingerprint TEXT NOT NULL,
+    job_id                TEXT NOT NULL,
+    channel               TEXT NOT NULL,
+    recommendation        TEXT NOT NULL,
+    score                 INTEGER,
+    evidence              TEXT,
+    risk_flags            TEXT,
+    fit_tags              TEXT,
+    profile_url           TEXT,
+    created_at            TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(run_id, candidate_fingerprint)
+  );
+
   CREATE TABLE IF NOT EXISTS run_actions (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id   INTEGER NOT NULL,
@@ -131,6 +147,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_reflections_channel ON reflections(channel);
   CREATE INDEX IF NOT EXISTS idx_run_candidates_run  ON run_candidates(run_id);
   CREATE INDEX IF NOT EXISTS idx_run_candidates_fp   ON run_candidates(candidate_fingerprint);
+  CREATE INDEX IF NOT EXISTS idx_screen_candidates_run ON screen_candidates(run_id);
+  CREATE INDEX IF NOT EXISTS idx_screen_candidates_fp  ON screen_candidates(candidate_fingerprint);
   CREATE INDEX IF NOT EXISTS idx_run_actions_run     ON run_actions(run_id);
   CREATE INDEX IF NOT EXISTS idx_tasks_status        ON tasks(status);
   CREATE INDEX IF NOT EXISTS idx_tasks_parent        ON tasks(parent_id);

@@ -16,12 +16,20 @@ export interface RiskGuard {
   lastGreetingAt: number;
 }
 
+export interface BrowserLiveState {
+  url: string;
+  title?: string;
+  /** true = the controlled tab is currently selected in its Chrome window. */
+  active?: boolean;
+}
+
 export interface DomBrowserSession {
   kind: 'chrome-cdp' | 'chrome-applescript';
   label: string;
   goto(url: string): Promise<void>;
   url(): Promise<string>;
   bodyText(): Promise<string>;
+  liveState?(): Promise<BrowserLiveState>;
   snapshot(): Promise<string>;
   act(input: BrowserAction, guard: RiskGuard): Promise<string>;
 }
