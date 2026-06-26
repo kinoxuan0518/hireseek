@@ -538,24 +538,32 @@ export async function runChannel(
     const result = normalizeResultForRunMode(rawResult, runMode);
 
     const durationSec = Math.round((Date.now() - startMs) / 1000);
+    const runExitStatus = result.exitStatus ?? 'completed';
+    const taskStatus = runExitStatus === 'completed' ? 'completed' : runExitStatus;
 
-    console.log(`\n[Orchestrator] ✓ ${label} 完成 (${durationSec}s)`);
-    emitLog(`✓ ${label} 完成 (${durationSec}s)`);
+    const doneLabel = taskStatus === 'completed'
+      ? '完成'
+      : taskStatus === 'paused'
+        ? '已暂停'
+        : '未完成';
+    const statusIcon = taskStatus === 'completed' ? '✓' : taskStatus === 'paused' ? '⏸' : '✗';
+    console.log(`\n[Orchestrator] ${statusIcon} ${label} ${doneLabel} (${durationSec}s)`);
+    emitLog(`${label} ${doneLabel} (${durationSec}s)`);
     emitStatus('idle');
 
     taskRunOps.complete.run({
       id: runId,
       finished_at: dayjs().toISOString(),
-      status: 'completed',
+      status: taskStatus,
       contacted_count: result.contacted,
       skipped_count: result.skipped,
-      error: null,
+      error: taskStatus === 'completed' ? null : result.exitReason ?? taskStatus,
     });
 
     // 统一落库：结构化候选人（verifier 数据来源）+ 执行轨迹（合规审计来源）
     persistRunResult(runId, jobId, channel, result, { mode: runMode });
 
-    if (runMode === 'execute') {
+    if (runMode === 'execute' && taskStatus === 'completed') {
       // 生成反思并存储
       try {
         const reflectionPrompt = buildReflectionPrompt(label, result.contacted, result.skipped, result.summary);
@@ -578,6 +586,8 @@ export async function runChannel(
         summary: result.summary,
         durationSec,
       });
+    } else if (taskStatus !== 'completed') {
+      console.log(`[Orchestrator] ${runMode} ${doneLabel}：${result.exitReason ?? '未完成'}。未发送报告、未生成反思。`);
     } else {
       console.log(`[Orchestrator] ${runMode} 完成：未发送报告、未生成反思、未触达候选人`);
     }

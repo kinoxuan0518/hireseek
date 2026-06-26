@@ -210,6 +210,45 @@ describe('agent core lower layer', () => {
     expect(rows[0]).toMatchObject({ run_id: 101, tool_name: 'browser_act', ok: 1, side_effect: 1, mode: 'execute', stage_id: 'prefilter' });
   });
 
+  it('stores the latest run state for continuation and pause recovery', async () => {
+    const { upsertAgentRunState, loadAgentRunState } = await import('../src/agent-core/run-state-store');
+
+    upsertAgentRunState({
+      runId: 303,
+      sessionId: 'run-state-session',
+      status: 'running',
+      phase: 'browser_action',
+      stageId: 'prefilter',
+      lastAction: 'click',
+      lastUrl: 'https://www.zhipin.com/web/chat/recommend',
+      snapshotSummary: 'URL: https://www.zhipin.com/web/chat/recommend\n标题: 推荐牛人',
+    });
+    expect(loadAgentRunState(303)).toMatchObject({
+      runId: 303,
+      sessionId: 'run-state-session',
+      status: 'running',
+      phase: 'browser_action',
+      stageId: 'prefilter',
+      lastAction: 'click',
+    });
+
+    upsertAgentRunState({
+      runId: 303,
+      status: 'paused',
+      phase: 'external_control',
+      lastAction: 'click',
+      lastUrl: 'https://www.zhipin.com/web/chat/aiform',
+      reason: 'user is using Chrome',
+    });
+    expect(loadAgentRunState(303)).toMatchObject({
+      runId: 303,
+      sessionId: 'run-state-session',
+      status: 'paused',
+      phase: 'external_control',
+      reason: 'user is using Chrome',
+    });
+  });
+
   it('offloads large tool outputs to private runtime storage', async () => {
     const { offloadToolOutput } = await import('../src/agent-core/tool-output-store');
 
@@ -808,6 +847,25 @@ describe('agent core lower layer', () => {
     const prepareCheck = await complianceCheck({ runId: prepareRunId });
     expect(prepareCheck.verdict).toBe('skip');
     expect(prepareCheck.violations).toHaveLength(0);
+
+    const pausedInserted = taskRunOps.start.run({
+      job_id: 'Agent工程师',
+      channel: 'boss',
+      mode: 'execute',
+      started_at: new Date().toISOString(),
+    });
+    const pausedRunId = Number(pausedInserted.lastInsertRowid);
+    taskRunOps.complete.run({
+      id: pausedRunId,
+      finished_at: new Date().toISOString(),
+      status: 'paused',
+      contacted_count: 0,
+      skipped_count: 0,
+      error: 'user is using Chrome',
+    });
+    const pausedCheck = await complianceCheck({ runId: pausedRunId });
+    expect(pausedCheck.verdict).toBe('skip');
+    expect(pausedCheck.summary).toContain('已暂停');
   });
 
   it('formats read-only core status for observability', async () => {

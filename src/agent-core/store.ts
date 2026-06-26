@@ -23,6 +23,22 @@ export function ensureAgentCoreSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_run ON agent_tool_calls(run_id);
     CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_session ON agent_tool_calls(session_id);
 
+    CREATE TABLE IF NOT EXISTS agent_run_states (
+      run_id           INTEGER PRIMARY KEY,
+      session_id       TEXT,
+      status           TEXT NOT NULL,
+      phase            TEXT NOT NULL,
+      stage_id         TEXT,
+      last_action      TEXT,
+      last_url         TEXT,
+      reason           TEXT,
+      snapshot_summary TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_run_states_status ON agent_run_states(status);
+    CREATE INDEX IF NOT EXISTS idx_agent_run_states_stage ON agent_run_states(stage_id);
+
     CREATE TABLE IF NOT EXISTS agent_sessions (
       id            TEXT PRIMARY KEY,
       title         TEXT NOT NULL,
@@ -100,6 +116,7 @@ export function ensureAgentCoreSchema(): void {
     `ALTER TABLE agent_memory_episodic ADD COLUMN content_hash TEXT`,
     `ALTER TABLE agent_memory_semantic ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`,
     `ALTER TABLE agent_tool_calls ADD COLUMN stage_id TEXT`,
+    `ALTER TABLE agent_run_states ADD COLUMN snapshot_summary TEXT`,
   ]) {
     try { db.exec(sql); } catch { /* column already exists */ }
   }

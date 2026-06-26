@@ -244,10 +244,13 @@ export async function complianceCheck(opts: { runId?: number } = {}): Promise<Co
 
   const runtime = createRuntimeContext();
   const job = runtime.activeJob;
-  const runRow = db.prepare(`SELECT job_id, channel, mode FROM task_runs WHERE id = ?`).get(runId) as { job_id: string; channel: string; mode?: string } | undefined;
+  const runRow = db.prepare(`SELECT job_id, channel, mode, status FROM task_runs WHERE id = ?`).get(runId) as { job_id: string; channel: string; mode?: string; status?: string } | undefined;
   const channelRow = db.prepare(`SELECT channel FROM run_actions WHERE run_id = ? LIMIT 1`).get(runId) as { channel: string } | undefined;
   const channel = (runRow?.channel ?? channelRow?.channel ?? 'boss') as Channel;
   const runMode = runRow?.mode === 'dry_run' ? 'dry_run' : runRow?.mode === 'prepare' ? 'prepare' : runRow?.mode === 'screen' ? 'screen' : 'execute';
+  if (runRow?.status === 'paused') {
+    return { verdict: 'skip', runId, steps: trace.length, violations: [], summary: `run #${runId} 已暂停，未进入完整流程履约审计。` };
+  }
   const jobId = runRow?.job_id ?? runtime.activeJobId;
   const stageAudit = inspectStageCoverage(channel, runId, trace, { runMode });
 

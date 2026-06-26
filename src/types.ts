@@ -37,7 +37,7 @@ export interface TaskRun {
   mode?: 'execute' | 'dry_run' | 'prepare' | 'screen';
   started_at: string;
   finished_at?: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'paused' | 'failed';
   contacted_count: number;
   skipped_count: number;
   error?: string;
@@ -105,6 +105,9 @@ export interface SkillResult {
   skipped: number;
   candidates: Candidate[];
   summary: string;
+  /** Runner-level exit state: paused means the harness stopped safely before workflow completion. */
+  exitStatus?: 'completed' | 'paused' | 'failed';
+  exitReason?: string;
   /** 本轮执行轨迹；仅 DOM runner 目前填充，其他 runner 可缺省 */
   trace?: TraceStep[];
   /** 本轮已触达候选人结构化清单；DOM runner 从总结解析，供 verifier/漏斗使用 */

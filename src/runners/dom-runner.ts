@@ -21,6 +21,7 @@ import type { BrowserAction, BrowserLiveState, BrowserTarget, RiskGuard } from '
 import { isDomBrowserSession } from '../browser-session';
 import { recordRejectedToolCall, recordToolCall } from '../agent-core/trace';
 import { offloadToolOutput } from '../agent-core/tool-output-store';
+import { upsertAgentRunState, type AgentRunStatus } from '../agent-core/run-state-store';
 import {
   createToolRegistry,
   unknownToolResult,
@@ -319,6 +320,20 @@ function snapshotUrl(snapshot: string): string {
 
 function snapshotTitle(snapshot: string): string {
   return snapshot.split('\n').find(line => line.startsWith('标题: '))?.slice(4).trim() ?? '';
+}
+
+function summarizeSnapshotForRunState(snapshot: string): string {
+  return snapshot
+    .split('\n')
+    .filter(line =>
+      line.startsWith('URL: ') ||
+      line.startsWith('标题: ') ||
+      line.startsWith('滚动位置: ') ||
+      line.startsWith('[工具输出已卸载]') ||
+      line.startsWith('path: '),
+    )
+    .join('\n')
+    .slice(0, 1200);
 }
 
 function normalizeOwnershipUrl(url: string | undefined): string {
@@ -657,6 +672,38 @@ export class DomRunner implements LLMRunner {
       mode: initialMode,
       stageId: options.initialStageId,
     });
+    const setRunState = (input: {
+      status: AgentRunStatus;
+      phase: string;
+      stageId?: string;
+      lastAction?: string;
+      lastUrl?: string;
+      reason?: string | null;
+      snapshot?: string;
+    }): void => {
+      if (options.runId == null) return;
+      try {
+        upsertAgentRunState({
+          runId: options.runId,
+          sessionId: options.sessionId,
+          status: input.status,
+          phase: input.phase,
+          stageId: input.stageId,
+          lastAction: input.lastAction,
+          lastUrl: input.lastUrl,
+          reason: input.reason,
+          snapshotSummary: input.snapshot ? summarizeSnapshotForRunState(input.snapshot) : undefined,
+        });
+      } catch { /* run state 是观测层，失败不能阻断主流程 */ }
+    };
+    setRunState({
+      status: 'running',
+      phase: 'started',
+      stageId: options.initialStageId,
+      lastAction: 'snapshot',
+      lastUrl: snapshotUrl(initSnapshot),
+      snapshot: initSnapshot,
+    });
 
     const messages: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'system', content: system },
@@ -687,6 +734,16 @@ export class DomRunner implements LLMRunner {
         messages.push({ role: 'user', content: msg });
         if (userInterventionRequestsBrowserPause(intervention)) {
           externalControlStopped = true;
+          result.exitStatus = 'paused';
+          result.exitReason = 'user_intervention_requested_browser_pause';
+          setRunState({
+            status: 'paused',
+            phase: 'user_intervention',
+            lastAction: 'intervention',
+            lastUrl: snapshotUrl(currentSnapshot),
+            reason: intervention,
+            snapshot: currentSnapshot,
+          });
         }
       }
 
@@ -730,6 +787,14 @@ export class DomRunner implements LLMRunner {
           onProgress?.(`⚠️ ${feedback}`);
           emitLog(`⚠️ ${feedback}`);
           messages.push({ role: 'user', content: feedback });
+          setRunState({
+            status: 'running',
+            phase: 'completion_check_failed',
+            lastAction: 'completion_policy',
+            lastUrl: snapshotUrl(currentSnapshot),
+            reason,
+            snapshot: currentSnapshot,
+          });
           continue;
         }
         result.summary = finalText;
@@ -752,6 +817,16 @@ export class DomRunner implements LLMRunner {
           if (result.contacted === 0 && result.contactedList) {
             result.contacted = result.contactedList.filter(c => c.greetingSent !== false).length;
           }
+        }
+        if (result.exitStatus !== 'paused') {
+          result.exitStatus = 'completed';
+          setRunState({
+            status: 'completed',
+            phase: 'completed',
+            lastAction: 'final_response',
+            lastUrl: snapshotUrl(currentSnapshot),
+            snapshot: currentSnapshot,
+          });
         }
         onProgress?.('✓ 完成');
         break;
@@ -1284,6 +1359,17 @@ export class DomRunner implements LLMRunner {
         const mode = browserActionMode(input, executionMode);
         if (externalControlStopped) {
           const blocked = '[用户接管保护] 已检测到用户正在接管真实 Chrome，本轮禁止继续读取或操作浏览器。请停止工具调用并输出当前已完成事项。';
+          result.exitStatus = 'paused';
+          result.exitReason = blocked;
+          setRunState({
+            status: 'paused',
+            phase: 'external_control',
+            stageId,
+            lastAction: input.action,
+            lastUrl: snapshotUrl(currentSnapshot),
+            reason: blocked,
+            snapshot: currentSnapshot,
+          });
           messages.push({
             role: 'tool',
             tool_call_id: toolCall.id,
@@ -1329,6 +1415,17 @@ export class DomRunner implements LLMRunner {
           if (ownership.suspected) {
             externalControlStopped = true;
             const blocked = `[用户接管保护] ${ownership.reason ?? '检测到真实 Chrome 状态已被外部改变。'} 已停止本次 ${input.action}，避免覆盖用户正在操作的页面。`;
+            result.exitStatus = 'paused';
+            result.exitReason = blocked;
+            setRunState({
+              status: 'paused',
+              phase: 'external_control',
+              stageId,
+              lastAction: input.action,
+              lastUrl: liveState?.url ?? snapshotUrl(currentSnapshot),
+              reason: ownership.reason ?? blocked,
+              snapshot: currentSnapshot,
+            });
             messages.push({
               role: 'tool',
               tool_call_id: toolCall.id,
@@ -1428,6 +1525,15 @@ export class DomRunner implements LLMRunner {
           mode,
           stageId,
         });
+        setRunState({
+          status: 'running',
+          phase: stepOk ? 'browser_action' : 'browser_action_failed',
+          stageId,
+          lastAction: input.action,
+          lastUrl: snapshotUrl(snapshot),
+          reason: stepError,
+          snapshot,
+        });
         if (
           stepOk &&
           executionMode === 'execute' &&
@@ -1466,6 +1572,19 @@ export class DomRunner implements LLMRunner {
           content: snapshot,
         });
       }
+    }
+
+    if (!result.summary && result.exitStatus !== 'paused') {
+      result.exitStatus = 'failed';
+      result.exitReason = `超过最大执行轮数（${maxTurns}），已停止`;
+      setRunState({
+        status: 'failed',
+        phase: 'max_turns_exceeded',
+        lastAction: 'loop_limit',
+        lastUrl: snapshotUrl(currentSnapshot),
+        reason: result.exitReason,
+        snapshot: currentSnapshot,
+      });
     }
 
     return result;
