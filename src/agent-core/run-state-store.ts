@@ -68,13 +68,19 @@ export function upsertAgentRunState(input: UpsertAgentRunStateInput): void {
 
 export function loadAgentRunState(runId: number): AgentRunState | null {
   const row = db.prepare(`
-    SELECT run_id, session_id, status, phase, stage_id, last_action, last_url,
-           reason, snapshot_summary, created_at, updated_at
-    FROM agent_run_states
-    WHERE run_id = ?
+    SELECT ars.run_id, ars.session_id, tr.job_id, tr.channel, tr.mode AS run_mode,
+           tr.status AS task_status, ars.status, ars.phase, ars.stage_id, ars.last_action,
+           ars.last_url, ars.reason, ars.snapshot_summary, ars.created_at, ars.updated_at
+    FROM agent_run_states ars
+    LEFT JOIN task_runs tr ON tr.id = ars.run_id
+    WHERE ars.run_id = ?
   `).get(runId) as {
     run_id: number;
     session_id: string | null;
+    job_id?: string | null;
+    channel?: string | null;
+    run_mode?: string | null;
+    task_status?: string | null;
     status: AgentRunStatus;
     phase: string;
     stage_id: string | null;
@@ -90,6 +96,10 @@ export function loadAgentRunState(runId: number): AgentRunState | null {
   return {
     runId: row.run_id,
     sessionId: row.session_id,
+    jobId: row.job_id,
+    channel: row.channel,
+    runMode: row.run_mode,
+    taskStatus: row.task_status,
     status: row.status,
     phase: row.phase,
     stageId: row.stage_id,
@@ -230,4 +240,29 @@ export function formatRunStateList(
     lines.push('');
   }
   return lines.join('\n').trimEnd();
+}
+
+export function formatRunStateDetail(state: AgentRunState | null): string {
+  if (!state) return '没有找到这个 run state。';
+  const lines = [
+    `HireSeek Run State #${state.runId}`,
+    '',
+    `status: ${state.status}`,
+    `phase: ${state.phase}`,
+    state.taskStatus ? `taskStatus: ${state.taskStatus}` : '',
+    state.channel ? `channel: ${state.channel}` : '',
+    state.jobId ? `job: ${state.jobId}` : '',
+    state.runMode ? `mode: ${state.runMode}` : '',
+    state.stageId ? `stage: ${state.stageId}` : '',
+    state.lastAction ? `lastAction: ${state.lastAction}` : '',
+    state.lastUrl ? `lastUrl: ${state.lastUrl}` : '',
+    state.reason ? `reason: ${state.reason}` : '',
+    state.updatedAt ? `updatedAt: ${state.updatedAt}` : '',
+    '',
+    state.snapshotSummary ? `Snapshot summary:\n${state.snapshotSummary}` : 'Snapshot summary: 无',
+  ].filter(Boolean);
+  if (state.status === 'paused') {
+    lines.push('', `Next: 确认当前真实页面后，用 \`hireseek run ${state.channel ?? '<渠道>'} --here\` 继续。`);
+  }
+  return lines.join('\n');
 }
