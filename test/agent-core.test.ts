@@ -211,7 +211,14 @@ describe('agent core lower layer', () => {
   });
 
   it('stores the latest run state for continuation and pause recovery', async () => {
-    const { upsertAgentRunState, loadAgentRunState } = await import('../src/agent-core/run-state-store');
+    const {
+      formatRunStateForContext,
+      latestPausedRunState,
+      listAgentRunStates,
+      loadAgentRunState,
+      upsertAgentRunState,
+    } = await import('../src/agent-core/run-state-store');
+    const { db } = await import('../src/db');
 
     upsertAgentRunState({
       runId: 303,
@@ -247,6 +254,27 @@ describe('agent core lower layer', () => {
       phase: 'external_control',
       reason: 'user is using Chrome',
     });
+
+    db.prepare(`DELETE FROM task_runs WHERE id = ?`).run(304);
+    db.prepare(`
+      INSERT INTO task_runs (id, job_id, channel, mode, started_at, finished_at, status, contacted_count, skipped_count)
+      VALUES (?, ?, ?, 'execute', datetime('now','localtime'), datetime('now','localtime'), 'paused', 0, 0)
+    `).run(304, 'Agent工程师', 'boss');
+    upsertAgentRunState({
+      runId: 304,
+      status: 'paused',
+      phase: 'external_control',
+      stageId: 'candidate-screen',
+      lastAction: 'click',
+      lastUrl: 'https://www.zhipin.com/web/chat/aiform',
+      reason: 'user is using Chrome',
+      snapshotSummary: 'URL: https://www.zhipin.com/web/chat/aiform\n标题: AI 搜索',
+    });
+
+    const latest = latestPausedRunState({ jobId: 'Agent工程师', channel: 'boss' });
+    expect(latest?.runId).toBe(304);
+    expect(formatRunStateForContext(latest!)).toContain('phase: external_control');
+    expect(listAgentRunStates(2).some(s => s.runId === 304)).toBe(true);
   });
 
   it('offloads large tool outputs to private runtime storage', async () => {
@@ -898,6 +926,7 @@ describe('agent core lower layer', () => {
     expect(status.tools.sideEffect).toBe(1);
     expect(text).toContain('HireSeek Agent Core');
     expect(text).toContain('Trace:');
+    expect(text).toContain('Run states:');
     expect(text).toContain('Memory:');
   });
 

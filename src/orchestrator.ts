@@ -21,6 +21,7 @@ import { getPlatformProtocol } from './platform-protocols';
 import { buildRecruitingCapabilityContext } from './capabilities';
 import type { RunSkillOptions } from './runners/interface';
 import { saveRunTrace } from './agent-core/run-trace-store';
+import { formatRunStateForContext, latestPausedRunState, type AgentRunState } from './agent-core/run-state-store';
 
 type ChannelRunMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
 
@@ -79,6 +80,18 @@ function formatScreenContactGate(candidates: Array<ScreenedCandidate & { runId: 
     ...contact.slice(0, 20).map((c, index) => (
       `${index + 1}. ${c.name}${c.company ? ` | ${c.company}` : ''} | score=${c.score ?? 'NA'} | screenRun=${c.runId} | ${c.evidence ?? 'no evidence'}`
     )),
+  ].join('\n');
+}
+
+function formatPausedRunContext(state: AgentRunState | null): string {
+  if (!state) return '';
+  return [
+    '## 上一轮暂停上下文',
+    '',
+    '这是同一岗位/渠道最近 24 小时内暂停的 run 状态，只作为恢复参考；仍以当前真实 Chrome 页面为准。',
+    '如果当前页面已经不同，不要强行回到旧页面；先 snapshot 说明当前页，再继续。',
+    '',
+    formatRunStateForContext(state),
   ].join('\n');
 }
 
@@ -286,14 +299,16 @@ function taskPromptForChannel(
   screen = false,
   activeJob?: JobConfig | null,
   screenGateContext = '',
+  pausedRunContext = '',
 ): string {
   const protocol = getPlatformProtocol(channel);
   const base = protocol
     ? protocol.buildTaskPrompt({ channelLabel: label, fromCurrent, activeJob })
     : fromCurrent ? TASK_PROMPT_HERE(label) : TASK_PROMPT(label);
+  const baseWithResume = [base, pausedRunContext].filter(Boolean).join('\n\n---\n\n');
   if (prepare) {
     return [
-      base,
+      baseWithResume,
       [
         '## Prepare 安全验收约束',
         '',
@@ -305,7 +320,7 @@ function taskPromptForChannel(
   }
   if (screen) {
     return [
-      base,
+      baseWithResume,
       [
         '## Screen 候选人筛选验收约束',
         '',
@@ -320,9 +335,9 @@ function taskPromptForChannel(
       ].join('\n'),
     ].join('\n\n---\n\n');
   }
-  if (!dryRun) return [base, screenGateContext].filter(Boolean).join('\n\n---\n\n');
+  if (!dryRun) return [baseWithResume, screenGateContext].filter(Boolean).join('\n\n---\n\n');
   return [
-    base,
+    baseWithResume,
     [
       '## Dry-run 预检约束',
       '',
@@ -513,6 +528,9 @@ export async function runChannel(
     const screenGateContext = channel === 'boss' && runMode === 'execute'
       ? formatScreenContactGate(screenCandidates)
       : '';
+    const pausedRunContext = opts.fromCurrent
+      ? formatPausedRunContext(latestPausedRunState({ jobId, channel, maxAgeHours: 24 }))
+      : '';
 
     // 组装系统提示：SOUL + 职位上下文 + 中层能力 + 记忆 + Skill资产
     const soul      = loadWorkspaceFile('SOUL.md');
@@ -531,7 +549,7 @@ export async function runChannel(
     const rawResult = await runner.runSkill(
       page,
       systemPrompt,
-      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, screen, activeJob, screenGateContext),
+      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, screen, activeJob, screenGateContext, pausedRunContext),
       opts.progress ?? ((msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))),
       runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun, prepare, screen, activeJob?.title, allowedContactNames),
     );

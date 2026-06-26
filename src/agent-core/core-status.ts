@@ -1,5 +1,6 @@
 import { db } from '../db';
 import { createRuntimeContext } from './runtime-context';
+import { listAgentRunStates, type AgentRunState } from './run-state-store';
 import type { ToolRegistry } from './tool-registry';
 import './store';
 
@@ -26,6 +27,9 @@ export interface CoreStatus {
       created_at: string;
       error: string | null;
     }>;
+  };
+  runStates: {
+    recent: AgentRunState[];
   };
   sessions: {
     total: number;
@@ -73,6 +77,9 @@ export function collectCoreStatus(registry?: ToolRegistry): CoreStatus {
         LIMIT 8
       `).all() as CoreStatus['trace']['recent'],
     },
+    runStates: {
+      recent: listAgentRunStates(8),
+    },
     sessions: {
       total: count(`SELECT COUNT(*) AS n FROM agent_sessions`),
       messages: count(`SELECT COUNT(*) AS n FROM agent_messages`),
@@ -109,6 +116,15 @@ export function formatCoreStatus(status: CoreStatus): string {
       return `- ${t.created_at} ${t.tool_name} [${ok}${side}${stage}]${err}`;
     }).join('\n')
     : '无';
+  const recentRunStates = status.runStates.recent.length
+    ? status.runStates.recent.map(r => {
+      const stage = r.stageId ? ` stage=${r.stageId}` : '';
+      const action = r.lastAction ? ` last=${r.lastAction}` : '';
+      const url = r.lastUrl ? ` url=${r.lastUrl.slice(0, 90)}` : '';
+      const reason = r.reason ? ` — ${r.reason.slice(0, 80)}` : '';
+      return `- ${r.updatedAt ?? ''} run#${r.runId} ${r.status}/${r.phase}${stage}${action}${url}${reason}`;
+    }).join('\n')
+    : '无';
   const recentSessions = status.sessions.recent.length
     ? status.sessions.recent.map(s => `- ${s.updated_at} ${s.title} (${s.source}, ${s.message_count} messages, ${s.id})`).join('\n')
     : '无';
@@ -130,6 +146,8 @@ export function formatCoreStatus(status: CoreStatus): string {
     '',
     `Trace: ${status.trace.total} calls, ${status.trace.failed} failed, ${status.trace.sideEffect} side-effect`,
     `Recent trace:\n${recentTrace}`,
+    '',
+    `Run states:\n${recentRunStates}`,
     '',
     `Sessions: ${status.sessions.total} sessions, ${status.sessions.messages} messages`,
     `Recent sessions:\n${recentSessions}`,
