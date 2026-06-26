@@ -32,6 +32,7 @@ const USAGE = `
   hireseek hire-sync [--apply]  从飞书招聘/多维表格自动拉面试结果回流（默认 dry-run 预览）
   hireseek verify              双轴独立质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)（--push 推送）
   hireseek core                Agent Core 状态：工具注册 / trace / session / memory
+  hireseek runs [all]          查看最近暂停/失败 run；all 显示最近全部 run state
   hireseek doctor              产品结构体检：下层基座 / 中层协议 / skill 边界 / 真实验收缺口
   hireseek protocols           中层平台协议：已产品化渠道 / 契约 / 动作策略 / 合规规则
   hireseek capabilities        中层招聘能力：触达话术 / 候选人判断 / 搜索策略
@@ -227,6 +228,22 @@ async function main(): Promise<void> {
     const { CHAT_TOOL_REGISTRY } = await import('./chat');
     const { collectCoreStatus, formatCoreStatus } = await import('./agent-core/core-status');
     console.log(formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY)) + '\n');
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'runs' || command === 'run-state' || command === 'run-states') {
+    const {
+      formatRunStateList,
+      listAgentRunStates,
+      listPendingAgentRunStates,
+    } = await import('./agent-core/run-state-store');
+    const showAll = args.includes('all') || args.includes('--all');
+    const states = showAll ? listAgentRunStates(12) : listPendingAgentRunStates(12);
+    console.log(formatRunStateList(
+      states,
+      showAll ? 'HireSeek 最近 Run States' : 'HireSeek 待处理 Run States',
+      showAll ? '没有 run state。' : '没有待处理 run。',
+    ) + '\n');
     db.close();
     process.exit(0);
 

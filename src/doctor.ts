@@ -8,7 +8,7 @@ import { listRecruitingCapabilities } from './capabilities';
 import { listClaudeSkills } from './skills/claude-skills';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
-import { listAgentRunStates } from './agent-core/run-state-store';
+import { listPendingAgentRunStates } from './agent-core/run-state-store';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 export type DoctorLayer = 'lower' | 'middle' | 'upper' | 'external';
@@ -68,13 +68,7 @@ function missingWorkspaceSources(sourceFiles: string[], workspaceDir: string): s
 }
 
 function recentPendingRunStateDetails(limit = 3): string[] {
-  return listAgentRunStates(20)
-    .filter(state => state.status === 'paused' || state.status === 'failed')
-    .filter(state => {
-      if (!state.updatedAt) return true;
-      return Date.now() - new Date(state.updatedAt).getTime() <= 24 * 60 * 60 * 1000;
-    })
-    .slice(0, limit)
+  return listPendingAgentRunStates(limit, 24)
     .map(state => {
       const stage = state.stageId ? ` stage=${state.stageId}` : '';
       const action = state.lastAction ? ` last=${state.lastAction}` : '';

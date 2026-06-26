@@ -213,7 +213,9 @@ describe('agent core lower layer', () => {
   it('stores the latest run state for continuation and pause recovery', async () => {
     const {
       formatRunStateForContext,
+      formatRunStateList,
       latestPausedRunState,
+      listPendingAgentRunStates,
       listAgentRunStates,
       loadAgentRunState,
       upsertAgentRunState,
@@ -274,6 +276,10 @@ describe('agent core lower layer', () => {
     const latest = latestPausedRunState({ jobId: 'Agent工程师', channel: 'boss' });
     expect(latest?.runId).toBe(304);
     expect(formatRunStateForContext(latest!)).toContain('phase: external_control');
+    expect(formatRunStateForContext(latest!)).toContain('channel: boss');
+    expect(formatRunStateList([latest!], 'Pending')).toContain('next:');
+    expect(formatRunStateList([], 'All', '没有 run state。')).toContain('没有 run state。');
+    expect(listPendingAgentRunStates(3).some(s => s.runId === 304)).toBe(true);
     expect(listAgentRunStates(2).some(s => s.runId === 304)).toBe(true);
   });
 

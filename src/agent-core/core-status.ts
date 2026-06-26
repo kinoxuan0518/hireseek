@@ -118,11 +118,12 @@ export function formatCoreStatus(status: CoreStatus): string {
     : '无';
   const recentRunStates = status.runStates.recent.length
     ? status.runStates.recent.map(r => {
+      const scope = [r.channel, r.jobId, r.runMode].filter(Boolean).join('/') || 'unknown';
       const stage = r.stageId ? ` stage=${r.stageId}` : '';
       const action = r.lastAction ? ` last=${r.lastAction}` : '';
       const url = r.lastUrl ? ` url=${r.lastUrl.slice(0, 90)}` : '';
       const reason = r.reason ? ` — ${r.reason.slice(0, 80)}` : '';
-      return `- ${r.updatedAt ?? ''} run#${r.runId} ${r.status}/${r.phase}${stage}${action}${url}${reason}`;
+      return `- ${r.updatedAt ?? ''} run#${r.runId} ${scope} ${r.status}/${r.phase}${stage}${action}${url}${reason}`;
     }).join('\n')
     : '无';
   const recentSessions = status.sessions.recent.length
