@@ -20,6 +20,7 @@ import { repairToolMessageHistoryInPlace } from '../message-integrity';
 import type { BrowserAction, BrowserLiveState, BrowserTarget, RiskGuard } from '../browser-session';
 import { isDomBrowserSession } from '../browser-session';
 import { recordRejectedToolCall, recordToolCall } from '../agent-core/trace';
+import { offloadToolOutput } from '../agent-core/tool-output-store';
 import {
   createToolRegistry,
   unknownToolResult,
@@ -570,10 +571,11 @@ export async function executeDomAction(page: Page, input: BrowserAction, guard: 
   }
 }
 
-/** 只保留最近 keepLast 份快照，旧的替换为占位文字，控制 token */
+/** 只保留最近 keepLast 份完整快照，旧快照卸载到私有文件后只给头尾摘要，控制 token。 */
 function pruneSnapshots(
   messages: OpenAI.ChatCompletionMessageParam[],
   keepLast = 2,
+  opts: { runId?: number; sessionId?: string } = {},
 ): OpenAI.ChatCompletionMessageParam[] {
   const snapIdx: number[] = [];
   messages.forEach((m, i) => {
@@ -586,7 +588,16 @@ function pruneSnapshots(
 
   const pruned = [...messages];
   for (const i of snapIdx.slice(0, snapIdx.length - keepLast)) {
-    pruned[i] = { ...pruned[i], content: '[历史快照已省略]' } as OpenAI.ChatCompletionMessageParam;
+    const original = pruned[i];
+    const content = typeof original.content === 'string' ? original.content : JSON.stringify(original.content);
+    const offloaded = offloadToolOutput({
+      content,
+      toolName: 'browser',
+      runId: opts.runId,
+      sessionId: opts.sessionId,
+      kind: 'snapshot',
+    });
+    pruned[i] = { ...original, content: offloaded.content } as OpenAI.ChatCompletionMessageParam;
   }
   return pruned;
 }
@@ -685,7 +696,7 @@ export class DomRunner implements LLMRunner {
       repairToolMessageHistoryInPlace(messages);
       const response = await this.client.chat.completions.create({
         model: this.model,
-        messages: pruneSnapshots(messages),
+        messages: pruneSnapshots(messages, 2, { runId: options.runId, sessionId: options.sessionId }),
         tools: DOM_RUNNER_TOOLS,
         tool_choice: 'auto',
         max_tokens: 2048,

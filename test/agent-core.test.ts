@@ -210,6 +210,36 @@ describe('agent core lower layer', () => {
     expect(rows[0]).toMatchObject({ run_id: 101, tool_name: 'browser_act', ok: 1, side_effect: 1, mode: 'execute', stage_id: 'prefilter' });
   });
 
+  it('offloads large tool outputs to private runtime storage', async () => {
+    const { offloadToolOutput } = await import('../src/agent-core/tool-output-store');
+
+    const short = offloadToolOutput({
+      content: 'small output',
+      toolName: 'browser',
+      inlineLimit: 100,
+    });
+    expect(short.offloaded).toBe(false);
+    expect(short.content).toBe('small output');
+
+    const largeText = `URL: https://example.test\n${'candidate snapshot '.repeat(300)}`;
+    const large = offloadToolOutput({
+      content: largeText,
+      toolName: 'browser',
+      runId: 9001,
+      sessionId: 's-output',
+      kind: 'snapshot',
+      inlineLimit: 200,
+    });
+
+    expect(large.offloaded).toBe(true);
+    expect(large.path).toBeTruthy();
+    expect(large.path?.startsWith(path.dirname(process.env.HIRESEEK_DB_PATH!))).toBe(true);
+    expect(large.content).toContain('[工具输出已卸载]');
+    expect(large.content).toContain('## head');
+    expect(large.content).toContain('## tail');
+    expect(fs.readFileSync(large.path!, 'utf8')).toContain(largeText);
+  });
+
   it('persists run trace stage markers for compliance coverage', async () => {
     const { inspectStageCoverage, summarizeStageCoverage } = await import('../src/compliance');
     const { loadRunTrace, saveRunTrace } = await import('../src/agent-core/run-trace-store');
