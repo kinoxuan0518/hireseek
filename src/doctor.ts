@@ -8,6 +8,7 @@ import { listRecruitingCapabilities } from './capabilities';
 import { listClaudeSkills } from './skills/claude-skills';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
+import { listAgentRunStates } from './agent-core/run-state-store';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 export type DoctorLayer = 'lower' | 'middle' | 'upper' | 'external';
@@ -64,6 +65,22 @@ function pathState(target: string): DoctorStatus {
 
 function missingWorkspaceSources(sourceFiles: string[], workspaceDir: string): string[] {
   return sourceFiles.filter(file => !fs.existsSync(path.join(workspaceDir, file)));
+}
+
+function recentPendingRunStateDetails(limit = 3): string[] {
+  return listAgentRunStates(20)
+    .filter(state => state.status === 'paused' || state.status === 'failed')
+    .filter(state => {
+      if (!state.updatedAt) return true;
+      return Date.now() - new Date(state.updatedAt).getTime() <= 24 * 60 * 60 * 1000;
+    })
+    .slice(0, limit)
+    .map(state => {
+      const stage = state.stageId ? ` stage=${state.stageId}` : '';
+      const action = state.lastAction ? ` last=${state.lastAction}` : '';
+      const reason = state.reason ? ` reason=${state.reason.slice(0, 90)}` : '';
+      return `run #${state.runId} ${state.status}/${state.phase}${stage}${action}${reason}`;
+    });
 }
 
 export interface BossDryRunEvidence {
@@ -328,6 +345,16 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
         : 'run_actions has not been initialized yet; it will be created by compliance/run trace code',
   ));
 
+  const pendingRunStates = recentPendingRunStateDetails();
+  checks.push(check(
+    'lower',
+    'Pending run states',
+    pendingRunStates.length ? 'warn' : 'pass',
+    pendingRunStates.length
+      ? pendingRunStates.join(' | ')
+      : 'no paused/failed run states in the last 24h',
+  ));
+
   const protocols = listPlatformProtocols();
   const boss = protocols.find(protocol => protocol.channel === 'boss');
   checks.push(check(
@@ -430,6 +457,9 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   if (status === 'fail') nextSteps.push('先修复 fail 项，再跑真实渠道任务。');
   if (checks.some(c => c.name === 'Live BOSS run' && c.status === 'warn')) {
     nextSteps.push('真实页面验收从 `hireseek run boss --here --dry-run` 开始，不要直接真实触达。');
+  }
+  if (checks.some(c => c.name === 'Pending run states' && c.status === 'warn')) {
+    nextSteps.push('有暂停/失败的 run state：先用 `hireseek core` 查看停在哪，再从当前真实页面继续。');
   }
   if (checks.some(c => c.name === 'Live BOSS prepare' && c.status === 'warn')) {
     nextSteps.push('真实触达前运行 `hireseek run boss --here --prepare`，确认自动切职位和筛选提交安全通过。');

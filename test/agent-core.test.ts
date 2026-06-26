@@ -933,6 +933,7 @@ describe('agent core lower layer', () => {
   it('formats product doctor report without executing live browser workflows', async () => {
     const { collectDoctorReport, formatDoctorReport } = await import('../src/doctor');
     const { createToolRegistry } = await import('../src/agent-core/tool-registry');
+    const { upsertAgentRunState } = await import('../src/agent-core/run-state-store');
 
     const registry = createToolRegistry([
       {
@@ -976,6 +977,14 @@ describe('agent core lower layer', () => {
         },
       },
     ]);
+    upsertAgentRunState({
+      runId: 909,
+      status: 'paused',
+      phase: 'external_control',
+      stageId: 'candidate-screen',
+      lastAction: 'click',
+      reason: 'user is using Chrome',
+    });
 
     const report = collectDoctorReport(registry);
     const text = formatDoctorReport(report);
@@ -987,7 +996,9 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Live BOSS run');
     expect(text).toContain('Live BOSS prepare');
     expect(text).toContain('Live BOSS screen');
+    expect(text).toContain('Pending run states');
     expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Runner tool registry' && c.status === 'pass')).toBe(true);
+    expect(report.checks.some(c => c.name === 'Pending run states' && c.status === 'warn')).toBe(true);
   });
 });
