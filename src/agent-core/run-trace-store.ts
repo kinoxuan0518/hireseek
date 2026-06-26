@@ -9,8 +9,8 @@ export function saveRunTrace(
 ): void {
   if (!trace.length) return;
   const insert = db.prepare(`
-    INSERT INTO run_actions (run_id, job_id, channel, seq, action, target, detail, ok, stage_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO run_actions (run_id, job_id, channel, seq, action, target, detail, ok, stage_id, action_label)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const transaction = db.transaction((steps: TraceStep[]) => {
     for (const step of steps) {
@@ -24,6 +24,7 @@ export function saveRunTrace(
         step.detail ?? null,
         step.ok ? 1 : 0,
         step.stageId ?? null,
+        step.actionLabel ?? null,
       );
     }
   });
@@ -32,7 +33,7 @@ export function saveRunTrace(
 
 export function loadRunTrace(runId: number): TraceStep[] {
   return (db.prepare(`
-    SELECT seq, action, target, detail, ok, stage_id
+    SELECT seq, action, target, detail, ok, stage_id, action_label
     FROM run_actions
     WHERE run_id = ?
     ORDER BY seq
@@ -43,6 +44,7 @@ export function loadRunTrace(runId: number): TraceStep[] {
     detail: string | null;
     ok: number;
     stage_id: string | null;
+    action_label: string | null;
   }>).map(row => ({
     seq: row.seq,
     action: row.action,
@@ -50,6 +52,7 @@ export function loadRunTrace(runId: number): TraceStep[] {
     detail: row.detail ?? undefined,
     ok: !!row.ok,
     stageId: row.stage_id ?? undefined,
+    actionLabel: row.action_label ?? undefined,
   }));
 }
 

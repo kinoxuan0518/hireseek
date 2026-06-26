@@ -58,7 +58,7 @@ export interface TraceStep {
   sideEffect?: boolean;       // 是否真实影响外部世界
   mode?: 'read' | 'dry_run' | 'prepare' | 'screen' | 'execute';
   stageId?: string;           // 可选：中层协议阶段 id（如下层只记录，不解释业务含义）
-  actionLabel?: string;       // 动作执行前的控件语义（仅内存验收使用，不默认持久化）
+  actionLabel?: string;       // 动作执行前的控件语义（用于审计 ref 是否点对）
 }
 
 /**

@@ -310,6 +310,16 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
         ? 'run_actions exists but stage_id is missing'
         : 'run_actions has not been initialized yet; it will be created by compliance/run trace code',
   ));
+  checks.push(check(
+    'lower',
+    'Run trace action label column',
+    runActionColumns.has('action_label') ? 'pass' : tableExists('run_actions') ? 'fail' : 'warn',
+    runActionColumns.has('action_label')
+      ? 'run_actions.action_label exists'
+      : tableExists('run_actions')
+        ? 'run_actions exists but action_label is missing'
+        : 'run_actions has not been initialized yet; it will be created by compliance/run trace code',
+  ));
 
   const protocols = listPlatformProtocols();
   const boss = protocols.find(protocol => protocol.channel === 'boss');

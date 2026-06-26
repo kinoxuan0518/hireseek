@@ -86,6 +86,7 @@ db.exec(`
     detail   TEXT,
     ok       INTEGER NOT NULL DEFAULT 1,
     stage_id TEXT,
+    action_label TEXT,
     at       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
   );
 
@@ -178,6 +179,9 @@ try {
   const cols = db.prepare(`PRAGMA table_info(run_actions)`).all() as Array<{ name: string }>;
   if (!cols.some(c => c.name === 'stage_id')) {
     db.exec(`ALTER TABLE run_actions ADD COLUMN stage_id TEXT`);
+  }
+  if (!cols.some(c => c.name === 'action_label')) {
+    db.exec(`ALTER TABLE run_actions ADD COLUMN action_label TEXT`);
   }
 } catch { /* 迁移失败不阻断启动 */ }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_run_actions_run ON run_actions(run_id)`);

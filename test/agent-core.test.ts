@@ -203,15 +203,17 @@ describe('agent core lower layer', () => {
         detail: 'open filter panel',
         ok: true,
         stageId: 'prefilter',
+        actionLabel: '[ref=11] <button> 筛选 scope="iframe-1" rect="20,120,80x32"',
       },
     ]);
 
     const row = db.prepare(`
-      SELECT stage_id FROM run_actions WHERE run_id = ? ORDER BY id DESC LIMIT 1
-    `).get(runId) as { stage_id: string | null };
+      SELECT stage_id, action_label FROM run_actions WHERE run_id = ? ORDER BY id DESC LIMIT 1
+    `).get(runId) as { stage_id: string | null; action_label: string | null };
     expect(row.stage_id).toBe('prefilter');
+    expect(row.action_label).toContain('scope="iframe-1"');
     expect(loadRunTrace(runId)).toEqual([
-      expect.objectContaining({ seq: 1, action: 'click', stageId: 'prefilter', ok: true }),
+      expect.objectContaining({ seq: 1, action: 'click', stageId: 'prefilter', ok: true, actionLabel: expect.stringContaining('rect=') }),
     ]);
 
     const coverage = summarizeStageCoverage('boss', runId, [
@@ -407,9 +409,13 @@ describe('agent core lower layer', () => {
 
     expect(domRunnerSource).toContain('elementContext');
     expect(domRunnerSource).toContain('context="${context}"');
+    expect(domRunnerSource).toContain('scope="main"');
+    expect(domRunnerSource).toContain('rect="${elementRect');
     expect(domRunnerSource).toContain('role="${el.getAttribute');
     expect(domRunnerSource).toContain('tabindex="${el.getAttribute');
     expect(appleScriptSource).toContain('function elementContext');
+    expect(appleScriptSource).toContain('scope="');
+    expect(appleScriptSource).toContain('rect="');
     expect(appleScriptSource).toContain('context="');
     expect(appleScriptSource).toContain('role="');
     expect(appleScriptSource).toContain('tabindex="');

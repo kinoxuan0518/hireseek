@@ -139,7 +139,13 @@ const SNAPSHOT_JS = `
     }
     return '';
   }
-  function collect(doc, depth) {
+  function elementRect(el) {
+    try {
+      var r = el.getBoundingClientRect();
+      return Math.round(r.left) + ',' + Math.round(r.top) + ',' + Math.round(r.width) + 'x' + Math.round(r.height);
+    } catch (e) { return ''; }
+  }
+  function collect(doc, depth, scope) {
     var els;
     try {
       Array.prototype.forEach.call(doc.querySelectorAll('[data-hs-ref]'), function(el) { el.removeAttribute('data-hs-ref'); });
@@ -169,6 +175,9 @@ const SNAPSHOT_JS = `
       try { el.setAttribute('data-hs-ref', String(n)); } catch (e) {}
       var tag = el.tagName.toLowerCase();
       var parts = ['[ref=' + n + '] <' + tag + (el.type ? ' type=' + el.type : '') + '>'];
+      parts.push('scope="' + scope + '"');
+      var rectText = elementRect(el);
+      if (rectText) parts.push('rect="' + rectText + '"');
       var t = (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
       if (t) parts.push(t);
       if (el.placeholder) parts.push('placeholder="' + el.placeholder + '"');
@@ -200,11 +209,11 @@ const SNAPSHOT_JS = `
       try { frames = doc.querySelectorAll('iframe,frame'); } catch (e) { frames = []; }
       for (var j = 0; j < frames.length && n < MAX_EL; j++) {
         frameSeen++;
-        try { var d = frames[j].contentDocument; if (d) { frameRead++; collect(d, depth + 1); } } catch (e) {}
+        try { var d = frames[j].contentDocument; if (d) { frameRead++; collect(d, depth + 1, 'iframe-' + frameRead); } } catch (e) {}
       }
     }
   }
-  collect(document, 0);
+  collect(document, 0, 'main');
   return JSON.stringify({
     url: location.href,
     title: document.title,

@@ -240,6 +240,9 @@ const SCREEN_GUIDE = `
 - 禁止 type / press / goto，避免写入聊天框、发送消息或跳过站内流程。
 - 禁止点击打招呼/立即沟通/发送消息等沟通控件；代码层会拒绝。
 - 禁止调用 prepare_contact 建立真实触达检查点。
+- 从候选人详情回列表只能在 candidate-screen 阶段用 browser back，或使用页面内可见返回/推荐牛人入口；不要用 press Escape。
+- 职位定位/筛选阶段禁止用 back，避免回到旧职位或旧筛选状态。
+- 返回列表或切换 推荐/最新/精选 tab 前必须重新 snapshot，并确认目标 ref 的 scope/rect/context 是列表导航或页签，不是候选人卡片。
 - record_contacted 只能用于 greeting_sent=false 的观察记录；本轮不会写入候选人主档或 interaction_log。
 - 结束时输出：查看了哪些候选人、谁值得正式触达、谁应跳过、证据和风险点。
 `.trim();
@@ -321,6 +324,11 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
         return '';
       };
 
+      const elementRect = (el: Element): string => {
+        const rect = el.getBoundingClientRect();
+        return `${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)}x${Math.round(rect.height)}`;
+      };
+
       document.querySelectorAll('[data-hs-ref]').forEach(el => el.removeAttribute('data-hs-ref'));
       const elements = Array.from(document.querySelectorAll('*')).filter(el => {
         if (!isVisible(el)) return false;
@@ -352,6 +360,8 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
         const tag = el.tagName.toLowerCase();
         const input = el as HTMLInputElement;
         const parts: string[] = [`[ref=${ref}] <${tag}${input.type ? ` type=${input.type}` : ''}>`];
+        parts.push('scope="main"');
+        parts.push(`rect="${elementRect(el)}"`);
 
         const text = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
         if (text) parts.push(text);

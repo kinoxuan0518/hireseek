@@ -475,6 +475,12 @@ export const bossBrowserActionPolicy: BrowserActionPolicy = (
         reason: `screen 模式禁止 ${action.action}：候选人筛选验收不能向页面输入或发送内容。`,
       };
     }
+    if (action.action === 'back' && stageId !== 'candidate-screen') {
+      return {
+        allowed: false,
+        reason: 'screen 模式只有候选人查看阶段允许 back；职位定位/筛选阶段请使用页面内推荐牛人、职位下拉或可见返回入口，避免退回旧职位。',
+      };
+    }
     if (action.action === 'click') {
       if (stageId === 'single-contact') {
         return { allowed: false, reason: 'screen 模式禁止进入 single-contact；只能查看候选人并输出判断。' };

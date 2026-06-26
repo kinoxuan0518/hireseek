@@ -329,6 +329,22 @@ describe('boss platform protocol middle layer', () => {
         targetJobTitle: 'Agent工程师',
       },
     );
+    const blockedBackDuringJobPositioning = bossBrowserActionPolicy(
+      { action: 'back', stage_id: 'job-positioning' },
+      {
+        executionMode: 'screen',
+        observedStageIds,
+        targetJobTitle: 'Agent工程师',
+      },
+    );
+    const allowedBackDuringCandidateScreen = bossBrowserActionPolicy(
+      { action: 'back', stage_id: 'candidate-screen' },
+      {
+        executionMode: 'screen',
+        observedStageIds: [...observedStageIds, 'candidate-screen'],
+        targetJobTitle: 'Agent工程师',
+      },
+    );
     const unfinishedScreen = bossRunCompletionPolicy({
       executionMode: 'screen',
       trace: [],
@@ -347,6 +363,9 @@ describe('boss platform protocol middle layer', () => {
     expect(greetingButton.reason).toContain('沟通控件');
     expect(singleContact.allowed).toBe(false);
     expect(singleContact.reason).toContain('single-contact');
+    expect(blockedBackDuringJobPositioning.allowed).toBe(false);
+    expect(blockedBackDuringJobPositioning.reason).toContain('旧职位');
+    expect(allowedBackDuringCandidateScreen.allowed).toBe(true);
     expect(unfinishedScreen.allowed).toBe(false);
     expect(unfinishedScreen.reason).toContain('candidate-screen');
     expect(finishedScreen.allowed).toBe(true);
