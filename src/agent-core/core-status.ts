@@ -51,6 +51,8 @@ export interface CoreStatus {
     raw: number;
     episodic: number;
     semantic: number;
+    injectable: number;
+    archived: number;
   };
 }
 
@@ -113,6 +115,27 @@ export function collectCoreStatus(registry?: ToolRegistry): CoreStatus {
       raw: count(`SELECT COUNT(*) AS n FROM agent_memory_raw`),
       episodic: count(`SELECT COUNT(*) AS n FROM agent_memory_episodic`),
       semantic: count(`SELECT COUNT(*) AS n FROM agent_memory_semantic`),
+      injectable: count(`
+        SELECT SUM(n) AS n FROM (
+          SELECT COUNT(*) AS n FROM agent_memory_raw
+          WHERE inject_allowed = 1 AND archived_at IS NULL AND (expires_at IS NULL OR datetime(expires_at) > datetime('now','localtime'))
+          UNION ALL
+          SELECT COUNT(*) AS n FROM agent_memory_episodic
+          WHERE inject_allowed = 1 AND archived_at IS NULL AND (expires_at IS NULL OR datetime(expires_at) > datetime('now','localtime'))
+          UNION ALL
+          SELECT COUNT(*) AS n FROM agent_memory_semantic
+          WHERE inject_allowed = 1 AND archived_at IS NULL AND (expires_at IS NULL OR datetime(expires_at) > datetime('now','localtime'))
+        )
+      `),
+      archived: count(`
+        SELECT SUM(n) AS n FROM (
+          SELECT COUNT(*) AS n FROM agent_memory_raw WHERE archived_at IS NOT NULL
+          UNION ALL
+          SELECT COUNT(*) AS n FROM agent_memory_episodic WHERE archived_at IS NOT NULL
+          UNION ALL
+          SELECT COUNT(*) AS n FROM agent_memory_semantic WHERE archived_at IS NOT NULL
+        )
+      `),
     },
   };
 }
@@ -185,6 +208,6 @@ export function formatCoreStatus(status: CoreStatus): string {
     `Sessions: ${status.sessions.total} sessions, ${status.sessions.messages} messages`,
     `Recent sessions:\n${recentSessions}`,
     '',
-    `Memory: raw=${status.memory.raw}, episodic=${status.memory.episodic}, semantic=${status.memory.semantic}`,
+    `Memory: raw=${status.memory.raw}, episodic=${status.memory.episodic}, semantic=${status.memory.semantic}, injectable=${status.memory.injectable}, archived=${status.memory.archived}`,
   ].join('\n');
 }

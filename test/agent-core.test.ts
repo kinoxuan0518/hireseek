@@ -813,6 +813,7 @@ describe('agent core lower layer', () => {
 
   it('stores raw, episodic, and semantic memory without strategy interpretation', async () => {
     const {
+      archiveMemory,
       getSemanticFacts,
       listRawMemory,
       searchEpisodicMemory,
@@ -854,21 +855,54 @@ describe('agent core lower layer', () => {
       visibility: 'private',
       version: 1,
     });
+    const archivedRawId = writeRawMemory({
+      source: 'governance-test',
+      content: 'archived raw event',
+      visibility: 'private',
+    });
+    const expiredEpisodeId = writeEpisodicMemory({
+      userId: 'u1',
+      source: 'governance-test',
+      visibility: 'private',
+      summary: 'expired episode',
+      content: 'expired memory should not be active',
+      expiresAt: '2000-01-01T00:00:00Z',
+    });
+    upsertSemanticFact({
+      key: 'policy.hidden',
+      value: 'not for prompt injection',
+      source: 'governance-test',
+      visibility: 'private',
+      injectAllowed: false,
+    });
+    expect(archiveMemory('raw', archivedRawId)).toBe(true);
 
     expect(rawId).toBeGreaterThan(0);
     expect(duplicatedRawId).toBe(rawId);
     expect(episodeId).toBeGreaterThan(0);
     expect(duplicatedEpisodeId).toBe(episodeId);
+    expect(expiredEpisodeId).toBeGreaterThan(0);
     expect(listRawMemory({ source: 'test', visibility: 'private' })[0]).toMatchObject({
       source: 'test',
       visibility: 'private',
       version: 1,
+      inject_allowed: 1,
     });
     expect(searchEpisodicMemory({ userId: 'u1', query: 'remote', visibility: 'private' })).toHaveLength(1);
     expect(getSemanticFacts({ key: 'company.name', visibility: 'private' })[0]).toMatchObject({
       fact_value: 'BlackLake',
       visibility: 'private',
       version: 1,
+      inject_allowed: 1,
+    });
+    expect(listRawMemory({ source: 'governance-test' })).toHaveLength(0);
+    expect(listRawMemory({ source: 'governance-test', includeInactive: true })[0].archived_at).toBeTruthy();
+    expect(searchEpisodicMemory({ source: 'governance-test', query: 'expired' })).toHaveLength(0);
+    expect(searchEpisodicMemory({ source: 'governance-test', query: 'expired', includeInactive: true })[0].expires_at).toBeTruthy();
+    expect(getSemanticFacts({ key: 'policy.hidden', injectAllowed: true })).toHaveLength(0);
+    expect(getSemanticFacts({ key: 'policy.hidden', injectAllowed: false })[0]).toMatchObject({
+      fact_value: 'not for prompt injection',
+      inject_allowed: 0,
     });
   });
 
@@ -1200,6 +1234,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Live BOSS screen');
     expect(text).toContain('Pending run states');
     expect(text).toContain('Context compaction ledger');
+    expect(text).toContain('Memory governance columns');
     expect(text).toContain('Harness failure classifier');
     expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Runner tool registry' && c.status === 'pass')).toBe(true);

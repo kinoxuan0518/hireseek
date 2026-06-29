@@ -371,6 +371,26 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
       : 'context compression events are auditable',
   ));
 
+  const memoryGovernanceColumns = ['inject_allowed', 'expires_at', 'archived_at'];
+  const memoryGovernanceMissing = [
+    'agent_memory_raw',
+    'agent_memory_episodic',
+    'agent_memory_semantic',
+  ].flatMap(table => {
+    const columns = tableColumns(table);
+    return memoryGovernanceColumns
+      .filter(column => !columns.has(column))
+      .map(column => `${table}.${column}`);
+  });
+  checks.push(check(
+    'lower',
+    'Memory governance columns',
+    memoryGovernanceMissing.length ? 'fail' : 'pass',
+    memoryGovernanceMissing.length
+      ? `missing columns: ${memoryGovernanceMissing.join(', ')}`
+      : 'memory lifecycle and context-injection controls exist',
+  ));
+
   const failureReport = collectHarnessFailureReport(12);
   const unknownFailures = failureReport.byCode.unknown ?? 0;
   checks.push(check(

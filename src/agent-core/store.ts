@@ -101,6 +101,9 @@ export function ensureAgentCoreSchema(): void {
       source        TEXT NOT NULL,
       visibility    TEXT NOT NULL DEFAULT 'private',
       version       INTEGER NOT NULL DEFAULT 1,
+      inject_allowed INTEGER NOT NULL DEFAULT 1,
+      expires_at    TEXT,
+      archived_at   TEXT,
       content_hash  TEXT,
       content       TEXT NOT NULL,
       metadata_json TEXT,
@@ -115,6 +118,9 @@ export function ensureAgentCoreSchema(): void {
       source        TEXT NOT NULL,
       visibility    TEXT NOT NULL DEFAULT 'private',
       version       INTEGER NOT NULL DEFAULT 1,
+      inject_allowed INTEGER NOT NULL DEFAULT 1,
+      expires_at    TEXT,
+      archived_at   TEXT,
       content_hash  TEXT,
       summary       TEXT NOT NULL,
       content       TEXT NOT NULL,
@@ -131,6 +137,9 @@ export function ensureAgentCoreSchema(): void {
       source        TEXT NOT NULL,
       visibility    TEXT NOT NULL DEFAULT 'private',
       version       INTEGER NOT NULL DEFAULT 1,
+      inject_allowed INTEGER NOT NULL DEFAULT 1,
+      expires_at    TEXT,
+      archived_at   TEXT,
       metadata_json TEXT,
       created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
       updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -148,6 +157,15 @@ export function ensureAgentCoreSchema(): void {
     `ALTER TABLE agent_memory_episodic ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE agent_memory_episodic ADD COLUMN content_hash TEXT`,
     `ALTER TABLE agent_memory_semantic ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`,
+    `ALTER TABLE agent_memory_raw ADD COLUMN inject_allowed INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE agent_memory_raw ADD COLUMN expires_at TEXT`,
+    `ALTER TABLE agent_memory_raw ADD COLUMN archived_at TEXT`,
+    `ALTER TABLE agent_memory_episodic ADD COLUMN inject_allowed INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE agent_memory_episodic ADD COLUMN expires_at TEXT`,
+    `ALTER TABLE agent_memory_episodic ADD COLUMN archived_at TEXT`,
+    `ALTER TABLE agent_memory_semantic ADD COLUMN inject_allowed INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE agent_memory_semantic ADD COLUMN expires_at TEXT`,
+    `ALTER TABLE agent_memory_semantic ADD COLUMN archived_at TEXT`,
     `ALTER TABLE agent_tool_calls ADD COLUMN stage_id TEXT`,
     `ALTER TABLE agent_run_states ADD COLUMN snapshot_summary TEXT`,
   ]) {
@@ -156,6 +174,9 @@ export function ensureAgentCoreSchema(): void {
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_stage ON agent_tool_calls(stage_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_memory_raw_active ON agent_memory_raw(archived_at, expires_at, inject_allowed);
+    CREATE INDEX IF NOT EXISTS idx_agent_memory_episodic_active ON agent_memory_episodic(archived_at, expires_at, inject_allowed);
+    CREATE INDEX IF NOT EXISTS idx_agent_memory_semantic_active ON agent_memory_semantic(archived_at, expires_at, inject_allowed);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_memory_raw_dedupe
       ON agent_memory_raw(scope, source, content_hash)
       WHERE content_hash IS NOT NULL;
