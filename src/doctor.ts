@@ -3,13 +3,14 @@ import path from 'path';
 import { db } from './db';
 import { createRuntimeContext } from './agent-core/runtime-context';
 import type { ToolRegistry } from './agent-core/tool-registry';
-import { listPlatformProtocols } from './platform-protocols';
+import { buildPlatformProtocolManifest, listPlatformProtocols } from './platform-protocols';
 import { buildRecruitingCapabilityManifest, listRecruitingCapabilities } from './capabilities';
 import { listClaudeSkills } from './skills/claude-skills';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
 import { listPendingAgentRunStates } from './agent-core/run-state-store';
 import { collectHarnessFailureReport } from './agent-core/failure-classifier';
+import { contractWritesForChannel } from './contracts';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 export type DoctorLayer = 'lower' | 'middle' | 'upper' | 'external';
@@ -410,20 +411,45 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     boss ? 'pass' : 'fail',
     boss ? `${protocols.length} protocol(s), boss=${boss.name}` : 'boss protocol missing',
   ));
+
+  const protocolManifest = buildPlatformProtocolManifest();
+  const protocolProblems = protocolManifest.flatMap(entry => {
+    const problems: string[] = [];
+    if (entry.version <= 0) problems.push(`${entry.channel}:version missing`);
+    if (!entry.contractName) problems.push(`${entry.channel}:contract missing`);
+    if (entry.writes.length === 0) problems.push(`${entry.channel}:writes empty`);
+    if (entry.stageCount === 0) problems.push(`${entry.channel}:stages empty`);
+    const duplicateStages = entry.stageIds.filter((id, index, ids) => ids.indexOf(id) !== index);
+    if (duplicateStages.length) problems.push(`${entry.channel}:duplicate stages ${[...new Set(duplicateStages)].join(',')}`);
+    const missingHooks = Object.entries(entry.hooks)
+      .filter(([, present]) => !present)
+      .map(([hook]) => hook);
+    if (missingHooks.length) problems.push(`${entry.channel}:missing hooks ${missingHooks.join(',')}`);
+    const contractWrites = contractWritesForChannel(entry.channel);
+    const missingContractWrites = contractWrites.filter(write => !entry.writes.includes(write));
+    const extraProtocolWrites = entry.writes.filter(write => !contractWrites.includes(write));
+    if (missingContractWrites.length) problems.push(`${entry.channel}:missing contract writes ${missingContractWrites.join(',')}`);
+    if (extraProtocolWrites.length) problems.push(`${entry.channel}:extra writes ${extraProtocolWrites.join(',')}`);
+    return problems;
+  });
+  checks.push(check(
+    'middle',
+    'Platform protocol manifest',
+    protocolManifest.length > 0 && protocolProblems.length === 0 ? 'pass' : 'fail',
+    protocolProblems.length
+      ? protocolProblems.join('; ')
+      : `${protocolManifest.length} protocol manifest entr${protocolManifest.length === 1 ? 'y' : 'ies'} with contract-aligned writes`,
+  ));
+
   if (boss) {
-    const stageCount = boss.stageManifest?.().length ?? 0;
-    const missing: string[] = [];
-    if (!boss.contractName) missing.push('contract');
-    if (!boss.buildSystemContext) missing.push('system context');
-    if (!boss.browserActionPolicy) missing.push('browser action policy');
-    if (!boss.completionPolicy) missing.push('completion policy');
-    if (!boss.processRules) missing.push('process rules');
-    if (stageCount === 0) missing.push('stage manifest');
+    const bossEntry = protocolManifest.find(entry => entry.channel === 'boss');
     checks.push(check(
       'middle',
       'BOSS protocol wiring',
-      missing.length ? 'fail' : 'pass',
-      missing.length ? `missing: ${missing.join(', ')}` : `contract=${boss.contractName}, stages=${stageCount}`,
+      bossEntry && protocolProblems.every(problem => !problem.startsWith('boss:')) ? 'pass' : 'fail',
+      bossEntry
+        ? `contract=${bossEntry.contractName}, stages=${bossEntry.stageCount}, writes=${bossEntry.writes.join(', ')}`
+        : 'boss protocol manifest missing',
     ));
   }
 

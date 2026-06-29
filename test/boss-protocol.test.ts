@@ -2,7 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { contractNameForChannel } from '../src/contracts';
-import { formatPlatformProtocols, getPlatformProtocol } from '../src/platform-protocols';
+import {
+  buildPlatformProtocolManifest,
+  formatPlatformProtocolManifest,
+  formatPlatformProtocols,
+  getPlatformProtocol,
+} from '../src/platform-protocols';
 import {
   bossBrowserActionPolicy,
   bossRunCompletionPolicy,
@@ -386,12 +391,32 @@ describe('boss platform protocol middle layer', () => {
 
     expect(protocol?.name).toBe('boss-platform.v1');
     expect(protocol?.contractName).toBe('boss-greeting.v1');
+    expect(protocol?.writes).toEqual(['contacted_candidates', 'run_trace', 'interaction_log']);
     expect(contractNameForChannel('boss')).toBe('boss-greeting.v1');
     expect(protocol?.buildSystemContext?.()).toContain('优先级高于外部 skill 资产');
     expect(protocol?.completionPolicy).toBe(bossRunCompletionPolicy);
     expect(formatPlatformProtocols()).toContain('boss-platform.v1');
     expect(formatPlatformProtocols()).toContain('产品中层协议');
     expect(formatPlatformProtocols()).toContain('Stage manifest: 7 stages');
+    const manifest = buildPlatformProtocolManifest();
+    const bossManifest = manifest.find(entry => entry.channel === 'boss');
+    expect(bossManifest).toMatchObject({
+      name: 'boss-platform.v1',
+      version: 1,
+      contractName: 'boss-greeting.v1',
+      stageCount: 7,
+    });
+    expect(bossManifest?.writes).toContain('contacted_candidates');
+    expect(bossManifest?.stageIds).toContain('single-contact');
+    expect(bossManifest?.hooks).toMatchObject({
+      systemContext: true,
+      taskPrompt: true,
+      browserActionPolicy: true,
+      completionPolicy: true,
+      processRules: true,
+    });
+    expect(formatPlatformProtocolManifest()).toContain('HireSeek Platform Protocol Manifest');
+    expect(formatPlatformProtocolManifest()).toContain('writes: contacted_candidates, run_trace, interaction_log');
     expect(runSkillOptionsForChannel('boss', 123, true, true).initialStageId).toBe('session-precheck');
     expect(runSkillOptionsForChannel('boss', 124, true, false, true, false, 'Agent工程师')).toMatchObject({
       executionMode: 'prepare',
