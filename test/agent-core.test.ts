@@ -259,10 +259,20 @@ describe('agent core lower layer', () => {
     });
 
     db.prepare(`DELETE FROM task_runs WHERE id = ?`).run(304);
+    db.prepare(`DELETE FROM run_actions WHERE run_id = ?`).run(304);
+    db.prepare(`DELETE FROM agent_tool_calls WHERE run_id = ?`).run(304);
     db.prepare(`
       INSERT INTO task_runs (id, job_id, channel, mode, started_at, finished_at, status, contacted_count, skipped_count)
       VALUES (?, ?, ?, 'execute', datetime('now','localtime'), datetime('now','localtime'), 'paused', 0, 0)
     `).run(304, 'Agent工程师', 'boss');
+    db.prepare(`
+      INSERT INTO run_actions (run_id, job_id, channel, seq, action, target, detail, ok, stage_id, action_label)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(304, 'Agent工程师', 'boss', 1, 'click', 'ref=3', 'open candidate card', 0, 'candidate-screen', '[ref=3] <button> 候选人');
+    db.prepare(`
+      INSERT INTO agent_tool_calls (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, error, side_effect, mode, stage_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(304, 'run-state-session', 'tool-304', 'browser', '{}', 'blocked', 0, 'user is using Chrome', 1, 'execute', 'candidate-screen');
     upsertAgentRunState({
       runId: 304,
       status: 'paused',
@@ -282,6 +292,9 @@ describe('agent core lower layer', () => {
     expect(formatRunStateDetail(loadAgentRunState(304))).toContain('HireSeek Run State #304');
     expect(formatRunStateDetail(loadAgentRunState(304))).toContain('channel: boss');
     expect(formatRunStateDetail(loadAgentRunState(304))).toContain('Next:');
+    expect(formatRunStateDetail(loadAgentRunState(304))).toContain('Recent actions:');
+    expect(formatRunStateDetail(loadAgentRunState(304))).toContain('open candidate card');
+    expect(formatRunStateDetail(loadAgentRunState(304))).toContain('Recent tool failures:');
     expect(formatRunStateList([], 'All', '没有 run state。')).toContain('没有 run state。');
     expect(listPendingAgentRunStates(3).some(s => s.runId === 304)).toBe(true);
     expect(listAgentRunStates(2).some(s => s.runId === 304)).toBe(true);

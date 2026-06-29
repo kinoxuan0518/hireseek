@@ -242,8 +242,58 @@ export function formatRunStateList(
   return lines.join('\n').trimEnd();
 }
 
+function recentRunActionLines(runId: number, limit = 8): string[] {
+  const rows = db.prepare(`
+    SELECT seq, action, target, detail, ok, stage_id, action_label, at
+    FROM run_actions
+    WHERE run_id = ?
+    ORDER BY seq DESC, id DESC
+    LIMIT ?
+  `).all(runId, limit) as Array<{
+    seq: number;
+    action: string;
+    target: string | null;
+    detail: string | null;
+    ok: number;
+    stage_id: string | null;
+    action_label: string | null;
+    at: string;
+  }>;
+  return rows.reverse().map(row => {
+    const ok = row.ok ? 'ok' : 'fail';
+    const target = row.target ? ` ${row.target}` : '';
+    const stage = row.stage_id ? ` stage=${row.stage_id}` : '';
+    const detail = row.detail ? ` detail=${row.detail.slice(0, 80)}` : '';
+    const label = row.action_label ? ` label=${row.action_label.slice(0, 120)}` : '';
+    return `  ${row.seq}. ${row.action}${target} [${ok}${stage}]${detail}${label}`;
+  });
+}
+
+function recentToolFailureLines(runId: number, limit = 5): string[] {
+  const rows = db.prepare(`
+    SELECT tool_name, mode, stage_id, error, created_at
+    FROM agent_tool_calls
+    WHERE run_id = ? AND ok = 0
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(runId, limit) as Array<{
+    tool_name: string;
+    mode: string;
+    stage_id: string | null;
+    error: string | null;
+    created_at: string;
+  }>;
+  return rows.map(row => {
+    const stage = row.stage_id ? ` stage=${row.stage_id}` : '';
+    const error = row.error ? ` — ${row.error.slice(0, 160)}` : '';
+    return `  - ${row.created_at} ${row.tool_name} [${row.mode}${stage}]${error}`;
+  });
+}
+
 export function formatRunStateDetail(state: AgentRunState | null): string {
   if (!state) return '没有找到这个 run state。';
+  const actions = recentRunActionLines(state.runId);
+  const failures = recentToolFailureLines(state.runId);
   const lines = [
     `HireSeek Run State #${state.runId}`,
     '',
@@ -260,6 +310,12 @@ export function formatRunStateDetail(state: AgentRunState | null): string {
     state.updatedAt ? `updatedAt: ${state.updatedAt}` : '',
     '',
     state.snapshotSummary ? `Snapshot summary:\n${state.snapshotSummary}` : 'Snapshot summary: 无',
+    '',
+    'Recent actions:',
+    actions.length ? actions.join('\n') : '  无',
+    '',
+    'Recent tool failures:',
+    failures.length ? failures.join('\n') : '  无',
   ].filter(Boolean);
   if (state.status === 'paused') {
     lines.push('', `Next: 确认当前真实页面后，用 \`hireseek run ${state.channel ?? '<渠道>'} --here\` 继续。`);
