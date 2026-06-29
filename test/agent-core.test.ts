@@ -357,6 +357,40 @@ describe('agent core lower layer', () => {
     expect(listExecutionEnvironments(3).some(env => env.id === 'browser:chrome-applescript')).toBe(true);
   });
 
+  it('classifies harness failures from tool trace and environment state', async () => {
+    const {
+      classifyHarnessFailure,
+      collectHarnessFailureReport,
+      formatHarnessFailureReport,
+    } = await import('../src/agent-core/failure-classifier');
+    const { db } = await import('../src/db');
+
+    expect(classifyHarnessFailure({ toolName: 'not_a_tool', error: 'unknown tool: not_a_tool' }).code).toBe('unknown_tool');
+    expect(classifyHarnessFailure({ toolName: 'browser', error: 'Expected property name' }).code).toBe('invalid_tool_arguments');
+    expect(classifyHarnessFailure({ toolName: 'run_shell', error: 'approval denied' }).code).toBe('approval_denied');
+    expect(classifyHarnessFailure({ toolName: 'browser', error: '[用户接管保护] user is using Chrome' }).code).toBe('external_control');
+
+    db.prepare(`DELETE FROM agent_tool_calls WHERE session_id = ?`).run('failure-classifier');
+    db.prepare(`DELETE FROM agent_execution_environments WHERE id = ?`).run('browser:classifier-test');
+    db.prepare(`
+      INSERT INTO agent_tool_calls (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, error, side_effect, mode, stage_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(606, 'failure-classifier', 'tc-unknown', 'not_a_tool', '{}', 'unknown', 0, 'unknown tool: not_a_tool', 0, 'read', null);
+    db.prepare(`
+      INSERT INTO agent_tool_calls (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, error, side_effect, mode, stage_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(606, 'failure-classifier', 'tc-external', 'browser', '{}', 'blocked', 0, 'user is using Chrome', 1, 'execute', 'candidate-screen');
+    db.prepare(`
+      INSERT INTO agent_execution_environments (id, kind, label, controller, status, mode, run_id, session_id, reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('browser:classifier-test', 'browser', '真实 Chrome', 'user', 'blocked', 'execute', 606, 'failure-classifier', 'user is using Chrome');
+
+    const report = collectHarnessFailureReport(6);
+    expect(report.byCode.unknown_tool).toBeGreaterThanOrEqual(1);
+    expect(report.byCode.external_control).toBeGreaterThanOrEqual(1);
+    expect(formatHarnessFailureReport(report)).toContain('external_control');
+  });
+
   it('offloads large tool outputs to private runtime storage', async () => {
     const { offloadToolOutput } = await import('../src/agent-core/tool-output-store');
 
@@ -1008,6 +1042,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Trace:');
     expect(text).toContain('Run states:');
     expect(text).toContain('Execution environments:');
+    expect(text).toContain('Harness failures:');
     expect(text).toContain('Memory:');
   });
 
@@ -1078,6 +1113,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Live BOSS prepare');
     expect(text).toContain('Live BOSS screen');
     expect(text).toContain('Pending run states');
+    expect(text).toContain('Harness failure classifier');
     expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Runner tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Pending run states' && c.status === 'warn')).toBe(true);

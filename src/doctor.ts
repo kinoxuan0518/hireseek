@@ -9,6 +9,7 @@ import { listClaudeSkills } from './skills/claude-skills';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
 import { listPendingAgentRunStates } from './agent-core/run-state-store';
+import { collectHarnessFailureReport } from './agent-core/failure-classifier';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 export type DoctorLayer = 'lower' | 'middle' | 'upper' | 'external';
@@ -348,6 +349,17 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     pendingRunStates.length
       ? pendingRunStates.join(' | ')
       : 'no paused/failed run states in the last 24h',
+  ));
+
+  const failureReport = collectHarnessFailureReport(12);
+  const unknownFailures = failureReport.byCode.unknown ?? 0;
+  checks.push(check(
+    'lower',
+    'Harness failure classifier',
+    unknownFailures > 0 ? 'warn' : 'pass',
+    failureReport.total === 0
+      ? 'no recent harness failures to classify'
+      : `classified ${failureReport.total} recent failure signal(s); unknown=${unknownFailures}; codes=${Object.entries(failureReport.byCode).map(([code, n]) => `${code}:${n}`).join(', ')}`,
   ));
 
   const protocols = listPlatformProtocols();

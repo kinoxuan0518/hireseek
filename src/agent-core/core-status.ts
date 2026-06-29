@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { createRuntimeContext } from './runtime-context';
 import { formatExecutionEnvironmentLine, listExecutionEnvironments, type ExecutionEnvironmentState } from './environment-store';
+import { collectHarnessFailureReport, formatHarnessFailureReport, type HarnessFailureReport } from './failure-classifier';
 import { listAgentRunStates, type AgentRunState } from './run-state-store';
 import type { ToolRegistry } from './tool-registry';
 import './store';
@@ -35,6 +36,7 @@ export interface CoreStatus {
   environments: {
     recent: ExecutionEnvironmentState[];
   };
+  failures: HarnessFailureReport;
   sessions: {
     total: number;
     messages: number;
@@ -87,6 +89,7 @@ export function collectCoreStatus(registry?: ToolRegistry): CoreStatus {
     environments: {
       recent: listExecutionEnvironments(8),
     },
+    failures: collectHarnessFailureReport(8),
     sessions: {
       total: count(`SELECT COUNT(*) AS n FROM agent_sessions`),
       messages: count(`SELECT COUNT(*) AS n FROM agent_messages`),
@@ -136,6 +139,7 @@ export function formatCoreStatus(status: CoreStatus): string {
   const recentEnvironments = status.environments.recent.length
     ? status.environments.recent.map(formatExecutionEnvironmentLine).join('\n')
     : '无';
+  const recentFailures = formatHarnessFailureReport(status.failures);
   const recentSessions = status.sessions.recent.length
     ? status.sessions.recent.map(s => `- ${s.updated_at} ${s.title} (${s.source}, ${s.message_count} messages, ${s.id})`).join('\n')
     : '无';
@@ -161,6 +165,8 @@ export function formatCoreStatus(status: CoreStatus): string {
     `Run states:\n${recentRunStates}`,
     '',
     `Execution environments:\n${recentEnvironments}`,
+    '',
+    `Harness failures:\n${recentFailures}`,
     '',
     `Sessions: ${status.sessions.total} sessions, ${status.sessions.messages} messages`,
     `Recent sessions:\n${recentSessions}`,
