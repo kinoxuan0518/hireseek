@@ -8,6 +8,7 @@ export interface ToolOutputOffloadInput {
   toolName: string;
   runId?: number | null;
   sessionId?: string | null;
+  toolCallId?: string | null;
   kind?: string;
   inlineLimit?: number;
   headChars?: number;
@@ -37,6 +38,9 @@ function safePart(value: string | number | null | undefined, fallback: string): 
 export function offloadToolOutput(input: ToolOutputOffloadInput): ToolOutputOffloadResult {
   const inlineLimit = input.inlineLimit ?? DEFAULT_INLINE_LIMIT;
   const originalChars = input.content.length;
+  if (input.content.startsWith('[工具输出已卸载]')) {
+    return { content: input.content, offloaded: false, originalChars };
+  }
   if (originalChars <= inlineLimit) {
     return { content: input.content, offloaded: false, originalChars };
   }
@@ -48,6 +52,7 @@ export function offloadToolOutput(input: ToolOutputOffloadInput): ToolOutputOffl
   const filename = [
     safePart(input.runId, 'run-none'),
     safePart(input.sessionId, 'session-none'),
+    safePart(input.toolCallId, 'call-none'),
     safePart(input.toolName, 'tool'),
     safePart(input.kind, 'output'),
     hash,
@@ -61,6 +66,7 @@ export function offloadToolOutput(input: ToolOutputOffloadInput): ToolOutputOffl
       `tool_name: ${input.toolName}`,
       `run_id: ${input.runId ?? ''}`,
       `session_id: ${input.sessionId ?? ''}`,
+      `tool_call_id: ${input.toolCallId ?? ''}`,
       `kind: ${input.kind ?? 'output'}`,
       `chars: ${originalChars}`,
       '',
@@ -91,4 +97,18 @@ export function offloadToolOutput(input: ToolOutputOffloadInput): ToolOutputOffl
       tail,
     ].join('\n'),
   };
+}
+
+export function offloadToolResultForContext(
+  input: Omit<ToolOutputOffloadInput, 'kind' | 'inlineLimit' | 'headChars' | 'tailChars'> & {
+    kind?: string;
+  },
+): ToolOutputOffloadResult {
+  return offloadToolOutput({
+    ...input,
+    kind: input.kind ?? 'tool-result',
+    inlineLimit: 6000,
+    headChars: 2400,
+    tailChars: 1400,
+  });
 }

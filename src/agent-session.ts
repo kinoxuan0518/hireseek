@@ -12,6 +12,7 @@ import { config } from './config';
 import { buildSystemPrompt, CHAT_TOOLS, executeTool, describeToolCall } from './chat';
 import { repairToolMessageHistoryInPlace } from './message-integrity';
 import { saveAgentSessionMessages } from './agent-core/session-store';
+import { offloadToolResultForContext } from './agent-core/tool-output-store';
 
 const MAX_HISTORY = 24;   // 系统提示之外保留的最近消息条数
 const MAX_ROUNDS  = 30;   // 单次回复内最多 tool-call 轮数
@@ -124,6 +125,13 @@ export async function runAgentTurn(
       } catch (err) {
         output = `工具执行失败：${err instanceof Error ? err.message : err}`;
       }
+      output = offloadToolResultForContext({
+        content: output,
+        toolName: call.function.name,
+        sessionId: session.id,
+        toolCallId: call.id,
+        kind: 'agent-session-tool-result',
+      }).content;
       session.messages.push({ role: 'tool', tool_call_id: call.id, content: output });
     }
   }

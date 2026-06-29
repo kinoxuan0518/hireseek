@@ -13,6 +13,7 @@
 import OpenAI from 'openai';
 import { config } from './config';
 import { recordRejectedToolCall } from './agent-core/trace';
+import { offloadToolResultForContext } from './agent-core/tool-output-store';
 
 export interface SubTask {
   id: number;
@@ -157,6 +158,13 @@ async function runLoop(t: SubTask, modelOverride?: string): Promise<void> {
               output,
               error,
             });
+            output = offloadToolResultForContext({
+              content: output,
+              toolName: name,
+              sessionId: `sub-agent-${t.id}`,
+              toolCallId: call.id,
+              kind: 'sub-agent-tool-result',
+            }).content;
             messages.push({ role: 'tool', tool_call_id: call.id, content: output });
             continue;
           }
@@ -170,6 +178,13 @@ async function runLoop(t: SubTask, modelOverride?: string): Promise<void> {
             output = `工具执行失败：${err instanceof Error ? err.message : err}`;
           }
         }
+        output = offloadToolResultForContext({
+          content: output,
+          toolName: name,
+          sessionId: `sub-agent-${t.id}`,
+          toolCallId: call.id,
+          kind: 'sub-agent-tool-result',
+        }).content;
         messages.push({ role: 'tool', tool_call_id: call.id, content: output });
       }
     }

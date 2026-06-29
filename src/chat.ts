@@ -26,6 +26,7 @@ import {
   type ToolExecutionMode,
 } from './agent-core/tool-registry';
 import { recordRejectedToolCall, recordToolCall } from './agent-core/trace';
+import { offloadToolResultForContext } from './agent-core/tool-output-store';
 import { buildRecruitingCapabilityContext } from './capabilities';
 import { createRuntimeContext } from './agent-core/runtime-context';
 
@@ -3200,6 +3201,13 @@ export async function startChat(): Promise<void> {
             } finally {
               if (interactiveTool) toolOwnsStdin = false;
               if (result == null) result = '工具执行失败：没有返回结果。';
+              result = offloadToolResultForContext({
+                content: result,
+                toolName: call.function.name,
+                sessionId: activeSessionId,
+                toolCallId: call.id,
+                kind: 'chat-tool-result',
+              }).content;
               toolResults.push({ role: 'tool', tool_call_id: call.id, content: result });
             }
           }

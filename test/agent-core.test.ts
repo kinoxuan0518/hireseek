@@ -445,7 +445,7 @@ describe('agent core lower layer', () => {
   });
 
   it('offloads large tool outputs to private runtime storage', async () => {
-    const { offloadToolOutput } = await import('../src/agent-core/tool-output-store');
+    const { offloadToolOutput, offloadToolResultForContext } = await import('../src/agent-core/tool-output-store');
 
     const short = offloadToolOutput({
       content: 'small output',
@@ -472,6 +472,38 @@ describe('agent core lower layer', () => {
     expect(large.content).toContain('## head');
     expect(large.content).toContain('## tail');
     expect(fs.readFileSync(large.path!, 'utf8')).toContain(largeText);
+
+    const largeToolResult = offloadToolResultForContext({
+      content: 'tool result '.repeat(900),
+      toolName: 'read_file',
+      sessionId: 's-output',
+      toolCallId: 'call-output-1',
+    });
+    expect(largeToolResult.offloaded).toBe(true);
+    expect(largeToolResult.path).toContain('call-output-1');
+    expect(largeToolResult.content).toContain('[工具输出已卸载]');
+    expect(fs.readFileSync(largeToolResult.path!, 'utf8')).toContain('tool_call_id: call-output-1');
+
+    const alreadyOffloaded = offloadToolResultForContext({
+      content: largeToolResult.content,
+      toolName: 'read_file',
+      sessionId: 's-output',
+      toolCallId: 'call-output-1',
+    });
+    expect(alreadyOffloaded.offloaded).toBe(false);
+    expect(alreadyOffloaded.content).toBe(largeToolResult.content);
+  });
+
+  it('routes chat tool results through generic output offload', () => {
+    const files = [
+      'src/chat.ts',
+      'src/agent-session.ts',
+      'src/sub-agent.ts',
+    ];
+    for (const file of files) {
+      const source = fs.readFileSync(path.resolve(process.cwd(), file), 'utf8');
+      expect(source).toContain('offloadToolResultForContext');
+    }
   });
 
   it('persists run trace stage markers for compliance coverage', async () => {
