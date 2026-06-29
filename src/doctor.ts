@@ -4,7 +4,7 @@ import { db } from './db';
 import { createRuntimeContext } from './agent-core/runtime-context';
 import type { ToolRegistry } from './agent-core/tool-registry';
 import { listPlatformProtocols } from './platform-protocols';
-import { listRecruitingCapabilities } from './capabilities';
+import { buildRecruitingCapabilityManifest, listRecruitingCapabilities } from './capabilities';
 import { listClaudeSkills } from './skills/claude-skills';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
@@ -439,6 +439,36 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     capabilities.length
       ? `${capabilities.length} capability module(s); missing sources=${missingSources.length ? missingSources.join(', ') : 'none'}`
       : 'no capability modules registered',
+  ));
+
+  const capabilityManifest = buildRecruitingCapabilityManifest();
+  const duplicateCapabilityIds = capabilityManifest
+    .map(entry => entry.id)
+    .filter((id, index, ids) => ids.indexOf(id) !== index);
+  const manifestProblems = capabilityManifest.flatMap(entry => {
+    const problems: string[] = [];
+    if (!/\.v\d+$/.test(entry.id)) problems.push(`${entry.id}:id missing .vN suffix`);
+    if (entry.version <= 0) problems.push(`${entry.id}:version must be positive`);
+    if (entry.contract.produces.length === 0) problems.push(`${entry.id}:contract.produces empty`);
+    if (entry.contract.constraints.length === 0) problems.push(`${entry.id}:contract.constraints empty`);
+    if (entry.sourceFiles.some(file => !file.exists || file.bytes === 0)) problems.push(`${entry.id}:missing or empty source`);
+    return problems;
+  });
+  const priorities = capabilityManifest.map(entry => entry.priority);
+  const duplicatePriorities = priorities.filter((priority, index) => priorities.indexOf(priority) !== index);
+  checks.push(check(
+    'middle',
+    'Capability manifest',
+    capabilityManifest.length > 0 && duplicateCapabilityIds.length === 0 && duplicatePriorities.length === 0 && manifestProblems.length === 0
+      ? 'pass'
+      : 'fail',
+    manifestProblems.length || duplicateCapabilityIds.length || duplicatePriorities.length
+      ? [
+        duplicateCapabilityIds.length ? `duplicate ids=${[...new Set(duplicateCapabilityIds)].join(', ')}` : '',
+        duplicatePriorities.length ? `duplicate priorities=${[...new Set(duplicatePriorities)].join(', ')}` : '',
+        manifestProblems.join(', '),
+      ].filter(Boolean).join('; ')
+      : `${capabilityManifest.length} manifest entries with explicit contracts`,
   ));
 
   const prepare = latestBossPrepareEvidence();

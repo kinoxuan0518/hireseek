@@ -1236,6 +1236,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Context compaction ledger');
     expect(text).toContain('Memory governance columns');
     expect(text).toContain('Harness failure classifier');
+    expect(text).toContain('Capability manifest');
     expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Runner tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Pending run states' && c.status === 'warn')).toBe(true);

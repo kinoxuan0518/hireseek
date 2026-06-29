@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildRecruitingCapabilityContext,
+  buildRecruitingCapabilityManifest,
   formatRecruitingCapabilities,
+  formatRecruitingCapabilityManifest,
   listRecruitingCapabilities,
 } from '../src/capabilities';
 
@@ -14,6 +16,19 @@ describe('recruiting capability middle layer', () => {
     expect(ids).toContain('outreach-voice.v1');
     expect(ids).toContain('talent-sourcing-strategy.v1');
     expect(formatRecruitingCapabilities()).toContain('HireSeek 中层招聘能力');
+  });
+
+  it('exposes a mechanical capability manifest with contracts', () => {
+    const manifest = buildRecruitingCapabilityManifest();
+    const outreach = manifest.find(entry => entry.id === 'outreach-voice.v1');
+
+    expect(outreach).toBeTruthy();
+    expect(outreach?.version).toBe(1);
+    expect(outreach?.contract.produces).toContain('outreach-output.v1');
+    expect(outreach?.contract.writes).toContain('record_contacted');
+    expect(outreach?.sourceFiles.every(file => file.exists && file.bytes > 0)).toBe(true);
+    expect(formatRecruitingCapabilityManifest()).toContain('HireSeek Recruiting Capability Manifest');
+    expect(formatRecruitingCapabilityManifest()).toContain('writes: record_contacted');
   });
 
   it('builds BOSS context from shared evaluation and outreach without maimai search playbook', () => {
