@@ -3130,6 +3130,8 @@ export async function startChat(): Promise<void> {
         maxTokens: 180000,  // 90% of 200K context window
         targetTokens: 100000,
         preserveRecent: 10,
+        sessionId: activeSessionId,
+        source: 'chat',
       });
 
       if (result.compressed) {

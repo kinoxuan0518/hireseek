@@ -391,6 +391,59 @@ describe('agent core lower layer', () => {
     expect(formatHarnessFailureReport(report)).toContain('external_control');
   });
 
+  it('records grounded context compaction events', async () => {
+    const { autoCompress, estimateTokens } = await import('../src/context-compression');
+    const { listContextCompactions } = await import('../src/agent-core/compaction-store');
+    const { upsertAgentRunState } = await import('../src/agent-core/run-state-store');
+    const { db } = await import('../src/db');
+
+    db.prepare(`DELETE FROM agent_context_compactions WHERE session_id = ?`).run('compaction-session');
+    db.prepare(`DELETE FROM agent_run_states WHERE run_id = ?`).run(707);
+    db.prepare(`DELETE FROM agent_tool_calls WHERE session_id = ?`).run('compaction-session');
+
+    upsertAgentRunState({
+      runId: 707,
+      sessionId: 'compaction-session',
+      status: 'paused',
+      phase: 'external_control',
+      stageId: 'candidate-screen',
+      lastAction: 'click',
+      lastUrl: 'https://www.zhipin.com/web/chat/recommend',
+      reason: 'user is using Chrome',
+      snapshotSummary: 'URL: https://www.zhipin.com/web/chat/recommend\n标题: 推荐牛人',
+    });
+    db.prepare(`
+      INSERT INTO agent_tool_calls (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, error, side_effect, mode, stage_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(707, 'compaction-session', 'tc-compaction', 'browser', '{}', 'blocked', 0, 'user is using Chrome', 1, 'execute', 'candidate-screen');
+
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: '请继续 BOSS 任务。' },
+      { role: 'assistant', content: '计划：先看当前页面，再处理候选人。' },
+      { role: 'user', content: '候选人信息 ' + 'Agent '.repeat(400) },
+      { role: 'assistant', content: '错误：Chrome 被用户接管，需要暂停。' },
+      { role: 'user', content: '继续 ' + 'context '.repeat(400) },
+    ] as any[];
+
+    expect(estimateTokens(messages)).toBeGreaterThan(100);
+    const result = autoCompress(messages, {
+      maxTokens: 100,
+      targetTokens: 50,
+      preserveRecent: 1,
+      sessionId: 'compaction-session',
+      source: 'test',
+    });
+
+    expect(result.compressed).toBe(true);
+    const records = listContextCompactions(5).filter(record => record.sessionId === 'compaction-session');
+    expect(records.length).toBeGreaterThan(0);
+    expect(records[0].originalMessages).toBe(messages.length);
+    expect(records[0].compressedMessages).toBe(result.messages.length);
+    expect(records[0].summary).toContain('下层运行事实');
+    expect(records[0].summary).toContain('external_control');
+  });
+
   it('offloads large tool outputs to private runtime storage', async () => {
     const { offloadToolOutput } = await import('../src/agent-core/tool-output-store');
 
@@ -1043,6 +1096,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Run states:');
     expect(text).toContain('Execution environments:');
     expect(text).toContain('Harness failures:');
+    expect(text).toContain('Context compactions:');
     expect(text).toContain('Memory:');
   });
 
@@ -1113,6 +1167,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Live BOSS prepare');
     expect(text).toContain('Live BOSS screen');
     expect(text).toContain('Pending run states');
+    expect(text).toContain('Context compaction ledger');
     expect(text).toContain('Harness failure classifier');
     expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Runner tool registry' && c.status === 'pass')).toBe(true);

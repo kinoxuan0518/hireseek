@@ -1,4 +1,5 @@
 import { db } from '../db';
+import { formatContextCompactionLine, listContextCompactions, type ContextCompactionRecord } from './compaction-store';
 import { createRuntimeContext } from './runtime-context';
 import { formatExecutionEnvironmentLine, listExecutionEnvironments, type ExecutionEnvironmentState } from './environment-store';
 import { collectHarnessFailureReport, formatHarnessFailureReport, type HarnessFailureReport } from './failure-classifier';
@@ -37,6 +38,10 @@ export interface CoreStatus {
     recent: ExecutionEnvironmentState[];
   };
   failures: HarnessFailureReport;
+  compactions: {
+    total: number;
+    recent: ContextCompactionRecord[];
+  };
   sessions: {
     total: number;
     messages: number;
@@ -90,6 +95,10 @@ export function collectCoreStatus(registry?: ToolRegistry): CoreStatus {
       recent: listExecutionEnvironments(8),
     },
     failures: collectHarnessFailureReport(8),
+    compactions: {
+      total: count(`SELECT COUNT(*) AS n FROM agent_context_compactions`),
+      recent: listContextCompactions(5),
+    },
     sessions: {
       total: count(`SELECT COUNT(*) AS n FROM agent_sessions`),
       messages: count(`SELECT COUNT(*) AS n FROM agent_messages`),
@@ -140,6 +149,9 @@ export function formatCoreStatus(status: CoreStatus): string {
     ? status.environments.recent.map(formatExecutionEnvironmentLine).join('\n')
     : '无';
   const recentFailures = formatHarnessFailureReport(status.failures);
+  const recentCompactions = status.compactions.recent.length
+    ? status.compactions.recent.map(formatContextCompactionLine).join('\n')
+    : '无';
   const recentSessions = status.sessions.recent.length
     ? status.sessions.recent.map(s => `- ${s.updated_at} ${s.title} (${s.source}, ${s.message_count} messages, ${s.id})`).join('\n')
     : '无';
@@ -167,6 +179,8 @@ export function formatCoreStatus(status: CoreStatus): string {
     `Execution environments:\n${recentEnvironments}`,
     '',
     `Harness failures:\n${recentFailures}`,
+    '',
+    `Context compactions: ${status.compactions.total} total\n${recentCompactions}`,
     '',
     `Sessions: ${status.sessions.total} sessions, ${status.sessions.messages} messages`,
     `Recent sessions:\n${recentSessions}`,

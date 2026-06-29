@@ -5,6 +5,9 @@
  */
 
 import type OpenAI from 'openai';
+import { listContextCompactions, recordContextCompaction } from './agent-core/compaction-store';
+import { collectHarnessFailureReport, formatHarnessFailureReport } from './agent-core/failure-classifier';
+import { formatRunStateForContext, listAgentRunStates } from './agent-core/run-state-store';
 import { repairToolMessageHistory } from './message-integrity';
 
 export interface CompressionOptions {
@@ -12,6 +15,8 @@ export interface CompressionOptions {
   targetTokens: number;        // 压缩后的目标 token 数
   preserveRecent: number;      // 保留最近 N 轮对话
   preserveSystem: boolean;     // 是否保留系统提示
+  sessionId?: string;          // 可选：用于落库追踪压缩事件
+  source?: string;             // 可选：压缩来源，如 chat / runner
 }
 
 const DEFAULT_OPTIONS: CompressionOptions = {
@@ -87,6 +92,31 @@ function extractImportantMessages(
 /**
  * 生成对话摘要
  */
+function groundedHarnessSummary(): string {
+  const lines: string[] = [];
+  try {
+    const states = listAgentRunStates(3);
+    if (states.length > 0) {
+      lines.push('最近 run state：');
+      for (const state of states) {
+        lines.push(formatRunStateForContext(state).split('\n').slice(0, 8).join(' | '));
+      }
+    }
+  } catch {
+    // 压缩不能因为观测层读取失败而中断。
+  }
+  try {
+    const failures = collectHarnessFailureReport(3);
+    if (failures.total > 0) {
+      lines.push('最近 harness failure：');
+      lines.push(formatHarnessFailureReport(failures));
+    }
+  } catch {
+    // 压缩不能因为观测层读取失败而中断。
+  }
+  return lines.join('\n');
+}
+
 function summarizeConversation(
   messages: OpenAI.ChatCompletionMessageParam[]
 ): string {
@@ -119,6 +149,11 @@ function summarizeConversation(
   const important = extractImportantMessages(messages);
   if (important.length > 0) {
     summary.push(`关键事件 ${important.length} 个（已保留详细内容）`);
+  }
+
+  const grounded = groundedHarnessSummary();
+  if (grounded) {
+    summary.push(`下层运行事实：\n${grounded}`);
   }
 
   return summary.join('\n');
@@ -170,6 +205,22 @@ export function compressConversation(
   // 6. 验证压缩效果
   const originalTokens = estimateTokens(messages);
   const compressedTokens = estimateTokens(repaired.messages);
+  const stats = getCompressionStats(messages, repaired.messages);
+
+  try {
+    recordContextCompaction({
+      sessionId: opts.sessionId,
+      source: opts.source ?? 'chat',
+      originalTokens: stats.originalTokens,
+      compressedTokens: stats.compressedTokens,
+      originalMessages: stats.originalMessages,
+      compressedMessages: stats.compressedMessages,
+      reductionPercent: stats.reductionPercent,
+      summary,
+    });
+  } catch {
+    // Compaction 账本是观测层，失败不能阻断对话。
+  }
 
   console.log(
     `[Compression] ${originalTokens} tokens → ${compressedTokens} tokens (${Math.round((1 - compressedTokens / originalTokens) * 100)}% 减少)`
@@ -196,6 +247,8 @@ export function autoCompress(
 
   return { compressed: true, messages: compressedMessages };
 }
+
+export { listContextCompactions };
 
 /**
  * 获取压缩统计信息

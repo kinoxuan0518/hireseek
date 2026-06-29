@@ -58,6 +58,20 @@ export function ensureAgentCoreSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_agent_execution_env_status ON agent_execution_environments(status);
     CREATE INDEX IF NOT EXISTS idx_agent_execution_env_run ON agent_execution_environments(run_id);
 
+    CREATE TABLE IF NOT EXISTS agent_context_compactions (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id          TEXT,
+      source              TEXT NOT NULL DEFAULT 'chat',
+      original_tokens     INTEGER NOT NULL,
+      compressed_tokens   INTEGER NOT NULL,
+      original_messages   INTEGER NOT NULL,
+      compressed_messages INTEGER NOT NULL,
+      reduction_percent   INTEGER NOT NULL,
+      summary             TEXT,
+      created_at          TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_context_compactions_session ON agent_context_compactions(session_id);
+
     CREATE TABLE IF NOT EXISTS agent_sessions (
       id            TEXT PRIMARY KEY,
       title         TEXT NOT NULL,

@@ -297,6 +297,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     'agent_tool_calls',
     'agent_run_states',
     'agent_execution_environments',
+    'agent_context_compactions',
     'agent_sessions',
     'agent_messages',
     'agent_memory_raw',
@@ -308,7 +309,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     'lower',
     'Agent Core storage',
     missingAgentTables.length ? 'fail' : 'pass',
-    missingAgentTables.length ? `missing tables: ${missingAgentTables.join(', ')}` : 'tool trace, run state, execution environment, session/message history, and memory tables exist',
+    missingAgentTables.length ? `missing tables: ${missingAgentTables.join(', ')}` : 'tool trace, run state, execution environment, context compaction, session/message history, and memory tables exist',
   ));
 
   const toolColumns = tableColumns('agent_tool_calls');
@@ -349,6 +350,25 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     pendingRunStates.length
       ? pendingRunStates.join(' | ')
       : 'no paused/failed run states in the last 24h',
+  ));
+
+  const compactionColumns = tableColumns('agent_context_compactions');
+  const compactionRequiredColumns = [
+    'session_id',
+    'original_tokens',
+    'compressed_tokens',
+    'original_messages',
+    'compressed_messages',
+    'summary',
+  ];
+  const missingCompactionColumns = compactionRequiredColumns.filter(column => !compactionColumns.has(column));
+  checks.push(check(
+    'lower',
+    'Context compaction ledger',
+    missingCompactionColumns.length ? 'fail' : 'pass',
+    missingCompactionColumns.length
+      ? `missing columns: ${missingCompactionColumns.join(', ')}`
+      : 'context compression events are auditable',
   ));
 
   const failureReport = collectHarnessFailureReport(12);
