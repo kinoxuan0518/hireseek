@@ -21,6 +21,7 @@ import {
 } from '../src/platform-protocols/boss';
 import { loadSkill } from '../src/skills/loader';
 import { channelSkillAssetContext, runSkillOptionsForChannel } from '../src/orchestrator';
+import { buildSkillAssetManifest, formatSkillAssetManifest } from '../src/skills/skill-asset-manifest';
 
 describe('boss platform protocol middle layer', () => {
   const agentJob = {
@@ -452,5 +453,18 @@ describe('boss platform protocol middle layer', () => {
     expect(productContext.mode).toBe('fallback-only');
     expect(productContext.content).toContain('完整 legacy skill 不预加载');
     expect(productContext.content).not.toContain('<!-- HireSeek skill source:');
+
+    const manifest = buildSkillAssetManifest();
+    const bossAsset = manifest.find(entry => entry.channel === 'boss');
+    expect(bossAsset).toMatchObject({
+      productProtocol: 'boss-platform.v1',
+      mode: 'productized-fallback-only',
+      preloadLegacy: false,
+    });
+    expect(bossAsset?.activeAsset).toBeTruthy();
+    expect(bossAsset?.boundary.mustNotOverride).toContain('platform-protocol');
+    expect(bossAsset?.boundary.mustNotOverride).toContain('structured-output-contracts');
+    expect(formatSkillAssetManifest()).toContain('HireSeek Skill Asset Manifest');
+    expect(formatSkillAssetManifest()).toContain('mode: productized-fallback-only');
   });
 });

@@ -6,6 +6,7 @@ import type { ToolRegistry } from './agent-core/tool-registry';
 import { buildPlatformProtocolManifest, listPlatformProtocols } from './platform-protocols';
 import { buildRecruitingCapabilityManifest, listRecruitingCapabilities } from './capabilities';
 import { listClaudeSkills } from './skills/claude-skills';
+import { buildSkillAssetManifest } from './skills/skill-asset-manifest';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
 import { listPendingAgentRunStates } from './agent-core/run-state-store';
@@ -553,6 +554,27 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     runtime.flags.legacySkillPreload
       ? 'full legacy skill preload is enabled and may override product protocols'
       : 'full legacy skill is not preloaded; external skill remains available to CC/Codex and explicit fallback',
+  ));
+
+  const skillAssetManifest = buildSkillAssetManifest();
+  const skillAssetProblems = skillAssetManifest.flatMap(entry => {
+    const problems: string[] = [];
+    if (!entry.activeAsset) problems.push(`${entry.channel}:no active skill asset`);
+    if (entry.productProtocol && entry.mode !== 'productized-fallback-only') {
+      problems.push(`${entry.channel}:productized channel should use fallback-only mode`);
+    }
+    if (entry.productProtocol && !entry.boundary.mustNotOverride.includes('platform-protocol')) {
+      problems.push(`${entry.channel}:missing platform-protocol boundary`);
+    }
+    return problems;
+  });
+  checks.push(check(
+    'external',
+    'Skill asset manifest',
+    skillAssetProblems.length ? 'warn' : 'pass',
+    skillAssetProblems.length
+      ? skillAssetProblems.join('; ')
+      : `${skillAssetManifest.length} channel skill asset entr${skillAssetManifest.length === 1 ? 'y' : 'ies'} with explicit product boundaries`,
   ));
 
   const status = worstStatus(checks.map(c => c.status));
