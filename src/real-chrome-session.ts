@@ -6,6 +6,7 @@ import {
   GREETING_PATTERN,
   takeDomSnapshot,
 } from './runners/dom-runner';
+import { upsertExecutionEnvironment } from './agent-core/environment-store';
 
 const CDP_URL = process.env.HIRESEEK_CDP_URL || 'http://127.0.0.1:9222';
 
@@ -188,15 +189,58 @@ async function connectViaAppleScript(urlHint?: string): Promise<DomBrowserSessio
   };
 }
 
-export async function connectRealChrome(channelHint?: string): Promise<DomBrowserSession> {
-  const hint = appleScriptHint(channelHint);
-  const cdp = await connectViaCDP(hint);
-  if (cdp) {
-    console.log(`[Browser] 已接管${cdp.label}`);
-    return cdp;
+async function recordConnectedEnvironment(session: DomBrowserSession): Promise<void> {
+  try {
+    const live = await session.liveState?.();
+    upsertExecutionEnvironment({
+      id: `browser:${session.kind}`,
+      kind: 'browser',
+      label: session.label,
+      controller: 'hireseek',
+      status: 'claimed',
+      mode: 'execute',
+      url: live?.url,
+      title: live?.title,
+      active: live?.active,
+    });
+  } catch {
+    // 环境状态是观测层，失败不能阻断浏览器接管。
   }
+}
 
-  const session = await connectViaAppleScript(hint);
-  console.log(`[Browser] 已接管${session.label}`);
-  return session;
+function recordConnectionError(reason: string): void {
+  try {
+    upsertExecutionEnvironment({
+      id: 'browser:real-chrome',
+      kind: 'browser',
+      label: '真实 Chrome',
+      controller: 'unknown',
+      status: 'error',
+      mode: 'read',
+      reason,
+    });
+  } catch {
+    // 环境状态是观测层，失败不能覆盖真实错误。
+  }
+}
+
+export async function connectRealChrome(channelHint?: string): Promise<DomBrowserSession> {
+  try {
+    const hint = appleScriptHint(channelHint);
+    const cdp = await connectViaCDP(hint);
+    if (cdp) {
+      await recordConnectedEnvironment(cdp);
+      console.log(`[Browser] 已接管${cdp.label}`);
+      return cdp;
+    }
+
+    const session = await connectViaAppleScript(hint);
+    await recordConnectedEnvironment(session);
+    console.log(`[Browser] 已接管${session.label}`);
+    return session;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    recordConnectionError(reason);
+    throw err;
+  }
 }

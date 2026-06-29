@@ -295,6 +295,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   const agentTables = [
     'agent_tool_calls',
     'agent_run_states',
+    'agent_execution_environments',
     'agent_sessions',
     'agent_messages',
     'agent_memory_raw',
@@ -306,7 +307,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     'lower',
     'Agent Core storage',
     missingAgentTables.length ? 'fail' : 'pass',
-    missingAgentTables.length ? `missing tables: ${missingAgentTables.join(', ')}` : 'tool trace, run state, session/message history, and memory tables exist',
+    missingAgentTables.length ? `missing tables: ${missingAgentTables.join(', ')}` : 'tool trace, run state, execution environment, session/message history, and memory tables exist',
   ));
 
   const toolColumns = tableColumns('agent_tool_calls');

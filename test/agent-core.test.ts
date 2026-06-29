@@ -300,6 +300,63 @@ describe('agent core lower layer', () => {
     expect(listAgentRunStates(2).some(s => s.runId === 304)).toBe(true);
   });
 
+  it('tracks execution environment ownership separately from run state', async () => {
+    const {
+      formatExecutionEnvironmentLine,
+      listExecutionEnvironments,
+      loadExecutionEnvironment,
+      upsertExecutionEnvironment,
+    } = await import('../src/agent-core/environment-store');
+    const { db } = await import('../src/db');
+
+    db.prepare(`DELETE FROM agent_execution_environments WHERE id = ?`).run('browser:chrome-applescript');
+
+    upsertExecutionEnvironment({
+      id: 'browser:chrome-applescript',
+      kind: 'browser',
+      label: '真实 Chrome（AppleScript）',
+      controller: 'hireseek',
+      status: 'claimed',
+      mode: 'execute',
+      runId: 304,
+      sessionId: 'run-state-session',
+      url: 'https://www.zhipin.com/web/chat/recommend',
+      title: '推荐牛人',
+      active: true,
+    });
+
+    expect(loadExecutionEnvironment('browser:chrome-applescript')).toMatchObject({
+      id: 'browser:chrome-applescript',
+      kind: 'browser',
+      controller: 'hireseek',
+      status: 'claimed',
+      runId: 304,
+      active: true,
+    });
+
+    upsertExecutionEnvironment({
+      id: 'browser:chrome-applescript',
+      kind: 'browser',
+      controller: 'user',
+      status: 'blocked',
+      mode: 'execute',
+      active: false,
+      reason: 'user is using Chrome',
+    });
+
+    const blocked = loadExecutionEnvironment('browser:chrome-applescript')!;
+    expect(blocked).toMatchObject({
+      controller: 'user',
+      status: 'blocked',
+      runId: 304,
+      active: false,
+      reason: 'user is using Chrome',
+    });
+    expect(formatExecutionEnvironmentLine(blocked)).toContain('browser:chrome-applescript');
+    expect(formatExecutionEnvironmentLine(blocked)).toContain('blocked/user/execute');
+    expect(listExecutionEnvironments(3).some(env => env.id === 'browser:chrome-applescript')).toBe(true);
+  });
+
   it('offloads large tool outputs to private runtime storage', async () => {
     const { offloadToolOutput } = await import('../src/agent-core/tool-output-store');
 
@@ -950,6 +1007,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('HireSeek Agent Core');
     expect(text).toContain('Trace:');
     expect(text).toContain('Run states:');
+    expect(text).toContain('Execution environments:');
     expect(text).toContain('Memory:');
   });
 

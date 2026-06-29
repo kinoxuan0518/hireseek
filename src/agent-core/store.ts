@@ -39,6 +39,25 @@ export function ensureAgentCoreSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_agent_run_states_status ON agent_run_states(status);
     CREATE INDEX IF NOT EXISTS idx_agent_run_states_stage ON agent_run_states(stage_id);
 
+    CREATE TABLE IF NOT EXISTS agent_execution_environments (
+      id          TEXT PRIMARY KEY,
+      kind        TEXT NOT NULL,
+      label       TEXT,
+      controller  TEXT NOT NULL DEFAULT 'unknown',
+      status      TEXT NOT NULL,
+      mode        TEXT NOT NULL DEFAULT 'read',
+      run_id      INTEGER,
+      session_id  TEXT,
+      url         TEXT,
+      title       TEXT,
+      active      INTEGER,
+      reason      TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_execution_env_status ON agent_execution_environments(status);
+    CREATE INDEX IF NOT EXISTS idx_agent_execution_env_run ON agent_execution_environments(run_id);
+
     CREATE TABLE IF NOT EXISTS agent_sessions (
       id            TEXT PRIMARY KEY,
       title         TEXT NOT NULL,

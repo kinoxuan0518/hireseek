@@ -23,6 +23,11 @@ import { recordRejectedToolCall, recordToolCall } from '../agent-core/trace';
 import { offloadToolOutput } from '../agent-core/tool-output-store';
 import { upsertAgentRunState, type AgentRunStatus } from '../agent-core/run-state-store';
 import {
+  upsertExecutionEnvironment,
+  type ExecutionEnvironmentController,
+  type ExecutionEnvironmentStatus,
+} from '../agent-core/environment-store';
+import {
   createToolRegistry,
   unknownToolResult,
   type ToolExecutionMode,
@@ -340,6 +345,10 @@ function normalizeOwnershipUrl(url: string | undefined): string {
   return (url ?? '').trim().replace(/\/$/, '');
 }
 
+function browserEnvironmentId(page: BrowserTarget): string {
+  return isDomBrowserSession(page) ? `browser:${page.kind}` : 'browser:playwright';
+}
+
 export interface BrowserOwnershipDecision {
   suspected: boolean;
   reason?: string;
@@ -647,6 +656,32 @@ export class DomRunner implements LLMRunner {
     const initSnapshot = isDomBrowserSession(page) ? await page.snapshot() : await takeDomSnapshot(page);
     let currentSnapshot = initSnapshot;
     const initialMode = executionMode === 'execute' ? 'read' : executionMode;
+    const setBrowserEnvironment = (input: {
+      status: ExecutionEnvironmentStatus;
+      controller?: ExecutionEnvironmentController;
+      mode?: ToolExecutionMode;
+      liveState?: BrowserLiveState | null;
+      reason?: string | null;
+    }): void => {
+      try {
+        upsertExecutionEnvironment({
+          id: browserEnvironmentId(page),
+          kind: 'browser',
+          label: isDomBrowserSession(page) ? page.label : 'Playwright browser',
+          controller: input.controller ?? 'hireseek',
+          status: input.status,
+          mode: input.mode ?? (executionMode as ToolExecutionMode),
+          runId: options.runId,
+          sessionId: options.sessionId,
+          url: input.liveState?.url ?? snapshotUrl(currentSnapshot),
+          title: input.liveState?.title ?? undefined,
+          active: input.liveState?.active,
+          reason: input.reason,
+        });
+      } catch {
+        // 环境状态是观测层，失败不能阻断主流程。
+      }
+    };
     result.trace!.push({
       seq: 1,
       action: 'snapshot',
@@ -703,6 +738,10 @@ export class DomRunner implements LLMRunner {
       lastAction: 'snapshot',
       lastUrl: snapshotUrl(initSnapshot),
       snapshot: initSnapshot,
+    });
+    setBrowserEnvironment({
+      status: executionMode === 'dry_run' ? 'observing' : 'claimed',
+      mode: initialMode,
     });
 
     const messages: OpenAI.ChatCompletionMessageParam[] = [
@@ -826,6 +865,11 @@ export class DomRunner implements LLMRunner {
             lastAction: 'final_response',
             lastUrl: snapshotUrl(currentSnapshot),
             snapshot: currentSnapshot,
+          });
+          setBrowserEnvironment({
+            status: 'released',
+            controller: 'hireseek',
+            mode: executionMode as ToolExecutionMode,
           });
         }
         onProgress?.('✓ 完成');
@@ -1370,6 +1414,12 @@ export class DomRunner implements LLMRunner {
             reason: blocked,
             snapshot: currentSnapshot,
           });
+          setBrowserEnvironment({
+            status: 'blocked',
+            controller: 'user',
+            mode,
+            reason: blocked,
+          });
           messages.push({
             role: 'tool',
             tool_call_id: toolCall.id,
@@ -1425,6 +1475,13 @@ export class DomRunner implements LLMRunner {
               lastUrl: liveState?.url ?? snapshotUrl(currentSnapshot),
               reason: ownership.reason ?? blocked,
               snapshot: currentSnapshot,
+            });
+            setBrowserEnvironment({
+              status: 'blocked',
+              controller: 'user',
+              mode,
+              liveState,
+              reason: ownership.reason ?? blocked,
             });
             messages.push({
               role: 'tool',
@@ -1534,6 +1591,11 @@ export class DomRunner implements LLMRunner {
           reason: stepError,
           snapshot,
         });
+        setBrowserEnvironment({
+          status: stepOk ? (sideEffect ? 'claimed' : 'observing') : 'error',
+          mode,
+          reason: stepError,
+        });
         if (
           stepOk &&
           executionMode === 'execute' &&
@@ -1584,6 +1646,12 @@ export class DomRunner implements LLMRunner {
         lastUrl: snapshotUrl(currentSnapshot),
         reason: result.exitReason,
         snapshot: currentSnapshot,
+      });
+      setBrowserEnvironment({
+        status: 'error',
+        controller: 'hireseek',
+        mode: executionMode as ToolExecutionMode,
+        reason: result.exitReason,
       });
     }
 

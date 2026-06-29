@@ -1,5 +1,6 @@
 import { db } from '../db';
 import { createRuntimeContext } from './runtime-context';
+import { formatExecutionEnvironmentLine, listExecutionEnvironments, type ExecutionEnvironmentState } from './environment-store';
 import { listAgentRunStates, type AgentRunState } from './run-state-store';
 import type { ToolRegistry } from './tool-registry';
 import './store';
@@ -30,6 +31,9 @@ export interface CoreStatus {
   };
   runStates: {
     recent: AgentRunState[];
+  };
+  environments: {
+    recent: ExecutionEnvironmentState[];
   };
   sessions: {
     total: number;
@@ -80,6 +84,9 @@ export function collectCoreStatus(registry?: ToolRegistry): CoreStatus {
     runStates: {
       recent: listAgentRunStates(8),
     },
+    environments: {
+      recent: listExecutionEnvironments(8),
+    },
     sessions: {
       total: count(`SELECT COUNT(*) AS n FROM agent_sessions`),
       messages: count(`SELECT COUNT(*) AS n FROM agent_messages`),
@@ -126,6 +133,9 @@ export function formatCoreStatus(status: CoreStatus): string {
       return `- ${r.updatedAt ?? ''} run#${r.runId} ${scope} ${r.status}/${r.phase}${stage}${action}${url}${reason}`;
     }).join('\n')
     : '无';
+  const recentEnvironments = status.environments.recent.length
+    ? status.environments.recent.map(formatExecutionEnvironmentLine).join('\n')
+    : '无';
   const recentSessions = status.sessions.recent.length
     ? status.sessions.recent.map(s => `- ${s.updated_at} ${s.title} (${s.source}, ${s.message_count} messages, ${s.id})`).join('\n')
     : '无';
@@ -149,6 +159,8 @@ export function formatCoreStatus(status: CoreStatus): string {
     `Recent trace:\n${recentTrace}`,
     '',
     `Run states:\n${recentRunStates}`,
+    '',
+    `Execution environments:\n${recentEnvironments}`,
     '',
     `Sessions: ${status.sessions.total} sessions, ${status.sessions.messages} messages`,
     `Recent sessions:\n${recentSessions}`,
