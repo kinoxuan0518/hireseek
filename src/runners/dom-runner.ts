@@ -219,7 +219,23 @@ export const DOM_RUNNER_TOOL_REGISTRY = createToolRegistry([
   RECORD_CONTACTED_TOOL,
   RECORD_SCREENED_CANDIDATE_TOOL,
 ]);
-const DOM_RUNNER_TOOLS = DOM_RUNNER_TOOL_REGISTRY.list().map(tool => tool.schema);
+
+const DOM_RUNNER_TOOL_NAMES_BY_MODE: Record<SkillExecutionMode, string[]> = {
+  dry_run: ['browser'],
+  prepare: ['browser'],
+  screen: ['browser', 'record_screened_candidate'],
+  execute: ['browser', 'prepare_contact', 'record_contacted'],
+};
+
+export function domRunnerToolNamesForMode(mode: SkillExecutionMode = 'execute'): string[] {
+  return [...DOM_RUNNER_TOOL_NAMES_BY_MODE[mode]];
+}
+
+export function domRunnerToolsForMode(mode: SkillExecutionMode = 'execute'): OpenAI.ChatCompletionTool[] {
+  return domRunnerToolNamesForMode(mode)
+    .map(name => DOM_RUNNER_TOOL_REGISTRY.get(name)?.schema)
+    .filter(Boolean) as OpenAI.ChatCompletionTool[];
+}
 
 const DOM_GUIDE = `
 ## 浏览器操作说明（文本模式）
@@ -793,7 +809,7 @@ export class DomRunner implements LLMRunner {
       const response = await this.client.chat.completions.create({
         model: this.model,
         messages: pruneSnapshots(messages, 2, { runId: options.runId, sessionId: options.sessionId }),
-        tools: DOM_RUNNER_TOOLS,
+        tools: domRunnerToolsForMode(executionMode),
         tool_choice: 'auto',
         max_tokens: 2048,
       });

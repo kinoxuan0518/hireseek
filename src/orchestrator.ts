@@ -6,10 +6,10 @@ import type { BrowserTarget } from './browser-session';
 import { isDomBrowserSession } from './browser-session';
 import { connectRealChrome } from './real-chrome-session';
 import { createRunner } from './runners';
-import { loadSkill, loadWorkspaceFile, jobToPrompt, getEnabledChannels, type JobConfig } from './skills/loader';
+import { loadWorkspaceFile, getEnabledChannels, type JobConfig } from './skills/loader';
 import { sendReport } from './channels/feishu';
 import { taskRunOps, reflectionOps, candidateOps, db } from './db';
-import { buildMemoryContext, buildReflectionPrompt } from './memory';
+import { buildReflectionPrompt } from './memory';
 import { emitLog, emitStatus } from './events';
 import { getAccountId, hasStorageState } from './accounts';
 import { generatePlan, confirmPlan } from './planner';
@@ -18,10 +18,12 @@ import { retryWithBackoff, saveCheckpoint, loadCheckpoint, removeCheckpoint, wai
 import type { Channel, ScreenedCandidate, SkillResult } from './types';
 import { createRuntimeContext } from './agent-core/runtime-context';
 import { getPlatformProtocol } from './platform-protocols';
-import { buildRecruitingCapabilityContext } from './capabilities';
+import { buildHarnessSystemPrompt } from './harness/run-assembly';
 import type { RunSkillOptions } from './runners/interface';
 import { saveRunTrace } from './agent-core/run-trace-store';
 import { formatRunStateForContext, latestPausedRunState, type AgentRunState } from './agent-core/run-state-store';
+
+export { channelSkillAssetContext } from './harness/run-assembly';
 
 type ChannelRunMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
 
@@ -382,32 +384,6 @@ export function runSkillOptionsForChannel(
   return base;
 }
 
-function platformSystemContextForChannel(channel: Channel): string {
-  const protocol = getPlatformProtocol(channel);
-  return protocol?.buildSystemContext?.() ?? '';
-}
-
-export interface ChannelSkillAssetContext {
-  mode: 'preloaded' | 'fallback-only';
-  content: string;
-}
-
-export function channelSkillAssetContext(channel: Channel): ChannelSkillAssetContext {
-  const protocol = getPlatformProtocol(channel);
-  if (!protocol || config.skills.preloadLegacyForProductizedChannels) {
-    return { mode: 'preloaded', content: loadSkill(channel) };
-  }
-  return {
-    mode: 'fallback-only',
-    content: [
-      '# Legacy skill fallback',
-      `渠道 ${channel} 已由 HireSeek 产品协议 ${protocol.name} 接管。`,
-      '完整 legacy skill 不预加载进本轮 prompt，避免历史规则覆盖产品协议。',
-      'skill 文件仍保留在外部 skill homes，供 CC/Codex 原生使用，也可通过显式回退配置重新启用。',
-    ].join('\n'),
-  };
-}
-
 async function createBrowserTarget(channel: Channel): Promise<BrowserTarget> {
   if (config.browser.control === 'hireseek') {
     return await getPage();
@@ -532,18 +508,9 @@ export async function runChannel(
       ? formatPausedRunContext(latestPausedRunState({ jobId, channel, maxAgeHours: 24 }))
       : '';
 
-    // 组装系统提示：SOUL + 职位上下文 + 中层能力 + 记忆 + Skill资产
-    const soul      = loadWorkspaceFile('SOUL.md');
-    const job       = activeJob;
-    const jobCtx    = job ? jobToPrompt(job) : '';
-    const capabilities = buildRecruitingCapabilityContext({
-      channel,
-      includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
-    });
-    const memory    = buildMemoryContext(channel, jobId);
-    const skillAsset = channelSkillAssetContext(channel);
-    const protocolContext = platformSystemContextForChannel(channel);
-    const systemPrompt = [soul, jobCtx, skillAsset.content, protocolContext, capabilities, memory].filter(Boolean).join('\n\n---\n\n');
+    // 组装系统提示：SOUL + 职位事实 + Skill资产边界 + 平台协议 + 中层能力 + 记忆。
+    // 具体装配由 harness manifest 统一声明，避免每条工作流私下拼自己的上下文。
+    const { systemPrompt } = buildHarnessSystemPrompt(channel, runMode, activeJob, jobId);
 
     const runner = createRunner();
     const rawResult = await runner.runSkill(
@@ -879,21 +846,9 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
       return;
     }
 
-    // 构建 prompt
+    // 构建 prompt：并行路径也必须走统一 harness 装配，避免悄悄回到旧的散装上下文。
     const job = createRuntimeContext().activeJob;
-    const soul = loadWorkspaceFile('SOUL.md');
-    const skillAsset = channelSkillAssetContext(channel);
-    const jobContext = job ? jobToPrompt(job) : '';
-    const memory = buildMemoryContext(channel, jobId);
-    const protocolContext = platformSystemContextForChannel(channel);
-    const capabilities = buildRecruitingCapabilityContext({
-      channel,
-      includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
-    });
-
-    const systemPrompt = [soul, jobContext, skillAsset.content, protocolContext, capabilities, memory]
-      .filter(Boolean)
-      .join('\n\n---\n\n');
+    const { systemPrompt } = buildHarnessSystemPrompt(channel, 'execute', job, jobId);
 
     const runner = createRunner();
 

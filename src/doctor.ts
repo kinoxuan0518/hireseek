@@ -7,6 +7,7 @@ import { buildPlatformProtocolManifest, listPlatformProtocols } from './platform
 import { buildRecruitingCapabilityManifest, listRecruitingCapabilities } from './capabilities';
 import { listClaudeSkills } from './skills/claude-skills';
 import { buildSkillAssetManifest } from './skills/skill-asset-manifest';
+import { buildHarnessRunAssembly } from './harness/run-assembly';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
 import { listPendingAgentRunStates } from './agent-core/run-state-store';
@@ -293,6 +294,41 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     runnerIssues.length === 0
       ? `registered runner tools=${[...runnerTools].sort().join(', ')}`
       : `validation issues=${runnerIssues.map(issue => `${issue.tool}:${issue.problem}`).join(', ')}`,
+  ));
+
+  const harnessModes = ['dry_run', 'prepare', 'screen', 'execute'] as const;
+  const harnessAssemblyProblems = harnessModes.flatMap(mode => {
+    const assembly = buildHarnessRunAssembly('boss', mode);
+    const declared = new Set(assembly.tools.filter(tool => tool.declaredToModel).map(tool => tool.name));
+    const problems: string[] = [];
+    if (!declared.has('browser')) problems.push(`${mode}:browser missing`);
+    if ((mode === 'dry_run' || mode === 'prepare') && declared.size !== 1) {
+      problems.push(`${mode}:should only declare browser`);
+    }
+    if (
+      mode === 'screen' &&
+      (!declared.has('record_screened_candidate') || declared.has('prepare_contact') || declared.has('record_contacted'))
+    ) {
+      problems.push(`${mode}:screen tool disclosure mismatch`);
+    }
+    if (
+      mode === 'execute' &&
+      (!declared.has('prepare_contact') || !declared.has('record_contacted') || declared.has('record_screened_candidate'))
+    ) {
+      problems.push(`${mode}:execute tool disclosure mismatch`);
+    }
+    if (assembly.platformProtocol && !assembly.boundaries.includes('platform-protocol-overrides-legacy-skill')) {
+      problems.push(`${mode}:missing protocol/skill boundary`);
+    }
+    return problems;
+  });
+  checks.push(check(
+    'lower',
+    'Harness run assembly',
+    harnessAssemblyProblems.length === 0 ? 'pass' : 'fail',
+    harnessAssemblyProblems.length === 0
+      ? 'mode-specific tool/context assembly is explicit for BOSS dry_run/prepare/screen/execute'
+      : harnessAssemblyProblems.join('; '),
   ));
 
   const agentTables = [

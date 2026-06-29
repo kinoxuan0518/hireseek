@@ -22,6 +22,8 @@ import {
 import { loadSkill } from '../src/skills/loader';
 import { channelSkillAssetContext, runSkillOptionsForChannel } from '../src/orchestrator';
 import { buildSkillAssetManifest, formatSkillAssetManifest } from '../src/skills/skill-asset-manifest';
+import { buildHarnessRunAssembly, formatHarnessRunAssembly } from '../src/harness/run-assembly';
+import { domRunnerToolNamesForMode } from '../src/runners/dom-runner';
 
 describe('boss platform protocol middle layer', () => {
   const agentJob = {
@@ -466,5 +468,35 @@ describe('boss platform protocol middle layer', () => {
     expect(bossAsset?.boundary.mustNotOverride).toContain('structured-output-contracts');
     expect(formatSkillAssetManifest()).toContain('HireSeek Skill Asset Manifest');
     expect(formatSkillAssetManifest()).toContain('mode: productized-fallback-only');
+  });
+
+  it('assembles mode-specific harness context and tools', () => {
+    expect(domRunnerToolNamesForMode('dry_run')).toEqual(['browser']);
+    expect(domRunnerToolNamesForMode('prepare')).toEqual(['browser']);
+    expect(domRunnerToolNamesForMode('screen')).toEqual(['browser', 'record_screened_candidate']);
+    expect(domRunnerToolNamesForMode('execute')).toEqual(['browser', 'prepare_contact', 'record_contacted']);
+
+    const assembly = buildHarnessRunAssembly('boss', 'screen');
+    const declaredTools = assembly.tools.filter(tool => tool.declaredToModel).map(tool => tool.name);
+    const withheldTools = assembly.tools.filter(tool => !tool.declaredToModel).map(tool => tool.name);
+
+    expect(assembly.platformProtocol).toBe('boss-platform.v1');
+    expect(assembly.contractName).toBe('boss-greeting.v1');
+    expect(assembly.skillAssetMode).toBe('productized-fallback-only');
+    expect(assembly.boundaries).toContain('mode-specific-tool-disclosure');
+    expect(assembly.boundaries).toContain('platform-protocol-overrides-legacy-skill');
+    expect(assembly.contextBlocks.find(block => block.id === 'platform-protocol')).toMatchObject({
+      included: true,
+      layer: 'middle',
+    });
+    expect(assembly.contextBlocks.find(block => block.id === 'skill-asset')).toMatchObject({
+      included: true,
+      layer: 'external',
+    });
+    expect(declaredTools).toEqual(['browser', 'record_screened_candidate']);
+    expect(withheldTools).toContain('prepare_contact');
+    expect(withheldTools).toContain('record_contacted');
+    expect(formatHarnessRunAssembly('boss', 'screen')).toContain('HireSeek Harness Run Assembly');
+    expect(formatHarnessRunAssembly('boss', 'screen')).toContain('record_screened_candidate: declared');
   });
 });
