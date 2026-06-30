@@ -1373,7 +1373,10 @@ export class DomRunner implements LLMRunner {
           pendingContactAwaitingRecord: pendingContact?.greetingClicked ?? false,
         });
         if (policyDecision && !policyDecision.allowed) {
-          const blocked = policyDecision.reason ?? `当前平台协议禁止执行 ${input.action}`;
+          const blocked = [
+            policyDecision.reason ?? `当前平台协议禁止执行 ${input.action}`,
+            policyDecision.recovery ? `\n[协议恢复建议]\n${policyDecision.recovery}` : '',
+          ].filter(Boolean).join('\n');
           const sideEffect = browserActionHasSideEffect(input, executionMode);
           const mode = browserActionMode(input, executionMode);
           messages.push({

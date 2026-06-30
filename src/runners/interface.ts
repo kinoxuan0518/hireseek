@@ -5,6 +5,8 @@ import type { ToolExecutionMode } from '../agent-core/tool-registry';
 export interface BrowserActionPolicyDecision {
   allowed: boolean;
   reason?: string;
+  /** 给模型的下一步恢复指导；不改变 allowed 判定，只提升被拦后的可恢复性。 */
+  recovery?: string;
 }
 
 export interface BrowserActionPolicyContext {

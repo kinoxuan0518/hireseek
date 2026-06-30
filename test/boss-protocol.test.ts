@@ -206,13 +206,17 @@ describe('boss platform protocol middle layer', () => {
 
     expect(denied.allowed).toBe(false);
     expect(denied.reason).toContain('直接跳转 URL');
+    expect(denied.recovery).toContain('stage_id=job-positioning');
     expect(allowedClick.allowed).toBe(true);
     expect(allowedSnapshot.allowed).toBe(true);
     expect(allowedScroll.allowed).toBe(true);
     expect(missingStage.allowed).toBe(false);
     expect(missingStage.reason).toContain('stage_id');
+    expect(missingStage.recovery).toContain('可用 stage_id');
     expect(skippedJobPositioning.allowed).toBe(false);
     expect(skippedJobPositioning.reason).toContain('job-positioning');
+    expect(skippedJobPositioning.recovery).toContain('缺失前置阶段');
+    expect(skippedJobPositioning.recovery).toContain('职位定位');
     expect(allowedPrefilter.allowed).toBe(true);
     expect(blockedPrepareContact.allowed).toBe(false);
     expect(blockedPrepareContact.reason).toContain('禁止打招呼');

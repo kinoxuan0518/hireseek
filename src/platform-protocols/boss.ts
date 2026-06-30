@@ -392,6 +392,49 @@ function browserActionStage(action: BrowserAction): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function stageLabel(stageId: string): string {
+  return BOSS_PROTOCOL_STAGES.find(stage => stage.id === stageId)?.name ?? stageId;
+}
+
+function stageRecoveryLine(stageId: string): string {
+  switch (stageId) {
+    case 'session-precheck':
+      return '先只读 snapshot 当前 BOSS 页，确认 URL、登录态、验证码/风控状态，不做点击。';
+    case 'job-positioning':
+      return '先用 stage_id=job-positioning 通过页面内职位下拉、职位列表、职位管理或推荐牛人入口切到目标职位。';
+    case 'prefilter':
+      return '先用 stage_id=prefilter 打开筛选面板，逐项设置经验/学历/院校/关键词/活跃度，并点击确定或保留激活态证据。';
+    case 'dom-probe':
+      return '先用 stage_id=dom-probe 做只读 snapshot/探测，以打招呼按钮为锚点确认候选人卡片结构和 parse_quality。';
+    case 'candidate-screen':
+      return '先用 stage_id=candidate-screen 查看候选人卡片或详情，记录匹配证据、风险标签和跳过/建议触达判断。';
+    case 'single-contact':
+      return '进入 single-contact 前必须已有 prepare_contact 检查点，点击后立刻 record_contacted。';
+    default:
+      return `回到 ${stageId} 阶段补齐可审计证据后再重试。`;
+  }
+}
+
+function formatStageRecovery(input: {
+  targetStage?: string;
+  missingStage?: string;
+  observedStageIds?: string[];
+  action?: BrowserAction['action'];
+}): string {
+  const observed = input.observedStageIds?.length
+    ? input.observedStageIds.map(stageLabel).join(' -> ')
+    : '无';
+  const target = input.targetStage ? `${stageLabel(input.targetStage)} (${input.targetStage})` : '未声明阶段';
+  const missing = input.missingStage ? `${stageLabel(input.missingStage)} (${input.missingStage})` : '未知前置阶段';
+  return [
+    `当前已留痕阶段：${observed}`,
+    `被拦动作：${input.action ?? 'unknown'}，目标阶段：${target}`,
+    `缺失前置阶段：${missing}`,
+    stageRecoveryLine(input.missingStage ?? input.targetStage ?? 'session-precheck'),
+    '完成缺失阶段后重新 snapshot，再重试原动作；不要用 URL 深链绕过页面内流程。',
+  ].join('\n');
+}
+
 export const bossBrowserActionPolicy: BrowserActionPolicy = (
   action: BrowserAction,
   context,
@@ -400,6 +443,11 @@ export const bossBrowserActionPolicy: BrowserActionPolicy = (
     return {
       allowed: false,
       reason: 'BOSS 协议禁止在任务执行中直接跳转 URL；请通过当前页面内的职位入口、推荐牛人入口或搜索筛选控件完成站内流转。',
+      recovery: [
+        '先 snapshot 当前页，查找职位下拉、职位管理、推荐牛人、筛选控件等站内入口。',
+        '如果要切职位，用 stage_id=job-positioning 点击页面内职位入口；如果要筛选，用 stage_id=prefilter 操作筛选控件。',
+        '只有页面内真实入口不可达且用户明确授权时，才把阻塞原因交给用户确认；不要自行深链跳转。',
+      ].join('\n'),
     };
   }
 
@@ -409,12 +457,18 @@ export const bossBrowserActionPolicy: BrowserActionPolicy = (
     return {
       allowed: false,
       reason: `BOSS 协议要求 ${action.action} 动作携带 stage_id；请先确认当前协议阶段再重试。`,
+      recovery: [
+        `当前已留痕阶段：${context.observedStageIds?.length ? context.observedStageIds.map(stageLabel).join(' -> ') : '无'}`,
+        '先 snapshot 判断你正在做的事属于哪个 stage manifest 阶段，再给 browser action 补 stage_id。',
+        `可用 stage_id：${BOSS_PROTOCOL_STAGES.map(stage => stage.id).join(', ')}`,
+      ].join('\n'),
     };
   }
   if (stageId && !BOSS_STAGE_IDS.has(stageId)) {
     return {
       allowed: false,
       reason: `未知 BOSS stage_id=${stageId}；只能使用 stage manifest 中声明的阶段。`,
+      recovery: `改用已声明 stage_id：${BOSS_PROTOCOL_STAGES.map(stage => stage.id).join(', ')}。如果确实需要新阶段，先修改中层协议 manifest。`,
     };
   }
 
@@ -424,6 +478,12 @@ export const bossBrowserActionPolicy: BrowserActionPolicy = (
       return {
         allowed: false,
         reason: `BOSS 阶段门禁：${stageId} 之前必须先完成并留痕 ${prerequisite}。`,
+        recovery: formatStageRecovery({
+          targetStage: stageId,
+          missingStage: prerequisite,
+          observedStageIds: context.observedStageIds,
+          action: action.action,
+        }),
       };
     }
   }
