@@ -1401,6 +1401,58 @@ describe('agent core lower layer', () => {
     expect(JSON.stringify(raw)).not.toContain(taskPrompt);
   });
 
+  it('records early browser environment failures under a task run', async () => {
+    const { config } = await import('../src/config');
+    const { db } = await import('../src/db');
+    const originalBrowserControl = config.browser.control;
+    config.browser.control = 'invalid-for-test';
+    try {
+      const { runChannel } = await import('../src/orchestrator');
+      const runId = await runChannel('boss', 'agent-engineer', { dryRun: true, progress: () => {} });
+
+      const run = db.prepare(`
+        SELECT status, error, mode
+        FROM task_runs
+        WHERE id = ?
+      `).get(runId) as { status: string; error: string; mode: string };
+      expect(run).toMatchObject({
+        status: 'failed',
+        mode: 'dry_run',
+      });
+      expect(run.error).toContain('不支持的 HIRESEEK_BROWSER_CONTROL');
+
+      const assembly = db.prepare(`
+        SELECT provider, mode, system_prompt_hash, task_prompt_hash
+        FROM agent_run_assemblies
+        WHERE run_id = ?
+      `).get(runId) as {
+        provider: string;
+        mode: string;
+        system_prompt_hash: string;
+        task_prompt_hash: string;
+      };
+      expect(assembly.mode).toBe('dry_run');
+      expect(assembly.system_prompt_hash).toMatch(/^[a-f0-9]{64}$/);
+      expect(assembly.task_prompt_hash).toMatch(/^[a-f0-9]{64}$/);
+
+      const env = db.prepare(`
+        SELECT run_id, status, mode, reason
+        FROM agent_execution_environments
+        WHERE run_id = ? AND status = 'error'
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `).get(runId) as { run_id: number; status: string; mode: string; reason: string };
+      expect(env).toMatchObject({
+        run_id: runId,
+        status: 'error',
+        mode: 'dry_run',
+      });
+      expect(env.reason).toContain('不支持的 HIRESEEK_BROWSER_CONTROL');
+    } finally {
+      config.browser.control = originalBrowserControl;
+    }
+  });
+
   it('formats product doctor report without executing live browser workflows', async () => {
     const { collectDoctorReport, formatDoctorReport } = await import('../src/doctor');
     const { createToolRegistry } = await import('../src/agent-core/tool-registry');

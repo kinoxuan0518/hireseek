@@ -7,6 +7,7 @@ import {
   takeDomSnapshot,
 } from './runners/dom-runner';
 import { upsertExecutionEnvironment } from './agent-core/environment-store';
+import type { ToolExecutionMode } from './agent-core/tool-registry';
 
 const CDP_URL = process.env.HIRESEEK_CDP_URL || 'http://127.0.0.1:9222';
 
@@ -189,7 +190,11 @@ async function connectViaAppleScript(urlHint?: string): Promise<DomBrowserSessio
   };
 }
 
-async function recordConnectedEnvironment(session: DomBrowserSession): Promise<void> {
+async function recordConnectedEnvironment(
+  session: DomBrowserSession,
+  runId?: number | null,
+  mode: ToolExecutionMode = 'execute',
+): Promise<void> {
   try {
     const live = await session.liveState?.();
     upsertExecutionEnvironment({
@@ -198,7 +203,8 @@ async function recordConnectedEnvironment(session: DomBrowserSession): Promise<v
       label: session.label,
       controller: 'hireseek',
       status: 'claimed',
-      mode: 'execute',
+      mode,
+      runId,
       url: live?.url,
       title: live?.title,
       active: live?.active,
@@ -208,7 +214,11 @@ async function recordConnectedEnvironment(session: DomBrowserSession): Promise<v
   }
 }
 
-function recordConnectionError(reason: string): void {
+function recordConnectionError(
+  reason: string,
+  runId?: number | null,
+  mode: ToolExecutionMode = 'execute',
+): void {
   try {
     upsertExecutionEnvironment({
       id: 'browser:real-chrome',
@@ -216,7 +226,8 @@ function recordConnectionError(reason: string): void {
       label: '真实 Chrome',
       controller: 'unknown',
       status: 'error',
-      mode: 'read',
+      mode,
+      runId,
       reason,
     });
   } catch {
@@ -224,23 +235,27 @@ function recordConnectionError(reason: string): void {
   }
 }
 
-export async function connectRealChrome(channelHint?: string): Promise<DomBrowserSession> {
+export async function connectRealChrome(
+  channelHint?: string,
+  runId?: number | null,
+  mode: ToolExecutionMode = 'execute',
+): Promise<DomBrowserSession> {
   try {
     const hint = appleScriptHint(channelHint);
     const cdp = await connectViaCDP(hint);
     if (cdp) {
-      await recordConnectedEnvironment(cdp);
+      await recordConnectedEnvironment(cdp, runId, mode);
       console.log(`[Browser] 已接管${cdp.label}`);
       return cdp;
     }
 
     const session = await connectViaAppleScript(hint);
-    await recordConnectedEnvironment(session);
+    await recordConnectedEnvironment(session, runId, mode);
     console.log(`[Browser] 已接管${session.label}`);
     return session;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    recordConnectionError(reason);
+    recordConnectionError(reason, runId, mode);
     throw err;
   }
 }

@@ -18,11 +18,12 @@ import { retryWithBackoff, saveCheckpoint, loadCheckpoint, removeCheckpoint, wai
 import type { Channel, ScreenedCandidate, SkillResult } from './types';
 import { createRuntimeContext } from './agent-core/runtime-context';
 import { getPlatformProtocol } from './platform-protocols';
-import { buildHarnessSystemPrompt } from './harness/run-assembly';
+import { buildHarnessSystemPrompt, type HarnessRunAssembly } from './harness/run-assembly';
 import type { RunSkillOptions } from './runners/interface';
 import { saveRunTrace } from './agent-core/run-trace-store';
 import { saveRunAssemblySnapshot } from './agent-core/run-assembly-store';
 import { formatRunStateForContext, latestPausedRunState, type AgentRunState } from './agent-core/run-state-store';
+import { upsertExecutionEnvironment } from './agent-core/environment-store';
 
 export { channelSkillAssetContext } from './harness/run-assembly';
 
@@ -385,7 +386,7 @@ export function runSkillOptionsForChannel(
   return base;
 }
 
-async function createBrowserTarget(channel: Channel): Promise<BrowserTarget> {
+async function createBrowserTarget(channel: Channel, runId?: number | null, mode: ChannelRunMode = 'execute'): Promise<BrowserTarget> {
   if (config.browser.control === 'hireseek') {
     return await getPage();
   }
@@ -395,7 +396,7 @@ async function createBrowserTarget(channel: Channel): Promise<BrowserTarget> {
   }
 
   try {
-    return await connectRealChrome(channel);
+    return await connectRealChrome(channel, runId, mode);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(
@@ -403,6 +404,38 @@ async function createBrowserTarget(channel: Channel): Promise<BrowserTarget> {
       '请确认：1) Google Chrome 已打开；2) 已登录对应招聘平台；' +
       '3) Chrome 菜单「视图 > 开发者 > 允许 Apple 事件中的 JavaScript」已开启。'
     );
+  }
+}
+
+async function recordBrowserEnvironmentFailure(
+  target: BrowserTarget | null,
+  runId: number,
+  mode: ChannelRunMode,
+  reason: string,
+): Promise<void> {
+  try {
+    const live = target && isDomBrowserSession(target)
+      ? await target.liveState?.().catch(() => null)
+      : null;
+    upsertExecutionEnvironment({
+      id: target
+        ? isDomBrowserSession(target) ? `browser:${target.kind}` : 'browser:playwright'
+        : 'browser:unavailable',
+      kind: 'browser',
+      label: target
+        ? isDomBrowserSession(target) ? target.label : 'Playwright browser'
+        : 'Browser unavailable',
+      controller: target ? 'hireseek' : 'unknown',
+      status: 'error',
+      mode,
+      runId,
+      url: live?.url ?? (target ? await currentTargetUrl(target).catch(() => null) : null),
+      title: live?.title ?? null,
+      active: live?.active ?? null,
+      reason,
+    });
+  } catch {
+    // 环境状态是观测层，失败不能覆盖真实错误。
   }
 }
 
@@ -477,25 +510,15 @@ export async function runChannel(
   emitStatus('running');
 
   const startMs = Date.now();
-  let runId: number | null = null;
+  const startedAt = dayjs().toISOString();
+  const runResult = taskRunOps.start.run({ job_id: jobId, channel, mode: runMode, started_at: startedAt });
+  const runId = runResult.lastInsertRowid as number;
+  let page: BrowserTarget | null = null;
+  let assembly: HarnessRunAssembly | null = null;
+  let systemPrompt = '';
+  let taskPrompt = '';
 
   try {
-    const page = await createBrowserTarget(channel);
-
-    if (opts.fromCurrent) {
-      // 就地接管：不跳转、不做登录态导航，直接从用户已开好的页面开始
-      const here = await currentTargetUrl(page).catch(() => '(未知)');
-      console.log(`[Orchestrator] 📍 就地接管当前页面（--here），不跳转：${here}`);
-      emitLog(`📍 就地接管当前页面：${here}`);
-    } else {
-      // 导航到对应招聘平台
-      await targetGoto(page, CHANNEL_URL[channel]);
-      await ensurePlatformSession(page, channel);
-    }
-
-    const startedAt = dayjs().toISOString();
-    const runResult = taskRunOps.start.run({ job_id: jobId, channel, mode: runMode, started_at: startedAt });
-    runId = runResult.lastInsertRowid as number;
     const screenCandidates = channel === 'boss' && runMode === 'execute'
       ? latestScreenCandidatesForJob(channel, jobId)
       : [];
@@ -511,8 +534,37 @@ export async function runChannel(
 
     // 组装系统提示：SOUL + 职位事实 + Skill资产边界 + 平台协议 + 中层能力 + 记忆。
     // 具体装配由 harness manifest 统一声明，避免每条工作流私下拼自己的上下文。
-    const { assembly, systemPrompt } = buildHarnessSystemPrompt(channel, runMode, activeJob, jobId);
-    const taskPrompt = taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, screen, activeJob, screenGateContext, pausedRunContext);
+    const harnessPrompt = buildHarnessSystemPrompt(channel, runMode, activeJob, jobId);
+    assembly = harnessPrompt.assembly;
+    systemPrompt = harnessPrompt.systemPrompt;
+    taskPrompt = taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, screen, activeJob, screenGateContext, pausedRunContext);
+    try {
+      saveRunAssemblySnapshot({
+        runId,
+        jobId,
+        channel,
+        mode: runMode,
+        assembly,
+        systemPrompt,
+        taskPrompt,
+      });
+    } catch {
+      // Harness assembly 是观测证据；写入失败不能阻断真实招聘执行。
+    }
+
+    page = await createBrowserTarget(channel, runId, runMode);
+
+    if (opts.fromCurrent) {
+      // 就地接管：不跳转、不做登录态导航，直接从用户已开好的页面开始
+      const here = await currentTargetUrl(page).catch(() => '(未知)');
+      console.log(`[Orchestrator] 📍 就地接管当前页面（--here），不跳转：${here}`);
+      emitLog(`📍 就地接管当前页面：${here}`);
+    } else {
+      // 导航到对应招聘平台
+      await targetGoto(page, CHANNEL_URL[channel]);
+      await ensurePlatformSession(page, channel);
+    }
+
     try {
       saveRunAssemblySnapshot({
         runId,
@@ -596,9 +648,21 @@ export async function runChannel(
     console.error(`\n[Orchestrator] ✗ ${label} 失败: ${error}`);
     emitLog(`✗ ${label} 失败: ${error}`);
     emitStatus('idle');
-
-    if (runId == null) {
-      throw err;
+    await recordBrowserEnvironmentFailure(page, runId, runMode, error);
+    if (assembly && systemPrompt && taskPrompt) {
+      try {
+        saveRunAssemblySnapshot({
+          runId,
+          jobId,
+          channel,
+          mode: runMode,
+          assembly,
+          systemPrompt,
+          taskPrompt,
+        });
+      } catch {
+        // Harness assembly 是观测证据；写入失败不能阻断失败收口。
+      }
     }
 
     taskRunOps.complete.run({
