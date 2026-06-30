@@ -11,6 +11,7 @@ import { buildHarnessRunAssembly } from './harness/run-assembly';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
 import { listPendingAgentRunStates } from './agent-core/run-state-store';
+import { listStaleTaskRuns } from './agent-core/task-run-lifecycle';
 import { collectHarnessFailureReport } from './agent-core/failure-classifier';
 import { contractWritesForChannel } from './contracts';
 
@@ -127,7 +128,7 @@ function latestBossDryRunEvidence(): BossDryRunEvidence | null {
         (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id) AS toolCalls,
         (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id AND side_effect = 1) AS sideEffects
       FROM task_runs
-      WHERE channel = 'boss' AND mode = 'dry_run'
+      WHERE channel = 'boss' AND mode = 'dry_run' AND status = 'completed'
       ORDER BY id DESC
       LIMIT 1
     `).get() as BossDryRunEvidence | undefined ?? null;
@@ -171,7 +172,7 @@ function latestBossPrepareEvidence(): BossPrepareEvidence | null {
           )
         ) AS unsafeSuccessfulActions
       FROM task_runs
-      WHERE channel = 'boss' AND mode = 'prepare'
+      WHERE channel = 'boss' AND mode = 'prepare' AND status = 'completed'
       ORDER BY id DESC
       LIMIT 1
     `).get() as BossPrepareEvidence | undefined ?? null;
@@ -227,7 +228,7 @@ function latestBossScreenEvidence(): BossScreenEvidence | null {
           )
         ) AS unsafeSuccessfulActions
       FROM task_runs
-      WHERE channel = 'boss' AND mode = 'screen'
+      WHERE channel = 'boss' AND mode = 'screen' AND status = 'completed'
       ORDER BY id DESC
       LIMIT 1
     `).get() as BossScreenEvidence | undefined ?? null;
@@ -388,6 +389,16 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     pendingRunStates.length
       ? pendingRunStates.join(' | ')
       : 'no paused/failed run states in the last 24h',
+  ));
+
+  const staleTaskRuns = listStaleTaskRuns(360, 5);
+  checks.push(check(
+    'lower',
+    'Task run lifecycle',
+    staleTaskRuns.length ? 'warn' : 'pass',
+    staleTaskRuns.length
+      ? staleTaskRuns.map(run => `#${run.id} ${run.channel}/${run.mode} ${run.ageMinutes}m`).join(' | ')
+      : 'no stale running task_runs older than 6h',
   ));
 
   const compactionColumns = tableColumns('agent_context_compactions');
@@ -621,6 +632,9 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   }
   if (checks.some(c => c.name === 'Pending run states' && c.status === 'warn')) {
     nextSteps.push('有暂停/失败的 run state：先用 `hireseek core` 查看停在哪，再从当前真实页面继续。');
+  }
+  if (checks.some(c => c.name === 'Task run lifecycle' && c.status === 'warn')) {
+    nextSteps.push('有超时 running run：先用 `hireseek runs cleanup` 预览，再用 `hireseek runs cleanup --apply` 收口。');
   }
   if (checks.some(c => c.name === 'Live BOSS prepare' && c.status === 'warn')) {
     nextSteps.push('真实触达前运行 `hireseek run boss --here --prepare`，确认自动切职位和筛选提交安全通过。');

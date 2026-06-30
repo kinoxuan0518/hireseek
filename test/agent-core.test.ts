@@ -811,6 +811,55 @@ describe('agent core lower layer', () => {
     expect((loaded?.messages[3] as OpenAI.ChatCompletionToolMessageParam).tool_call_id).toBe('call_resume_1');
   });
 
+  it('detects and reconciles stale running task runs without deleting trace data', async () => {
+    const { db } = await import('../src/db');
+    const {
+      formatStaleTaskRuns,
+      listStaleTaskRuns,
+      reconcileStaleTaskRuns,
+    } = await import('../src/agent-core/task-run-lifecycle');
+
+    const oldStartedAt = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
+    const recentStartedAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const insert = db.prepare(`
+      INSERT INTO task_runs (job_id, channel, mode, started_at, status)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const staleId = Number(insert.run('Agent工程师', 'boss', 'screen', oldStartedAt, 'running').lastInsertRowid);
+    const recentId = Number(insert.run('Agent工程师', 'boss', 'screen', recentStartedAt, 'running').lastInsertRowid);
+    insert.run('Agent工程师', 'boss', 'screen', oldStartedAt, 'completed');
+    db.prepare(`
+      INSERT INTO agent_tool_calls (run_id, tool_call_id, tool_name, input_summary, output_summary, ok, side_effect, mode)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(staleId, 'call-stale', 'browser', '{}', '{}', 1, 1, 'screen');
+
+    const staleRuns = listStaleTaskRuns(360);
+    expect(staleRuns.map(run => run.id)).toContain(staleId);
+    expect(staleRuns.map(run => run.id)).not.toContain(recentId);
+    expect(formatStaleTaskRuns({ staleRuns, applied: false, updated: 0 })).toContain('预览');
+
+    const result = reconcileStaleTaskRuns({
+      maxAgeMinutes: 360,
+      apply: true,
+      nowIso: '2026-06-30T00:00:00.000Z',
+    });
+    expect(result.updated).toBeGreaterThanOrEqual(1);
+
+    const staleRow = db.prepare(`SELECT status, finished_at, error FROM task_runs WHERE id = ?`).get(staleId) as {
+      status: string;
+      finished_at: string;
+      error: string;
+    };
+    const recentRow = db.prepare(`SELECT status FROM task_runs WHERE id = ?`).get(recentId) as { status: string };
+    const traceCount = (db.prepare(`SELECT COUNT(*) AS n FROM agent_tool_calls WHERE run_id = ?`).get(staleId) as { n: number }).n;
+
+    expect(staleRow.status).toBe('abandoned');
+    expect(staleRow.finished_at).toBe('2026-06-30T00:00:00.000Z');
+    expect(staleRow.error).toContain('abandoned_after_');
+    expect(recentRow.status).toBe('running');
+    expect(traceCount).toBe(1);
+  });
+
   it('stores raw, episodic, and semantic memory without strategy interpretation', async () => {
     const {
       archiveMemory,
@@ -1233,6 +1282,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Live BOSS prepare');
     expect(text).toContain('Live BOSS screen');
     expect(text).toContain('Pending run states');
+    expect(text).toContain('Task run lifecycle');
     expect(text).toContain('Context compaction ledger');
     expect(text).toContain('Memory governance columns');
     expect(text).toContain('Harness failure classifier');

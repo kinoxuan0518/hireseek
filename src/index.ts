@@ -33,6 +33,7 @@ const USAGE = `
   hireseek verify              双轴独立质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)（--push 推送）
   hireseek core                Agent Core 状态：工具注册 / trace / session / memory
   hireseek runs [all|ID]       查看最近暂停/失败 run；all 显示最近全部；ID 显示详情
+  hireseek runs cleanup [--apply]  收口超时 running run（默认预览，不删除 trace）
   hireseek doctor              产品结构体检：下层基座 / 中层协议 / skill 边界 / 真实验收缺口
   hireseek protocols           中层平台协议：已产品化渠道 / 契约 / 动作策略 / 合规规则
   hireseek capabilities        中层招聘能力：触达话术 / 候选人判断 / 搜索策略
@@ -232,6 +233,17 @@ async function main(): Promise<void> {
     process.exit(0);
 
   } else if (command === 'runs' || command === 'run-state' || command === 'run-states') {
+    if (args[1] === 'cleanup' || args[1] === 'reconcile') {
+      const { reconcileStaleTaskRuns, formatStaleTaskRuns } = await import('./agent-core/task-run-lifecycle');
+      const apply = args.includes('--apply') || args.includes('apply');
+      const result = reconcileStaleTaskRuns({ apply });
+      console.log(formatStaleTaskRuns(result) + '\n');
+      if (!apply && result.staleRuns.length > 0) {
+        console.log(chalk.gray('确认这些 run 已无活跃进程后，加 --apply 标记为 abandoned。不会删除 trace/tool_calls。\n'));
+      }
+      db.close();
+      process.exit(0);
+    }
     const {
       formatRunStateDetail,
       formatRunStateList,
