@@ -14,6 +14,7 @@ import { listPendingAgentRunStates } from './agent-core/run-state-store';
 import { listInconsistentRunStates, listStaleExecutionEnvironments, listStaleTaskRuns } from './agent-core/task-run-lifecycle';
 import { collectSessionIntegrityReport } from './agent-core/session-integrity';
 import { collectHarnessFailureReport } from './agent-core/failure-classifier';
+import { latestRunAssemblySnapshots } from './agent-core/run-assembly-store';
 import { contractWritesForChannel } from './contracts';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
@@ -378,6 +379,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     'agent_run_states',
     'agent_execution_environments',
     'agent_context_compactions',
+    'agent_run_assemblies',
     'agent_sessions',
     'agent_messages',
     'agent_memory_raw',
@@ -389,7 +391,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     'lower',
     'Agent Core storage',
     missingAgentTables.length ? 'fail' : 'pass',
-    missingAgentTables.length ? `missing tables: ${missingAgentTables.join(', ')}` : 'tool trace, run state, execution environment, context compaction, session/message history, and memory tables exist',
+    missingAgentTables.length ? `missing tables: ${missingAgentTables.join(', ')}` : 'tool trace, run state, execution environment, run assembly, context compaction, session/message history, and memory tables exist',
   ));
 
   const sessionIntegrity = collectSessionIntegrityReport(20);
@@ -479,6 +481,31 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     missingCompactionColumns.length
       ? `missing columns: ${missingCompactionColumns.join(', ')}`
       : 'context compression events are auditable',
+  ));
+
+  const runAssemblyColumns = tableColumns('agent_run_assemblies');
+  const runAssemblyRequiredColumns = [
+    'run_id',
+    'provider',
+    'model',
+    'context_blocks_json',
+    'tools_json',
+    'boundaries_json',
+    'environments_json',
+    'system_prompt_hash',
+    'task_prompt_hash',
+  ];
+  const missingRunAssemblyColumns = runAssemblyRequiredColumns.filter(column => !runAssemblyColumns.has(column));
+  const recentRunAssemblies = latestRunAssemblySnapshots(3);
+  checks.push(check(
+    'lower',
+    'Run assembly ledger',
+    missingRunAssemblyColumns.length ? 'fail' : 'pass',
+    missingRunAssemblyColumns.length
+      ? `missing columns: ${missingRunAssemblyColumns.join(', ')}`
+      : recentRunAssemblies.length
+        ? `latest=${recentRunAssemblies.map(row => `#${row.runId} ${row.channel}/${row.mode}/${row.provider}`).join(' | ')}`
+        : 'run assembly table is ready; no run snapshots recorded yet',
   ));
 
   const memoryGovernanceColumns = ['inject_allowed', 'expires_at', 'archived_at'];

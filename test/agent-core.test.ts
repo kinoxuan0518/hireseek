@@ -1328,6 +1328,79 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Memory:');
   });
 
+  it('persists run assembly snapshots without storing prompt bodies', async () => {
+    const { db } = await import('../src/db');
+    const { buildHarnessRunAssembly } = await import('../src/harness/run-assembly');
+    const {
+      saveRunAssemblySnapshot,
+      loadRunAssemblySnapshot,
+    } = await import('../src/agent-core/run-assembly-store');
+    const runId = 17101;
+    const systemPrompt = '系统提示里包含岗位事实和私人上下文';
+    const taskPrompt = '任务提示里包含候选人操作要求';
+
+    db.prepare(`DELETE FROM agent_run_assemblies WHERE run_id = ?`).run(runId);
+    saveRunAssemblySnapshot({
+      runId,
+      jobId: 'agent-engineer',
+      channel: 'boss',
+      mode: 'screen',
+      assembly: buildHarnessRunAssembly('boss', 'screen'),
+      systemPrompt,
+      taskPrompt,
+      environments: [{
+        id: 'browser:chrome-applescript',
+        kind: 'browser',
+        label: '真实 Chrome',
+        controller: 'hireseek',
+        status: 'claimed',
+        mode: 'screen',
+        runId,
+        sessionId: null,
+        url: 'https://www.zhipin.com/web/chat/recommend',
+        title: '推荐牛人',
+        active: true,
+      }],
+    });
+
+    const snapshot = loadRunAssemblySnapshot(runId);
+    expect(snapshot).toMatchObject({
+      runId,
+      jobId: 'agent-engineer',
+      channel: 'boss',
+      mode: 'screen',
+      platformProtocol: 'boss-platform.v1',
+      contractName: 'boss-greeting.v1',
+      skillAssetMode: 'productized-fallback-only',
+      systemPromptChars: systemPrompt.length,
+      taskPromptChars: taskPrompt.length,
+    });
+    expect(snapshot?.tools.some(tool => tool.name === 'record_screened_candidate' && tool.declaredToModel)).toBe(true);
+    expect(snapshot?.boundaries).toContain('trace-every-tool-call');
+    expect(snapshot?.environments[0]).toMatchObject({
+      kind: 'browser',
+      status: 'claimed',
+      mode: 'screen',
+    });
+
+    const raw = db.prepare(`
+      SELECT context_blocks_json, tools_json, system_prompt_hash, task_prompt_hash
+      FROM agent_run_assemblies
+      WHERE run_id = ?
+    `).get(runId) as {
+      context_blocks_json: string;
+      tools_json: string;
+      system_prompt_hash: string;
+      task_prompt_hash: string;
+    };
+    expect(raw.context_blocks_json).toContain('runtime-context');
+    expect(raw.tools_json).toContain('record_screened_candidate');
+    expect(raw.system_prompt_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(raw.task_prompt_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(raw)).not.toContain(systemPrompt);
+    expect(JSON.stringify(raw)).not.toContain(taskPrompt);
+  });
+
   it('formats product doctor report without executing live browser workflows', async () => {
     const { collectDoctorReport, formatDoctorReport } = await import('../src/doctor');
     const { createToolRegistry } = await import('../src/agent-core/tool-registry');
@@ -1397,6 +1470,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Pending run states');
     expect(text).toContain('Task run lifecycle');
     expect(text).toContain('Context compaction ledger');
+    expect(text).toContain('Run assembly ledger');
     expect(text).toContain('Memory governance columns');
     expect(text).toContain('Harness failure classifier');
     expect(text).toContain('Harness run assembly');

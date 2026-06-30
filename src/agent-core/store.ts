@@ -72,6 +72,28 @@ export function ensureAgentCoreSchema(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_agent_context_compactions_session ON agent_context_compactions(session_id);
 
+    CREATE TABLE IF NOT EXISTS agent_run_assemblies (
+      run_id              INTEGER PRIMARY KEY,
+      job_id              TEXT NOT NULL,
+      channel             TEXT NOT NULL,
+      mode                TEXT NOT NULL,
+      provider            TEXT NOT NULL,
+      model               TEXT,
+      platform_protocol   TEXT,
+      contract_name       TEXT,
+      skill_asset_mode    TEXT,
+      context_blocks_json TEXT NOT NULL,
+      tools_json          TEXT NOT NULL,
+      boundaries_json     TEXT NOT NULL,
+      environments_json   TEXT NOT NULL,
+      system_prompt_hash  TEXT NOT NULL,
+      system_prompt_chars INTEGER NOT NULL,
+      task_prompt_hash    TEXT NOT NULL,
+      task_prompt_chars   INTEGER NOT NULL,
+      created_at          TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_run_assemblies_channel ON agent_run_assemblies(channel, mode);
+
     CREATE TABLE IF NOT EXISTS agent_sessions (
       id            TEXT PRIMARY KEY,
       title         TEXT NOT NULL,

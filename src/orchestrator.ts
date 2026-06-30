@@ -21,6 +21,7 @@ import { getPlatformProtocol } from './platform-protocols';
 import { buildHarnessSystemPrompt } from './harness/run-assembly';
 import type { RunSkillOptions } from './runners/interface';
 import { saveRunTrace } from './agent-core/run-trace-store';
+import { saveRunAssemblySnapshot } from './agent-core/run-assembly-store';
 import { formatRunStateForContext, latestPausedRunState, type AgentRunState } from './agent-core/run-state-store';
 
 export { channelSkillAssetContext } from './harness/run-assembly';
@@ -510,13 +511,27 @@ export async function runChannel(
 
     // 组装系统提示：SOUL + 职位事实 + Skill资产边界 + 平台协议 + 中层能力 + 记忆。
     // 具体装配由 harness manifest 统一声明，避免每条工作流私下拼自己的上下文。
-    const { systemPrompt } = buildHarnessSystemPrompt(channel, runMode, activeJob, jobId);
+    const { assembly, systemPrompt } = buildHarnessSystemPrompt(channel, runMode, activeJob, jobId);
+    const taskPrompt = taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, screen, activeJob, screenGateContext, pausedRunContext);
+    try {
+      saveRunAssemblySnapshot({
+        runId,
+        jobId,
+        channel,
+        mode: runMode,
+        assembly,
+        systemPrompt,
+        taskPrompt,
+      });
+    } catch {
+      // Harness assembly 是观测证据；写入失败不能阻断真实招聘执行。
+    }
 
     const runner = createRunner();
     const rawResult = await runner.runSkill(
       page,
       systemPrompt,
-      taskPromptForChannel(channel, label, !!opts.fromCurrent, dryRun, prepare, screen, activeJob, screenGateContext, pausedRunContext),
+      taskPrompt,
       opts.progress ?? ((msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))),
       runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun, prepare, screen, activeJob?.title, allowedContactNames),
     );
