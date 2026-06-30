@@ -29,6 +29,18 @@ export interface HarnessFailureInput {
   environmentKind?: string | null;
 }
 
+export type HarnessPolicyFailureSubcode =
+  | 'direct_navigation_blocked'
+  | 'missing_stage_id'
+  | 'unknown_stage_id'
+  | 'stage_gate_blocked'
+  | 'missing_stage_evidence'
+  | 'screen_contact_blocked'
+  | 'screen_whitelist_missing'
+  | 'contact_not_screened'
+  | 'completion_check_failed'
+  | 'other_policy_blocked';
+
 export interface HarnessFailureClassification {
   code: HarnessFailureCode;
   severity: HarnessFailureSeverity;
@@ -44,6 +56,7 @@ export interface HarnessFailureEvent extends HarnessFailureClassification {
   toolName?: string | null;
   mode?: string | null;
   stageId?: string | null;
+  diagnosticText?: string | null;
   createdAt: string;
 }
 
@@ -67,6 +80,7 @@ export type HarnessFailureLayer =
 
 export interface HarnessFailureReviewGroup {
   code: HarnessFailureCode;
+  subcode?: string;
   layer: HarnessFailureLayer;
   severity: HarnessFailureSeverity;
   count: number;
@@ -91,6 +105,23 @@ function textOf(input: HarnessFailureInput): string {
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
+}
+
+function policyFailureSubcode(input: HarnessFailureInput): HarnessPolicyFailureSubcode | undefined {
+  const text = textOf(input);
+  if (!includesAny(text, ['协议', 'policy', '阶段', 'stage', 'screen', '触达前', '正式触达', 'completion_check_failed'])) {
+    return undefined;
+  }
+  if (includesAny(text, ['直接跳转 url', 'directly jump', 'goto'])) return 'direct_navigation_blocked';
+  if (includesAny(text, ['动作携带 stage_id', 'missing stage_id'])) return 'missing_stage_id';
+  if (includesAny(text, ['未知 boss stage_id', 'unknown stage'])) return 'unknown_stage_id';
+  if (includesAny(text, ['阶段门禁', '之前必须先完成'])) return 'stage_gate_blocked';
+  if (includesAny(text, ['缺少协议阶段', '缺少阶段证据', '触达前缺少'])) return 'missing_stage_evidence';
+  if (includesAny(text, ['screen 模式请使用 record_screened_candidate', 'screen 模式', '禁止真实触达'])) return 'screen_contact_blocked';
+  if (includesAny(text, ['screen 候选人白名单', '缺少 screen'])) return 'screen_whitelist_missing';
+  if (includesAny(text, ['不在最近 screen 建议正式触达名单'])) return 'contact_not_screened';
+  if (includesAny(text, ['completion_check_failed', '产品协议验收未通过'])) return 'completion_check_failed';
+  return 'other_policy_blocked';
 }
 
 function includesAny(text: string, patterns: Array<string | RegExp>): boolean {
@@ -141,7 +172,7 @@ export function classifyHarnessFailure(
     return classification(input, source, 'mode_blocked', 'info', true, '当前运行模式拒绝了该动作。');
   }
 
-  if (includesAny(text, ['平台协议禁止', '产品协议', '协议阶段', '阶段门禁', 'blocked by platform protocol', 'completion_check_failed'])) {
+  if (includesAny(text, ['平台协议禁止', '产品协议', '协议禁止', 'boss 协议', '协议阶段', '阶段门禁', 'blocked by platform protocol', 'completion_check_failed'])) {
     return classification(input, source, 'policy_blocked', 'warn', true, '上层或中层协议拒绝了该动作。');
   }
 
@@ -209,6 +240,7 @@ export function collectHarnessFailureReport(limit = 8): HarnessFailureReport {
       toolName: row.tool_name,
       mode: row.mode,
       stageId: row.stage_id,
+      diagnosticText: [row.error, row.output_summary].filter(Boolean).join(' | ') || null,
       createdAt: row.created_at,
     });
   }
@@ -245,6 +277,7 @@ export function collectHarnessFailureReport(limit = 8): HarnessFailureReport {
       runId: row.run_id,
       sessionId: row.session_id,
       mode: row.mode,
+      diagnosticText: row.reason,
       createdAt: row.updated_at,
     });
   }
@@ -340,6 +373,33 @@ function metadataForFailure(code: HarnessFailureCode): {
   }
 }
 
+function nextActionForPolicySubcode(subcode: string | undefined): string | null {
+  switch (subcode) {
+    case 'direct_navigation_blocked':
+      return '模型试图用 URL 深链绕过站内流程；应强化任务提示和页面入口发现，不要放开 goto。';
+    case 'missing_stage_id':
+      return '有副作用浏览器动作缺 stage_id；应让模型在动作前先声明当前 stage，或在 runner 里对明显阶段做安全默认。';
+    case 'unknown_stage_id':
+      return '模型用了 manifest 外阶段；应检查 stage manifest 是否注入清楚，或把新阶段正式加入中层协议。';
+    case 'stage_gate_blocked':
+      return '模型跳过了前置阶段；应回看 run trace 是否真的缺前置证据，必要时补阶段恢复提示。';
+    case 'missing_stage_evidence':
+      return '触达记录前缺少前置阶段证据；应先跑/补 dom-probe 和 candidate-screen，而不是放松 record_contacted。';
+    case 'screen_contact_blocked':
+      return 'screen 模式误调用正式触达工具；应检查工具披露和 screen 提示，screen 只能写 screened candidate。';
+    case 'screen_whitelist_missing':
+      return '正式触达缺少 screen 白名单；应先完成 screen 验收，或明确关闭白名单闸门的产品决策。';
+    case 'contact_not_screened':
+      return '候选人不在最近 screen 建议触达名单；应复查 screen 结果或先补结构化 screen 记录。';
+    case 'completion_check_failed':
+      return '模型想提前结束但协议验收缺项；应用缺项反馈继续执行，而不是接受文字总结。';
+    case 'other_policy_blocked':
+      return '保留原始错误并补充更细的协议诊断规则；当前只能定位到中层协议拦截。';
+    default:
+      return null;
+  }
+}
+
 function severityRank(severity: HarnessFailureSeverity): number {
   return severity === 'fail' ? 2 : severity === 'warn' ? 1 : 0;
 }
@@ -358,14 +418,24 @@ function eventEvidence(event: HarnessFailureEvent): string {
 
 export function collectHarnessFailureReview(limit = 20): HarnessFailureReview {
   const report = collectHarnessFailureReport(limit);
-  const groups = new Map<HarnessFailureCode, HarnessFailureReviewGroup>();
+  const groups = new Map<string, HarnessFailureReviewGroup>();
 
   for (const event of report.recent) {
     const meta = metadataForFailure(event.code);
-    const existing = groups.get(event.code);
+    const subcode = event.code === 'policy_blocked'
+      ? policyFailureSubcode({
+        toolName: event.toolName,
+        mode: event.mode,
+        stageId: event.stageId,
+        error: event.diagnosticText ?? event.reason,
+      })
+      : undefined;
+    const key = `${event.code}:${subcode ?? ''}`;
+    const existing = groups.get(key);
     if (!existing) {
-      groups.set(event.code, {
+      groups.set(key, {
         code: event.code,
+        subcode,
         layer: meta.layer,
         severity: event.severity,
         count: 1,
@@ -374,7 +444,7 @@ export function collectHarnessFailureReview(limit = 20): HarnessFailureReview {
         runIds: event.runId == null ? [] : [event.runId],
         latestAt: event.createdAt,
         reason: event.reason,
-        nextAction: meta.nextAction,
+        nextAction: nextActionForPolicySubcode(subcode) ?? meta.nextAction,
         evidence: [eventEvidence(event)],
       });
       continue;
@@ -411,14 +481,18 @@ export function formatHarnessFailureReview(review: HarnessFailureReview): string
     ].join('\n');
   }
 
+  const topCode = review.topPriority?.subcode
+    ? `${review.topPriority.code}/${review.topPriority.subcode}`
+    : review.topPriority?.code;
   const top = review.topPriority
-    ? `${review.topPriority.code} / ${review.topPriority.layer} / ${review.topPriority.count} 次`
+    ? `${topCode} / ${review.topPriority.layer} / ${review.topPriority.count} 次`
     : '无';
   const rows = review.groups.map(group => {
     const runs = group.runIds.length ? ` runs=${group.runIds.slice(0, 6).map(id => `#${id}`).join(',')}` : '';
     const sources = group.sources.join(',');
+    const code = group.subcode ? `${group.code}/${group.subcode}` : group.code;
     return [
-      `- ${group.code}: ${group.count} 次, severity=${group.severity}, layer=${group.layer}, retryable=${group.retryable}, sources=${sources}${runs}`,
+      `- ${code}: ${group.count} 次, severity=${group.severity}, layer=${group.layer}, retryable=${group.retryable}, sources=${sources}${runs}`,
       `  原因：${group.reason}`,
       `  下一步：${group.nextAction}`,
       `  证据：${group.evidence.join(' | ')}`,

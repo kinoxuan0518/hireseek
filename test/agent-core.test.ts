@@ -383,22 +383,34 @@ describe('agent core lower layer', () => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(606, 'failure-classifier', 'tc-external', 'browser', '{}', 'blocked', 0, 'user is using Chrome', 1, 'execute', 'candidate-screen');
     db.prepare(`
+      INSERT INTO agent_tool_calls (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, error, side_effect, mode, stage_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(606, 'failure-classifier', 'tc-goto', 'browser', '{"action":"goto"}', 'blocked', 0, 'BOSS 协议禁止在任务执行中直接跳转 URL', 1, 'prepare', 'job-positioning');
+    db.prepare(`
+      INSERT INTO agent_tool_calls (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, error, side_effect, mode, stage_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(606, 'failure-classifier', 'tc-stage-evidence', 'record_contacted', '{}', 'blocked', 0, '登记失败：触达前缺少协议阶段 dom-probe, candidate-screen 的运行证据。', 0, 'execute', 'single-contact');
+    db.prepare(`
       INSERT INTO agent_execution_environments (id, kind, label, controller, status, mode, run_id, session_id, reason)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run('browser:classifier-test', 'browser', '真实 Chrome', 'user', 'blocked', 'execute', 606, 'failure-classifier', 'user is using Chrome');
 
-    const report = collectHarnessFailureReport(6);
+    const report = collectHarnessFailureReport(12);
     expect(report.byCode.unknown_tool).toBeGreaterThanOrEqual(1);
     expect(report.byCode.external_control).toBeGreaterThanOrEqual(1);
     expect(formatHarnessFailureReport(report)).toContain('external_control');
 
-    const review = collectHarnessFailureReview(6);
+    const review = collectHarnessFailureReview(12);
     expect(review.groups.some(group => group.code === 'unknown_tool' && group.layer === 'tool_registry')).toBe(true);
     expect(review.groups.some(group => group.code === 'external_control' && group.layer === 'execution_environment')).toBe(true);
+    expect(review.groups.some(group => group.code === 'policy_blocked' && group.subcode === 'direct_navigation_blocked')).toBe(true);
+    expect(review.groups.some(group => group.code === 'policy_blocked' && group.subcode === 'missing_stage_evidence')).toBe(true);
     const reviewText = formatHarnessFailureReview(review);
     expect(reviewText).toContain('HireSeek Harness Failure Review');
     expect(reviewText).toContain('下一步');
     expect(reviewText).toContain('tool_registry');
+    expect(reviewText).toContain('policy_blocked/direct_navigation_blocked');
+    expect(reviewText).toContain('policy_blocked/missing_stage_evidence');
   });
 
   it('records grounded context compaction events', async () => {
