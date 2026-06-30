@@ -234,11 +234,22 @@ async function main(): Promise<void> {
 
   } else if (command === 'runs' || command === 'run-state' || command === 'run-states') {
     if (args[1] === 'cleanup' || args[1] === 'reconcile') {
-      const { reconcileStaleTaskRuns, formatStaleTaskRuns } = await import('./agent-core/task-run-lifecycle');
+      const {
+        formatInconsistentRunStates,
+        formatStaleTaskRuns,
+        formatStaleExecutionEnvironments,
+        reconcileInconsistentRunStates,
+        reconcileStaleExecutionEnvironments,
+        reconcileStaleTaskRuns,
+      } = await import('./agent-core/task-run-lifecycle');
       const apply = args.includes('--apply') || args.includes('apply');
-      const result = reconcileStaleTaskRuns({ apply });
-      console.log(formatStaleTaskRuns(result) + '\n');
-      if (!apply && result.staleRuns.length > 0) {
+      const stale = reconcileStaleTaskRuns({ apply });
+      const inconsistent = reconcileInconsistentRunStates({ apply });
+      const environments = reconcileStaleExecutionEnvironments({ apply });
+      console.log(formatStaleTaskRuns(stale) + '\n');
+      console.log(formatInconsistentRunStates(inconsistent) + '\n');
+      console.log(formatStaleExecutionEnvironments(environments) + '\n');
+      if (!apply && (stale.staleRuns.length > 0 || inconsistent.inconsistent.length > 0 || environments.stale.length > 0)) {
         console.log(chalk.gray('确认这些 run 已无活跃进程后，加 --apply 标记为 abandoned。不会删除 trace/tool_calls。\n'));
       }
       db.close();

@@ -1,7 +1,7 @@
 import { db } from '../db';
 import './store';
 
-export type AgentRunStatus = 'running' | 'paused' | 'completed' | 'failed';
+export type AgentRunStatus = 'running' | 'paused' | 'completed' | 'failed' | 'abandoned';
 
 export interface AgentRunState {
   runId: number;

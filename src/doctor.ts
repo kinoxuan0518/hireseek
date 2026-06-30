@@ -11,7 +11,8 @@ import { buildHarnessRunAssembly } from './harness/run-assembly';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
 import { listPendingAgentRunStates } from './agent-core/run-state-store';
-import { listStaleTaskRuns } from './agent-core/task-run-lifecycle';
+import { listInconsistentRunStates, listStaleExecutionEnvironments, listStaleTaskRuns } from './agent-core/task-run-lifecycle';
+import { collectSessionIntegrityReport } from './agent-core/session-integrity';
 import { collectHarnessFailureReport } from './agent-core/failure-classifier';
 import { contractWritesForChannel } from './contracts';
 
@@ -351,6 +352,16 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     missingAgentTables.length ? `missing tables: ${missingAgentTables.join(', ')}` : 'tool trace, run state, execution environment, context compaction, session/message history, and memory tables exist',
   ));
 
+  const sessionIntegrity = collectSessionIntegrityReport(20);
+  checks.push(check(
+    'lower',
+    'Session history integrity',
+    sessionIntegrity.issues.length ? 'warn' : 'pass',
+    sessionIntegrity.issues.length
+      ? `${sessionIntegrity.issues.length} issue(s): ${sessionIntegrity.issues.slice(0, 3).map(issue => `${issue.sessionId}:${issue.problem}`).join(', ')}`
+      : `checked=${sessionIntegrity.checkedSessions}, resumable=${sessionIntegrity.resumableSessions}, messages=${sessionIntegrity.totalMessages}`,
+  ));
+
   const toolColumns = tableColumns('agent_tool_calls');
   checks.push(check(
     'lower',
@@ -392,13 +403,23 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   ));
 
   const staleTaskRuns = listStaleTaskRuns(360, 5);
+  const inconsistentRunStates = listInconsistentRunStates(5);
+  const staleExecutionEnvironments = listStaleExecutionEnvironments(5);
   checks.push(check(
     'lower',
     'Task run lifecycle',
-    staleTaskRuns.length ? 'warn' : 'pass',
-    staleTaskRuns.length
-      ? staleTaskRuns.map(run => `#${run.id} ${run.channel}/${run.mode} ${run.ageMinutes}m`).join(' | ')
-      : 'no stale running task_runs older than 6h',
+    staleTaskRuns.length || inconsistentRunStates.length || staleExecutionEnvironments.length ? 'warn' : 'pass',
+    [
+      staleTaskRuns.length
+        ? `stale=${staleTaskRuns.map(run => `#${run.id} ${run.channel}/${run.mode} ${run.ageMinutes}m`).join(' | ')}`
+        : 'no stale running task_runs older than 6h',
+      inconsistentRunStates.length
+        ? `inconsistent=${inconsistentRunStates.map(row => `#${row.runId} task=${row.taskStatus ?? 'missing'} state=${row.runStateStatus}`).join(' | ')}`
+        : 'no running run_states for closed task_runs',
+      staleExecutionEnvironments.length
+        ? `env=${staleExecutionEnvironments.map(env => `${env.id} run#${env.runId ?? 'none'} task=${env.taskStatus ?? 'missing'}`).join(' | ')}`
+        : 'no active environments for closed task_runs',
+    ].join('; '),
   ));
 
   const compactionColumns = tableColumns('agent_context_compactions');

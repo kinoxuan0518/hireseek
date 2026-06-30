@@ -775,6 +775,59 @@ describe('agent core lower layer', () => {
     expect(row.message_count).toBe(4);
   });
 
+  it('audits stored session history before resume', async () => {
+    const { saveAgentSessionMessages } = await import('../src/agent-core/session-store');
+    const {
+      collectSessionIntegrityReport,
+      formatSessionIntegrityReport,
+    } = await import('../src/agent-core/session-integrity');
+    const { db } = await import('../src/db');
+
+    saveAgentSessionMessages({
+      sessionId: 'session-integrity-good',
+      title: 'good session',
+      source: 'test',
+      messages: [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'hello' },
+      ],
+    });
+
+    db.prepare(`
+      INSERT INTO agent_sessions (id, title, source, created_at, updated_at, message_count)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('session-integrity-bad', 'bad session', 'test', '2026-06-30T00:00:00.000Z', '2026-06-30T00:00:00.000Z', 2);
+    db.prepare(`
+      INSERT INTO agent_messages (session_id, seq, role, content, raw_json)
+      VALUES (?, ?, ?, ?, ?)
+    `).run('session-integrity-bad', 1, 'assistant', '', JSON.stringify({
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'missing-tool-result',
+          type: 'function',
+          function: { name: 'run_sourcing', arguments: '{}' },
+        },
+      ],
+    }));
+
+    const report = collectSessionIntegrityReport(50);
+    expect(report.resumableSessions).toBeGreaterThan(0);
+    expect(report.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sessionId: 'session-integrity-bad',
+        problem: 'message_count_mismatch',
+      }),
+      expect.objectContaining({
+        sessionId: 'session-integrity-bad',
+        problem: 'tool_history_needs_repair',
+      }),
+    ]));
+    expect(formatSessionIntegrityReport(report)).toContain('Session integrity');
+  });
+
   it('lists and resumes agent-core-only sessions', async () => {
     const { saveAgentSessionMessages } = await import('../src/agent-core/session-store');
     const { listSessions, loadSession } = await import('../src/remote-session');
@@ -814,7 +867,11 @@ describe('agent core lower layer', () => {
   it('detects and reconciles stale running task runs without deleting trace data', async () => {
     const { db } = await import('../src/db');
     const {
+      listInconsistentRunStates,
+      listStaleExecutionEnvironments,
       formatStaleTaskRuns,
+      reconcileInconsistentRunStates,
+      reconcileStaleExecutionEnvironments,
       listStaleTaskRuns,
       reconcileStaleTaskRuns,
     } = await import('../src/agent-core/task-run-lifecycle');
@@ -827,7 +884,20 @@ describe('agent core lower layer', () => {
     `);
     const staleId = Number(insert.run('Agent工程师', 'boss', 'screen', oldStartedAt, 'running').lastInsertRowid);
     const recentId = Number(insert.run('Agent工程师', 'boss', 'screen', recentStartedAt, 'running').lastInsertRowid);
-    insert.run('Agent工程师', 'boss', 'screen', oldStartedAt, 'completed');
+    const closedId = Number(insert.run('Agent工程师', 'boss', 'screen', oldStartedAt, 'abandoned').lastInsertRowid);
+    db.prepare(`
+      INSERT INTO agent_run_states (run_id, status, phase)
+      VALUES (?, ?, ?)
+    `).run(staleId, 'running', 'browser_action');
+    db.prepare(`
+      INSERT INTO agent_run_states (run_id, status, phase)
+      VALUES (?, ?, ?)
+    `).run(closedId, 'running', 'browser_action');
+    db.prepare(`
+      INSERT INTO agent_execution_environments
+        (id, kind, label, controller, status, mode, run_id, active, reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(`env-closed-${closedId}`, 'browser', 'test chrome', 'hireseek', 'claimed', 'screen', closedId, 1, 'still claimed');
     db.prepare(`
       INSERT INTO agent_tool_calls (run_id, tool_call_id, tool_name, input_summary, output_summary, ok, side_effect, mode)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -836,7 +906,7 @@ describe('agent core lower layer', () => {
     const staleRuns = listStaleTaskRuns(360);
     expect(staleRuns.map(run => run.id)).toContain(staleId);
     expect(staleRuns.map(run => run.id)).not.toContain(recentId);
-    expect(formatStaleTaskRuns({ staleRuns, applied: false, updated: 0 })).toContain('预览');
+    expect(formatStaleTaskRuns({ staleRuns, applied: false, updated: 0, runStatesUpdated: 0 })).toContain('预览');
 
     const result = reconcileStaleTaskRuns({
       maxAgeMinutes: 360,
@@ -844,11 +914,16 @@ describe('agent core lower layer', () => {
       nowIso: '2026-06-30T00:00:00.000Z',
     });
     expect(result.updated).toBeGreaterThanOrEqual(1);
+    expect(result.runStatesUpdated).toBeGreaterThanOrEqual(1);
 
     const staleRow = db.prepare(`SELECT status, finished_at, error FROM task_runs WHERE id = ?`).get(staleId) as {
       status: string;
       finished_at: string;
       error: string;
+    };
+    const staleRunState = db.prepare(`SELECT status, phase FROM agent_run_states WHERE run_id = ?`).get(staleId) as {
+      status: string;
+      phase: string;
     };
     const recentRow = db.prepare(`SELECT status FROM task_runs WHERE id = ?`).get(recentId) as { status: string };
     const traceCount = (db.prepare(`SELECT COUNT(*) AS n FROM agent_tool_calls WHERE run_id = ?`).get(staleId) as { n: number }).n;
@@ -856,8 +931,32 @@ describe('agent core lower layer', () => {
     expect(staleRow.status).toBe('abandoned');
     expect(staleRow.finished_at).toBe('2026-06-30T00:00:00.000Z');
     expect(staleRow.error).toContain('abandoned_after_');
+    expect(staleRunState.status).toBe('abandoned');
+    expect(staleRunState.phase).toBe('task_run_abandoned');
     expect(recentRow.status).toBe('running');
     expect(traceCount).toBe(1);
+
+    expect(listInconsistentRunStates(20).map(row => row.runId)).toContain(closedId);
+    const fixed = reconcileInconsistentRunStates({ apply: true });
+    expect(fixed.updated).toBeGreaterThanOrEqual(1);
+    const closedRunState = db.prepare(`SELECT status, phase FROM agent_run_states WHERE run_id = ?`).get(closedId) as {
+      status: string;
+      phase: string;
+    };
+    expect(closedRunState.status).toBe('abandoned');
+    expect(closedRunState.phase).toBe('task_run_reconciled');
+
+    expect(listStaleExecutionEnvironments(20).map(env => env.id)).toContain(`env-closed-${closedId}`);
+    const released = reconcileStaleExecutionEnvironments({ apply: true });
+    expect(released.updated).toBeGreaterThanOrEqual(1);
+    const envRow = db.prepare(`SELECT status, active, reason FROM agent_execution_environments WHERE id = ?`).get(`env-closed-${closedId}`) as {
+      status: string;
+      active: number;
+      reason: string;
+    };
+    expect(envRow.status).toBe('released');
+    expect(envRow.active).toBe(0);
+    expect(envRow.reason).toContain('environment_released_after_task_status=abandoned');
   });
 
   it('stores raw, episodic, and semantic memory without strategy interpretation', async () => {
@@ -1287,6 +1386,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Memory governance columns');
     expect(text).toContain('Harness failure classifier');
     expect(text).toContain('Harness run assembly');
+    expect(text).toContain('Session history integrity');
     expect(text).toContain('Platform protocol manifest');
     expect(text).toContain('Capability manifest');
     expect(text).toContain('Skill asset manifest');

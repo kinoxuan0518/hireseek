@@ -4,6 +4,7 @@ import { createRuntimeContext } from './runtime-context';
 import { formatExecutionEnvironmentLine, listExecutionEnvironments, type ExecutionEnvironmentState } from './environment-store';
 import { collectHarnessFailureReport, formatHarnessFailureReport, type HarnessFailureReport } from './failure-classifier';
 import { listAgentRunStates, type AgentRunState } from './run-state-store';
+import { collectSessionIntegrityReport, formatSessionIntegrityReport, type SessionIntegrityReport } from './session-integrity';
 import type { ToolRegistry } from './tool-registry';
 import './store';
 
@@ -46,6 +47,7 @@ export interface CoreStatus {
     total: number;
     messages: number;
     recent: Array<{ id: string; title: string; source: string; message_count: number; updated_at: string }>;
+    integrity: SessionIntegrityReport;
   };
   memory: {
     raw: number;
@@ -110,6 +112,7 @@ export function collectCoreStatus(registry?: ToolRegistry): CoreStatus {
         ORDER BY updated_at DESC
         LIMIT 5
       `).all() as CoreStatus['sessions']['recent'],
+      integrity: collectSessionIntegrityReport(20),
     },
     memory: {
       raw: count(`SELECT COUNT(*) AS n FROM agent_memory_raw`),
@@ -207,6 +210,7 @@ export function formatCoreStatus(status: CoreStatus): string {
     '',
     `Sessions: ${status.sessions.total} sessions, ${status.sessions.messages} messages`,
     `Recent sessions:\n${recentSessions}`,
+    formatSessionIntegrityReport(status.sessions.integrity),
     '',
     `Memory: raw=${status.memory.raw}, episodic=${status.memory.episodic}, semantic=${status.memory.semantic}, injectable=${status.memory.injectable}, archived=${status.memory.archived}`,
   ].join('\n');
