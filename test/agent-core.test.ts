@@ -1386,6 +1386,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Memory governance columns');
     expect(text).toContain('Harness failure classifier');
     expect(text).toContain('Harness run assembly');
+    expect(text).toContain('Chat harness assembly');
     expect(text).toContain('Session history integrity');
     expect(text).toContain('Platform protocol manifest');
     expect(text).toContain('Capability manifest');

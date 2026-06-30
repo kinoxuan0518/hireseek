@@ -22,7 +22,7 @@ import {
 import { loadSkill } from '../src/skills/loader';
 import { channelSkillAssetContext, runSkillOptionsForChannel } from '../src/orchestrator';
 import { buildSkillAssetManifest, formatSkillAssetManifest } from '../src/skills/skill-asset-manifest';
-import { buildHarnessRunAssembly, formatHarnessRunAssembly } from '../src/harness/run-assembly';
+import { buildChatHarnessContext, buildHarnessRunAssembly, formatHarnessRunAssembly } from '../src/harness/run-assembly';
 import { domRunnerToolNamesForMode } from '../src/runners/dom-runner';
 
 describe('boss platform protocol middle layer', () => {
@@ -498,5 +498,18 @@ describe('boss platform protocol middle layer', () => {
     expect(withheldTools).toContain('record_contacted');
     expect(formatHarnessRunAssembly('boss', 'screen')).toContain('HireSeek Harness Run Assembly');
     expect(formatHarnessRunAssembly('boss', 'screen')).toContain('record_screened_candidate: declared');
+  });
+
+  it('keeps chat mode aligned with product protocols and skill asset boundaries', () => {
+    const context = buildChatHarnessContext();
+
+    expect(context).toContain('HireSeek Chat Harness Assembly');
+    expect(context).toContain('boss-platform.v1');
+    expect(context).toContain('boss-greeting.v1');
+    expect(context).toContain('outreach-voice.v1');
+    expect(context).toContain('mode=productized-fallback-only');
+    expect(context).toContain('platform-protocol-overrides-legacy-skill');
+    expect(context).toContain('capability-protocol-overrides-duplicated-skill-knowledge');
+    expect(context).not.toContain('/Users/');
   });
 });

@@ -1,7 +1,7 @@
 import { config } from '../config';
 import { buildMemoryContext } from '../memory';
 import { buildRecruitingCapabilityContext, buildRecruitingCapabilityManifest } from '../capabilities';
-import { getPlatformProtocol } from '../platform-protocols';
+import { buildPlatformProtocolManifest, getPlatformProtocol } from '../platform-protocols';
 import { DOM_RUNNER_TOOL_REGISTRY, domRunnerToolNamesForMode } from '../runners/dom-runner';
 import { jobToPrompt, loadSkill, loadWorkspaceFile, type JobConfig } from '../skills/loader';
 import { buildSkillAssetManifest } from '../skills/skill-asset-manifest';
@@ -199,5 +199,48 @@ export function formatHarnessRunAssembly(channel: Channel, mode: HarnessRunMode)
     ...toolLines,
     '',
     `Boundaries: ${assembly.boundaries.join(', ')}`,
+  ].join('\n');
+}
+
+export function buildChatHarnessContext(): string {
+  const protocols = buildPlatformProtocolManifest();
+  const capabilities = buildRecruitingCapabilityManifest();
+  const skillAssets = buildSkillAssetManifest();
+  const protocolLines = protocols.length
+    ? protocols.map(entry => (
+      `- ${entry.channel}: ${entry.name}, contract=${entry.contractName ?? 'none'}, stages=${entry.stageCount}, writes=${entry.writes.join(', ') || 'none'}`
+    ))
+    : ['- none'];
+  const capabilityLines = capabilities.length
+    ? capabilities.map(entry => (
+      `- ${entry.id}, kind=${entry.kind}, appliesTo=${entry.appliesTo === 'all' ? 'all' : entry.appliesTo.join(', ')}, writes=${entry.contract.writes.join(', ') || 'none'}`
+    ))
+    : ['- none'];
+  const skillLines = skillAssets.map(entry => (
+    `- ${entry.channel}: mode=${entry.mode}, productProtocol=${entry.productProtocol ?? 'none'}, active=${entry.activeAsset ? 'yes' : 'no'}`
+  ));
+
+  return [
+    '# HireSeek Chat Harness Assembly',
+    '',
+    '对话模式也必须遵守同一套产品装配边界；不要因为是在聊天里，就让外部 skill 或临时提示覆盖产品协议。',
+    '',
+    '## 平台协议',
+    ...protocolLines,
+    '',
+    '## 中层招聘能力',
+    ...capabilityLines,
+    '',
+    '## 外部 Skill 资产边界',
+    ...skillLines,
+    '',
+    '## 不变量',
+    '- code-guards-override-prompts',
+    '- platform-protocol-overrides-legacy-skill',
+    '- capability-protocol-overrides-duplicated-skill-knowledge',
+    '- structured-tool-results-required',
+    '- user-current-instructions-override-stale-memory',
+    '',
+    '当用户要求执行已产品化渠道任务时，优先调用产品工具和平台协议；只有未覆盖场景、用户明确点名 skill、或需要历史页面经验时，才把外部 skill 作为 fallback/知识素材。'
   ].join('\n');
 }

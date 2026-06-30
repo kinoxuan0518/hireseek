@@ -7,7 +7,7 @@ import { buildPlatformProtocolManifest, listPlatformProtocols } from './platform
 import { buildRecruitingCapabilityManifest, listRecruitingCapabilities } from './capabilities';
 import { listClaudeSkills } from './skills/claude-skills';
 import { buildSkillAssetManifest } from './skills/skill-asset-manifest';
-import { buildHarnessRunAssembly } from './harness/run-assembly';
+import { buildChatHarnessContext, buildHarnessRunAssembly } from './harness/run-assembly';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
 import { listPendingAgentRunStates } from './agent-core/run-state-store';
@@ -331,6 +331,22 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     harnessAssemblyProblems.length === 0
       ? 'mode-specific tool/context assembly is explicit for BOSS dry_run/prepare/screen/execute'
       : harnessAssemblyProblems.join('; '),
+  ));
+
+  const chatHarnessContext = buildChatHarnessContext();
+  const chatHarnessProblems = [
+    chatHarnessContext.includes('HireSeek Chat Harness Assembly') ? '' : 'missing chat harness header',
+    chatHarnessContext.includes('boss-platform.v1') ? '' : 'missing boss platform protocol',
+    chatHarnessContext.includes('platform-protocol-overrides-legacy-skill') ? '' : 'missing protocol/skill boundary',
+    chatHarnessContext.includes('mode=productized-fallback-only') ? '' : 'missing productized fallback skill mode',
+  ].filter(Boolean);
+  checks.push(check(
+    'lower',
+    'Chat harness assembly',
+    chatHarnessProblems.length === 0 ? 'pass' : 'fail',
+    chatHarnessProblems.length === 0
+      ? 'chat prompt includes platform protocol, capability, and skill asset boundaries'
+      : chatHarnessProblems.join('; '),
   ));
 
   const agentTables = [

@@ -29,6 +29,7 @@ import { recordRejectedToolCall, recordToolCall } from './agent-core/trace';
 import { offloadToolResultForContext } from './agent-core/tool-output-store';
 import { buildRecruitingCapabilityContext } from './capabilities';
 import { createRuntimeContext } from './agent-core/runtime-context';
+import { buildChatHarnessContext } from './harness/run-assembly';
 
 /**
  * 如果配置了 MCP 服务器，则初始化它们
@@ -2195,6 +2196,7 @@ export function buildSystemPrompt(): string {
   const capabilities = buildRecruitingCapabilityContext({
     includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
   });
+  const harnessCtx = buildChatHarnessContext();
   const memory   = job ? buildMemoryContext('boss', runtime.activeJobId) : '';
   const convMem  = job ? buildConversationMemory(runtime.activeJobId) : '';
 
@@ -2268,7 +2270,7 @@ export function buildSystemPrompt(): string {
     // 技能目录不可用时跳过
   }
 
-  return [soul, jobCtx, capabilities, stateCtx, memory, convMem, autoMemory, skillsCtx, chatGuide].filter(Boolean).join('\n\n---\n\n');
+  return [soul, jobCtx, harnessCtx, capabilities, stateCtx, memory, convMem, autoMemory, skillsCtx, chatGuide].filter(Boolean).join('\n\n---\n\n');
 }
 
 // ── 对话记忆保存 ─────────────────────────────────────────
