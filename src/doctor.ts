@@ -349,6 +349,30 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
       : chatHarnessProblems.join('; '),
   ));
 
+  const chatSystemPrompt = (() => {
+    try {
+      const { buildSystemPrompt } = require('./chat') as typeof import('./chat');
+      return buildSystemPrompt();
+    } catch {
+      return '';
+    }
+  })();
+  const enabledMemoryChannels = runtime.enabledChannels.map(channel => channel.channel);
+  const chatMemoryProblems = [
+    chatSystemPrompt.includes('多渠道记忆上下文') ? '' : 'missing multi-channel memory context',
+    ...enabledMemoryChannels.map(channel => (
+      chatSystemPrompt.includes(`今日进度（${channel}）`) ? '' : `missing ${channel} memory`
+    )),
+  ].filter(Boolean);
+  checks.push(check(
+    'lower',
+    'Chat memory assembly',
+    chatMemoryProblems.length === 0 ? 'pass' : 'warn',
+    chatMemoryProblems.length === 0
+      ? 'chat prompt includes memory for enabled channels'
+      : chatMemoryProblems.join('; '),
+  ));
+
   const agentTables = [
     'agent_tool_calls',
     'agent_run_states',

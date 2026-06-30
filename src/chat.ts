@@ -12,7 +12,7 @@ import chalk from 'chalk';
 import yaml from 'js-yaml';
 import { config } from './config';
 import { loadWorkspaceFile, jobToPrompt } from './skills/loader';
-import { buildMemoryContext, buildConversationMemory } from './memory';
+import { buildChatMemoryContext, buildConversationMemory } from './memory';
 import { candidateOps, conversationOps, db } from './db';
 import { runChannel, runJob, scanInbox } from './orchestrator';
 import { webSearch } from './search';
@@ -2197,7 +2197,10 @@ export function buildSystemPrompt(): string {
     includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
   });
   const harnessCtx = buildChatHarnessContext();
-  const memory   = job ? buildMemoryContext('boss', runtime.activeJobId) : '';
+  const memory = job ? buildChatMemoryContext({
+    jobId: runtime.activeJobId,
+    channels: runtime.enabledChannels.map(channel => channel.channel),
+  }) : '';
   const convMem  = job ? buildConversationMemory(runtime.activeJobId) : '';
 
   // Auto Memory - 跨会话记忆

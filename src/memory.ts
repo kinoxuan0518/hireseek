@@ -6,6 +6,11 @@
 import { db, reflectionOps, conversationOps } from './db';
 import type { Channel } from './types';
 
+export interface ChatMemoryContextInput {
+  jobId: string;
+  channels: Channel[];
+}
+
 interface ChannelStat {
   channel: string;
   total: number;
@@ -88,6 +93,20 @@ export function buildMemoryContext(channel: Channel, jobId: string): string {
   }
 
   return `# 记忆上下文\n\n${sections.join('\n\n')}`;
+}
+
+/** 对话模式注入所有启用渠道的运行记忆，避免把 BOSS 当成唯一默认上下文。 */
+export function buildChatMemoryContext(input: ChatMemoryContextInput): string {
+  const channels = Array.from(new Set(input.channels)).filter(Boolean);
+  if (channels.length === 0) return '';
+  const sections = channels.map(channel => buildMemoryContext(channel, input.jobId));
+  return [
+    '# 多渠道记忆上下文',
+    '',
+    `当前 active job 启用渠道：${channels.join(', ')}`,
+    '',
+    ...sections,
+  ].join('\n\n---\n\n');
 }
 
 /** 注入历史对话记忆，让 HireSeek 跨会话记住和用户的交流 */

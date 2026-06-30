@@ -828,6 +828,20 @@ describe('agent core lower layer', () => {
     expect(formatSessionIntegrityReport(report)).toContain('Session integrity');
   });
 
+  it('builds chat memory across enabled recruiting channels', async () => {
+    const { buildChatMemoryContext } = await import('../src/memory');
+
+    const context = buildChatMemoryContext({
+      jobId: 'Agent工程师',
+      channels: ['boss', 'maimai'],
+    });
+
+    expect(context).toContain('多渠道记忆上下文');
+    expect(context).toContain('当前 active job 启用渠道：boss, maimai');
+    expect(context).toContain('今日进度（boss）');
+    expect(context).toContain('今日进度（maimai）');
+  });
+
   it('lists and resumes agent-core-only sessions', async () => {
     const { saveAgentSessionMessages } = await import('../src/agent-core/session-store');
     const { listSessions, loadSession } = await import('../src/remote-session');
@@ -1387,6 +1401,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Harness failure classifier');
     expect(text).toContain('Harness run assembly');
     expect(text).toContain('Chat harness assembly');
+    expect(text).toContain('Chat memory assembly');
     expect(text).toContain('Session history integrity');
     expect(text).toContain('Platform protocol manifest');
     expect(text).toContain('Capability manifest');
