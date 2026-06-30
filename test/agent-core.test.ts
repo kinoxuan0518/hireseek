@@ -361,7 +361,9 @@ describe('agent core lower layer', () => {
     const {
       classifyHarnessFailure,
       collectHarnessFailureReport,
+      collectHarnessFailureReview,
       formatHarnessFailureReport,
+      formatHarnessFailureReview,
     } = await import('../src/agent-core/failure-classifier');
     const { db } = await import('../src/db');
 
@@ -389,6 +391,14 @@ describe('agent core lower layer', () => {
     expect(report.byCode.unknown_tool).toBeGreaterThanOrEqual(1);
     expect(report.byCode.external_control).toBeGreaterThanOrEqual(1);
     expect(formatHarnessFailureReport(report)).toContain('external_control');
+
+    const review = collectHarnessFailureReview(6);
+    expect(review.groups.some(group => group.code === 'unknown_tool' && group.layer === 'tool_registry')).toBe(true);
+    expect(review.groups.some(group => group.code === 'external_control' && group.layer === 'execution_environment')).toBe(true);
+    const reviewText = formatHarnessFailureReview(review);
+    expect(reviewText).toContain('HireSeek Harness Failure Review');
+    expect(reviewText).toContain('下一步');
+    expect(reviewText).toContain('tool_registry');
   });
 
   it('records grounded context compaction events', async () => {

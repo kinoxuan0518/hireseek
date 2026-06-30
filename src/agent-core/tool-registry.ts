@@ -89,6 +89,7 @@ export const CORE_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
   mcp_call_tool: { category: 'mcp', sideEffect: true, requiresApproval: true },
   mcp_read_resource: { category: 'mcp', sideEffect: false },
   core_status: { category: 'workflow', sideEffect: false },
+  harness_failure_review: { category: 'workflow', sideEffect: false },
   product_doctor: { category: 'workflow', sideEffect: false },
   platform_protocols: { category: 'workflow', sideEffect: false },
   recruiting_capabilities: { category: 'workflow', sideEffect: false },

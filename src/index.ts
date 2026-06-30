@@ -32,6 +32,7 @@ const USAGE = `
   hireseek hire-sync [--apply]  从飞书招聘/多维表格自动拉面试结果回流（默认 dry-run 预览）
   hireseek verify              双轴独立质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)（--push 推送）
   hireseek core                Agent Core 状态：工具注册 / trace / session / memory
+  hireseek failures            Harness 失败复盘：环境 / 工具 / 协议 / 登录态优先级
   hireseek runs [all|ID]       查看最近暂停/失败 run；all 显示最近全部；ID 显示详情
   hireseek runs cleanup [--apply]  收口超时 running run（默认预览，不删除 trace）
   hireseek doctor              产品结构体检：下层基座 / 中层协议 / skill 边界 / 真实验收缺口
@@ -229,6 +230,13 @@ async function main(): Promise<void> {
     const { CHAT_TOOL_REGISTRY } = await import('./chat');
     const { collectCoreStatus, formatCoreStatus } = await import('./agent-core/core-status');
     console.log(formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY)) + '\n');
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'failures' || command === 'failure' || command === 'harness-failures') {
+    const { collectHarnessFailureReview, formatHarnessFailureReview } = await import('./agent-core/failure-classifier');
+    const limitArg = args.slice(1).find(a => /^\d+$/.test(a));
+    console.log(formatHarnessFailureReview(collectHarnessFailureReview(limitArg ? Number(limitArg) : 20)) + '\n');
     db.close();
     process.exit(0);
 

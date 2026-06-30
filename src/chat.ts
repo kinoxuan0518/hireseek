@@ -1067,6 +1067,20 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'harness_failure_review',
+      description:
+        '只读复盘最近的 harness 失败信号：按执行环境、工具注册、工具契约、权限、run mode、平台协议、登录态等层归类，并给出下一步修复队列。',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: '最多分析多少条最近失败信号，默认 20' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'product_doctor',
       description:
         '只读体检 HireSeek 产品结构：下层 Agent Core、工具注册、数据库/trace/session/memory、BOSS 中层协议、招聘能力模块、外部 skill 边界与真实验收缺口。',
@@ -1203,6 +1217,7 @@ export function describeToolCall(name: string, args: Record<string, unknown>): s
     case 'remember':         return '🧠 记下偏好';
     case 'recall_memory':    return '🧠 回忆上下文';
     case 'core_status':      return '🧱 查看 Agent Core';
+    case 'harness_failure_review': return '🧯 复盘 Harness 失败';
     case 'product_doctor':   return '🩺 产品结构体检';
     case 'platform_protocols': return '🧩 查看平台协议';
     case 'recruiting_capabilities': return '🧩 查看招聘能力';
@@ -2100,6 +2115,14 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
       return formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY));
     }
 
+    case 'harness_failure_review': {
+      const {
+        collectHarnessFailureReview,
+        formatHarnessFailureReview,
+      } = await import('./agent-core/failure-classifier');
+      return formatHarnessFailureReview(collectHarnessFailureReview(Number(args.limit ?? 20)));
+    }
+
     case 'product_doctor': {
       const { collectDoctorReport, formatDoctorReport } = await import('./doctor');
       return formatDoctorReport(collectDoctorReport(CHAT_TOOL_REGISTRY));
@@ -2455,6 +2478,7 @@ export async function startChat(): Promise<void> {
     { cmd: '/status', desc: '模型 / 职位 / 浏览器状态' },
     { cmd: '/skills', desc: '技能列表' },
     { cmd: '/core', desc: 'Agent Core 状态（工具 / trace / memory / session）' },
+    { cmd: '/failures', desc: 'Harness 失败复盘（环境 / 工具 / 协议）' },
     { cmd: '/doctor', desc: '产品结构体检（下层 / 中层 / skill 边界）' },
     { cmd: '/protocols', desc: '中层平台协议（产品化能力）' },
     { cmd: '/capabilities', desc: '中层招聘能力（话术 / 判断 / 搜索）' },
@@ -2720,6 +2744,7 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /clear              清空对话上下文，重新开始'),
       chalk.gray('  /status             模型 / 职位 / 数据库状态'),
       chalk.gray('  /core               Agent Core 状态（工具 / trace / memory / session）'),
+      chalk.gray('  /failures           Harness 失败复盘（环境 / 工具 / 协议）'),
       chalk.gray('  /doctor             产品结构体检（下层 / 中层 / skill 边界）'),
       chalk.gray('  /protocols          中层平台协议（产品化能力）'),
       chalk.gray('  /capabilities       中层招聘能力（话术 / 判断 / 搜索）'),
@@ -2902,6 +2927,13 @@ export async function startChat(): Promise<void> {
       if (text === '/core') {
         const { collectCoreStatus, formatCoreStatus } = await import('./agent-core/core-status');
         console.log('\n' + formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY)) + '\n');
+        ask();
+        return;
+      }
+
+      if (text === '/failures') {
+        const { collectHarnessFailureReview, formatHarnessFailureReview } = await import('./agent-core/failure-classifier');
+        console.log('\n' + formatHarnessFailureReview(collectHarnessFailureReview(20)) + '\n');
         ask();
         return;
       }

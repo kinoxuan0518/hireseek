@@ -53,6 +53,39 @@ export interface HarnessFailureReport {
   recent: HarnessFailureEvent[];
 }
 
+export type HarnessFailureLayer =
+  | 'execution_environment'
+  | 'tool_registry'
+  | 'tool_contract'
+  | 'permission_gate'
+  | 'run_mode'
+  | 'platform_protocol'
+  | 'account_session'
+  | 'risk_guard'
+  | 'tool_runtime'
+  | 'observability';
+
+export interface HarnessFailureReviewGroup {
+  code: HarnessFailureCode;
+  layer: HarnessFailureLayer;
+  severity: HarnessFailureSeverity;
+  count: number;
+  retryable: boolean;
+  sources: Array<HarnessFailureClassification['source']>;
+  runIds: number[];
+  latestAt: string;
+  reason: string;
+  nextAction: string;
+  evidence: string[];
+}
+
+export interface HarnessFailureReview {
+  total: number;
+  groups: HarnessFailureReviewGroup[];
+  topPriority: HarnessFailureReviewGroup | null;
+  report: HarnessFailureReport;
+}
+
 function textOf(input: HarnessFailureInput): string {
   return [input.error, input.output, input.environmentStatus, input.environmentController, input.environmentKind]
     .filter(Boolean)
@@ -232,4 +265,172 @@ export function formatHarnessFailureReport(report: HarnessFailureReport): string
     return `- ${event.createdAt} ${event.code}/${event.severity}${run}${tool}${stage} — ${event.reason}`;
   });
   return rows.join('\n');
+}
+
+function metadataForFailure(code: HarnessFailureCode): {
+  layer: HarnessFailureLayer;
+  nextAction: string;
+} {
+  switch (code) {
+    case 'external_control':
+      return {
+        layer: 'execution_environment',
+        nextAction: '先释放或确认浏览器控制权，再继续；如果是用户主动操作，应把 run 标记为 paused 而不是继续点击。',
+      };
+    case 'unknown_tool':
+      return {
+        layer: 'tool_registry',
+        nextAction: '核对模型可见工具清单、tool registry 和消息修复逻辑；未知工具必须返回结构化 tool result。',
+      };
+    case 'invalid_tool_arguments':
+      return {
+        layer: 'tool_contract',
+        nextAction: '收紧工具 schema 和参数修复；必要时在 prompt 里给最小合法示例，但不要靠业务话术兜底。',
+      };
+    case 'approval_denied':
+      return {
+        layer: 'permission_gate',
+        nextAction: '检查该工具是否应要求审批；如果是预期动作，显式配置权限或改成 dry-run/prepare 模式。',
+      };
+    case 'mode_blocked':
+      return {
+        layer: 'run_mode',
+        nextAction: '确认当前 run mode 是否正确；dry-run/screen/prepare 被拦是正常信号，不要把它当业务失败。',
+      };
+    case 'policy_blocked':
+      return {
+        layer: 'platform_protocol',
+        nextAction: '回看平台协议阶段和完成条件；如果协议过强，改中层协议，不要让 legacy skill 覆盖它。',
+      };
+    case 'environment_unavailable':
+      return {
+        layer: 'execution_environment',
+        nextAction: '先修 Chrome/CDP/AppleScript/运行环境连接，再跑业务；这不是候选人或话术问题。',
+      };
+    case 'session_unavailable':
+      return {
+        layer: 'account_session',
+        nextAction: '先恢复平台登录态或账号页面状态；登录态不可用时不应产出 0 触达假成功。',
+      };
+    case 'rate_limited':
+      return {
+        layer: 'risk_guard',
+        nextAction: '降低动作频率并保留风控事件；如果触发平台上限，应硬停本轮而不是重试。',
+      };
+    case 'timeout':
+      return {
+        layer: 'tool_runtime',
+        nextAction: '检查外部页面加载、工具超时和重试策略；先保留现场快照再决定是否重试。',
+      };
+    case 'browser_action_failed':
+      return {
+        layer: 'execution_environment',
+        nextAction: '检查页面 snapshot、ref 是否失效、当前 tab 是否变化；必要时重新 snapshot 后再动作。',
+      };
+    case 'tool_execution_failed':
+      return {
+        layer: 'tool_runtime',
+        nextAction: '查看工具原始错误和 offloaded 输出，判断是工具实现、外部依赖还是输入数据问题。',
+      };
+    case 'unknown':
+      return {
+        layer: 'observability',
+        nextAction: '先增强 trace/环境记录，保留原始错误；不要在证据不足时归因到业务策略。',
+      };
+  }
+}
+
+function severityRank(severity: HarnessFailureSeverity): number {
+  return severity === 'fail' ? 2 : severity === 'warn' ? 1 : 0;
+}
+
+function strongerSeverity(a: HarnessFailureSeverity, b: HarnessFailureSeverity): HarnessFailureSeverity {
+  return severityRank(a) >= severityRank(b) ? a : b;
+}
+
+function eventEvidence(event: HarnessFailureEvent): string {
+  const run = event.runId == null ? 'run=none' : `run#${event.runId}`;
+  const tool = event.toolName ? ` tool=${event.toolName}` : '';
+  const stage = event.stageId ? ` stage=${event.stageId}` : '';
+  const source = ` source=${event.source}`;
+  return `${event.createdAt} ${run}${tool}${stage}${source}`;
+}
+
+export function collectHarnessFailureReview(limit = 20): HarnessFailureReview {
+  const report = collectHarnessFailureReport(limit);
+  const groups = new Map<HarnessFailureCode, HarnessFailureReviewGroup>();
+
+  for (const event of report.recent) {
+    const meta = metadataForFailure(event.code);
+    const existing = groups.get(event.code);
+    if (!existing) {
+      groups.set(event.code, {
+        code: event.code,
+        layer: meta.layer,
+        severity: event.severity,
+        count: 1,
+        retryable: event.retryable,
+        sources: [event.source],
+        runIds: event.runId == null ? [] : [event.runId],
+        latestAt: event.createdAt,
+        reason: event.reason,
+        nextAction: meta.nextAction,
+        evidence: [eventEvidence(event)],
+      });
+      continue;
+    }
+    existing.count += 1;
+    existing.severity = strongerSeverity(existing.severity, event.severity);
+    existing.retryable = existing.retryable || event.retryable;
+    if (!existing.sources.includes(event.source)) existing.sources.push(event.source);
+    if (event.runId != null && !existing.runIds.includes(event.runId)) existing.runIds.push(event.runId);
+    if (event.createdAt > existing.latestAt) existing.latestAt = event.createdAt;
+    if (existing.evidence.length < 3) existing.evidence.push(eventEvidence(event));
+  }
+
+  const ordered = Array.from(groups.values()).sort((a, b) => (
+    severityRank(b.severity) - severityRank(a.severity) ||
+    b.count - a.count ||
+    b.latestAt.localeCompare(a.latestAt)
+  ));
+
+  return {
+    total: report.total,
+    groups: ordered,
+    topPriority: ordered[0] ?? null,
+    report,
+  };
+}
+
+export function formatHarnessFailureReview(review: HarnessFailureReview): string {
+  if (review.total === 0) {
+    return [
+      'HireSeek Harness Failure Review',
+      '',
+      '最近没有可复盘的 harness 失败信号。',
+    ].join('\n');
+  }
+
+  const top = review.topPriority
+    ? `${review.topPriority.code} / ${review.topPriority.layer} / ${review.topPriority.count} 次`
+    : '无';
+  const rows = review.groups.map(group => {
+    const runs = group.runIds.length ? ` runs=${group.runIds.slice(0, 6).map(id => `#${id}`).join(',')}` : '';
+    const sources = group.sources.join(',');
+    return [
+      `- ${group.code}: ${group.count} 次, severity=${group.severity}, layer=${group.layer}, retryable=${group.retryable}, sources=${sources}${runs}`,
+      `  原因：${group.reason}`,
+      `  下一步：${group.nextAction}`,
+      `  证据：${group.evidence.join(' | ')}`,
+    ].join('\n');
+  });
+
+  return [
+    'HireSeek Harness Failure Review',
+    '',
+    `Total signals: ${review.total}`,
+    `Top priority: ${top}`,
+    '',
+    ...rows,
+  ].join('\n');
 }
