@@ -34,17 +34,20 @@ describe('agent core lower layer', () => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps slash command selection opt-in instead of hijacking slash-prefixed text', () => {
+  it('keeps slash command suggestions inline and editable', () => {
     const source = fs.readFileSync(path.join(process.cwd(), 'src', 'chat.ts'), 'utf8');
 
-    expect(source).toContain("if (text === '/')");
-    expect(source).toContain('clearSubmittedPromptLine();');
-    expect(source).toContain('命令联想');
-    expect(source).toContain('选中项只补全到输入框，不直接执行');
-    expect(source).toContain('preservedInterventionDraft = `${entries[picked].cmd} `');
-    expect(source).toContain('"/后面接文字" 会作为正常用户输入');
+    expect(source).toContain('敲下 "/" 当场显示联想');
+    expect(source).toContain('Tab 才补全');
+    expect(source).toContain('Enter 始终提交当前输入框内容');
+    expect(source).toContain('renderSlashSuggestions');
+    expect(source).toContain('acceptSlashSuggestion');
+    expect(source).toContain("setInputLine(`${picked.cmd} `)");
     expect(source).not.toContain('openSlashSelector');
     expect(source).not.toContain('setImmediate(() => void openSlashSelector())');
+    expect(source).not.toContain('clearSubmittedPromptLine');
+    expect(source).not.toContain('命令联想');
+    expect(source).not.toContain('按 Tab 查看全部命令');
     expect(source).not.toContain('text = entries[picked].cmd');
   });
 

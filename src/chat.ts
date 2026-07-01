@@ -2538,16 +2538,91 @@ export async function startChat(): Promise<void> {
     r._refreshLine?.();
   };
 
-  const clearSubmittedPromptLine = (): void => {
-    if (!process.stdout.isTTY) return;
-    // 用户单独输入 "/" 后按回车时，readline 已经把 "❯ /" 留在上一行。
-    // 这里清掉它，再显示选择器，避免出现两个 "/" 输入面。
-    process.stdout.write('\x1b[1A\x1b[2K');
+  // "/" 是输入联想，不是命令模式切换：
+  // 敲下 "/" 当场显示联想；↑↓ 只移动候选，Tab 才补全，Enter 始终提交当前输入框内容。
+  // "/后面接文字" 会作为正常用户输入，不会被命令选择器抢走。
+  const slashSuggestionLimit = 10;
+  let slashSuggestVisible = false;
+  let slashSuggestIndex = 0;
+  let slashSuggestRenderedLines = 0;
+  let slashSuggestInput = '';
+
+  const slashSuggestionsFor = (line: string): Array<{ cmd: string; desc: string }> => {
+    if (!line.startsWith('/') || /\s/.test(line)) return [];
+    return allEntries()
+      .filter(e => e.cmd.startsWith(line))
+      .slice(0, slashSuggestionLimit);
   };
 
-  // "/" 是输入联想，不是命令模式切换：
-  // 单独提交 "/" 时打开联想面板；选中项只回填输入框，用户还能继续补参数或文字。
-  // "/后面接文字" 会作为正常用户输入，不会被 keypress 抢先截走。
+  const clearSlashSuggestionVisual = (): void => {
+    if (!process.stdout.isTTY || slashSuggestRenderedLines <= 0) return;
+    process.stdout.write('\x1b7');
+    process.stdout.write('\n');
+    for (let i = 0; i < slashSuggestRenderedLines; i += 1) {
+      process.stdout.write('\x1b[2K');
+      if (i < slashSuggestRenderedLines - 1) process.stdout.write('\n');
+    }
+    process.stdout.write('\x1b8');
+    slashSuggestRenderedLines = 0;
+  };
+
+  const hideSlashSuggestions = (): void => {
+    clearSlashSuggestionVisual();
+    slashSuggestVisible = false;
+    slashSuggestIndex = 0;
+    slashSuggestInput = '';
+    (rl as ReadlineInternals)._refreshLine?.();
+  };
+
+  const renderSlashSuggestions = (line: string): void => {
+    if (!process.stdout.isTTY) return;
+    const entries = slashSuggestionsFor(line);
+    clearSlashSuggestionVisual();
+    if (entries.length === 0) {
+      slashSuggestVisible = false;
+      slashSuggestIndex = 0;
+      slashSuggestInput = '';
+      (rl as ReadlineInternals)._refreshLine?.();
+      return;
+    }
+
+    slashSuggestVisible = true;
+    slashSuggestInput = line;
+    slashSuggestIndex = Math.max(0, Math.min(slashSuggestIndex, entries.length - 1));
+    const lines = entries.map((entry, index) => {
+      const marker = index === slashSuggestIndex ? chalk.cyan('▸') : ' ';
+      const label = index === slashSuggestIndex ? chalk.cyan.bold(entry.cmd) : entry.cmd;
+      return `  ${marker} ${label}${entry.desc ? chalk.gray(`  ${entry.desc}`) : ''}`;
+    });
+    lines.push(chalk.gray('    ↑↓ 移动 · Tab 补全 · Enter 发送当前输入 · Esc 收起'));
+
+    process.stdout.write('\x1b7');
+    process.stdout.write('\n' + lines.map(lineText => `\x1b[2K${lineText}`).join('\n'));
+    process.stdout.write('\x1b8');
+    slashSuggestRenderedLines = lines.length;
+    (rl as ReadlineInternals)._refreshLine?.();
+  };
+
+  const updateSlashSuggestionsFromInput = (): void => {
+    if (exiting || generating || toolLoopActive) {
+      if (slashSuggestVisible) hideSlashSuggestions();
+      return;
+    }
+    const line = ((rl as ReadlineInternals).line ?? '');
+    if (!line.startsWith('/') || /\s/.test(line)) {
+      if (slashSuggestVisible) hideSlashSuggestions();
+      return;
+    }
+    renderSlashSuggestions(line);
+  };
+
+  const acceptSlashSuggestion = (): void => {
+    const entries = slashSuggestionsFor(slashSuggestInput);
+    const picked = entries[slashSuggestIndex];
+    if (!picked) return;
+    hideSlashSuggestions();
+    setInputLine(`${picked.cmd} `);
+  };
 
   // ── 极简启动（CC 风格：安静，信息在需要时出现）──────────────────────
   const job = createRuntimeContext().activeJob;
@@ -2688,8 +2763,32 @@ export async function startChat(): Promise<void> {
   }
 
   // Esc 单键中断（CC 同款）：生成中=打断；任务中=暂停；空闲=清空输入行
-  process.stdin.on('keypress', (_s: unknown, key: { name?: string } | undefined) => {
-    if (key?.name !== 'escape') return;
+  process.stdin.on('keypress', (_s: unknown, key: { name?: string; sequence?: string } | undefined) => {
+    if (slashSuggestVisible && (key?.name === 'up' || key?.name === 'down')) {
+      const entries = slashSuggestionsFor(slashSuggestInput);
+      if (entries.length > 0) {
+        slashSuggestIndex = key.name === 'up'
+          ? (slashSuggestIndex - 1 + entries.length) % entries.length
+          : (slashSuggestIndex + 1) % entries.length;
+        setInputLine(slashSuggestInput);
+        renderSlashSuggestions(slashSuggestInput);
+      }
+      return;
+    }
+    if (slashSuggestVisible && key?.name === 'tab') {
+      acceptSlashSuggestion();
+      return;
+    }
+    if (key?.name !== 'escape') {
+      if (key?.name !== 'return' && key?.name !== 'enter') {
+        setImmediate(updateSlashSuggestionsFromInput);
+      }
+      return;
+    }
+    if (slashSuggestVisible) {
+      hideSlashSuggestions();
+      return;
+    }
     if (generating) {
       generating.abort();
       return;
@@ -2728,7 +2827,7 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /export [标题]      导出会话      /sessions  查看会话'),
       chalk.gray('  /resume [ID/序号]   恢复历史会话，空参数时弹出列表'),
       chalk.gray('  /<技能名> [参数]    直接触发技能，如 /rbt、/找候选人'),
-      chalk.gray('  /                  打开命令联想；选中后只补全输入框，可继续补文字'),
+      chalk.gray('  /                  触发联想；↑↓移动，Tab 补全，Enter 发送当前输入'),
       chalk.gray('  Esc                 打断生成 / 暂停任务 / 清空输入（Ctrl+C 同效）'),
       chalk.gray('  工具执行中           显示独立插话输入框，可编辑后 Enter 发送'),
       '',
@@ -2831,24 +2930,9 @@ export async function startChat(): Promise<void> {
     const draftToRestore = preservedInterventionDraft;
     preservedInterventionDraft = '';
     rl.question(chalk.green('❯ '), async (input) => {
+      if (slashSuggestVisible) hideSlashSuggestions();
       let text = await readFullInput(input);
       if (!text) { ask(); return; }
-
-      // 单独输入 / → 弹出联想面板。选中项只补全到输入框，不直接执行。
-      if (text === '/') {
-        clearSubmittedPromptLine();
-        const { selectOption } = await import('./select');
-        const entries = allEntries();
-        const picked = await selectOption(
-          '命令联想',
-          entries.map(e => ({ label: e.cmd, hint: e.desc })),
-          { echo: false },
-        );
-        if (picked == null) { ask(); return; }
-        preservedInterventionDraft = `${entries[picked].cmd} `;
-        ask();
-        return;
-      }
 
       // 写入跨会话历史（多行压平成单行，↑ 调出时仍可直接复用）
       try {
@@ -3126,7 +3210,7 @@ export async function startChat(): Promise<void> {
             console.log(chalk.gray('你是不是想找：'));
             for (const n of near) console.log(chalk.gray(`  ${n.cmd.padEnd(20)} ${n.desc}`));
           } else {
-            console.log(chalk.gray('输入 / 后按 Tab 查看全部命令，或 /skills 查看技能列表'));
+            console.log(chalk.gray('输入 / 会显示联想，↑↓移动，Tab 补全；或 /skills 查看技能列表'));
           }
           ask();
           return;
