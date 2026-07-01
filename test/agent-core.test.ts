@@ -34,6 +34,16 @@ describe('agent core lower layer', () => {
     expect(violations).toEqual([]);
   });
 
+  it('keeps slash command selection opt-in instead of hijacking slash-prefixed text', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'src', 'chat.ts'), 'utf8');
+
+    expect(source).toContain("if (text === '/')");
+    expect(source).toContain('clearSubmittedPromptLine();');
+    expect(source).toContain('"/后面接文字" 会作为正常用户输入');
+    expect(source).not.toContain('openSlashSelector');
+    expect(source).not.toContain('setImmediate(() => void openSlashSelector())');
+  });
+
   it('registers tools with schemas and side-effect policy', async () => {
     const { createToolRegistry } = await import('../src/agent-core/tool-registry');
     const tools: OpenAI.ChatCompletionTool[] = [

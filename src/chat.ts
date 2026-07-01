@@ -2537,38 +2537,16 @@ export async function startChat(): Promise<void> {
     r.cursor = line.length;
     r._refreshLine?.();
   };
-  const submitInputLine = (): void => {
-    rl.write(null, { name: 'return' });
-  };
-  let mainInputActive = false;
-  let slashSelectorActive = false;
-  const openSlashSelector = async (): Promise<void> => {
-    if (slashSelectorActive || !mainInputActive || exiting || generating || toolLoopActive) return;
-    const r = rl as ReadlineInternals;
-    if ((r.line ?? '') !== '/') return;
 
-    slashSelectorActive = true;
-    try {
-      const { selectOption } = await import('./select');
-      const entries = allEntries();
-      const picked = await selectOption(
-        '选择命令',
-        entries.map(e => ({ label: e.cmd, hint: e.desc })),
-        { echo: false },
-      );
-      if (picked == null) {
-        setInputLine('');
-        return;
-      }
-      setInputLine(entries[picked].cmd);
-      submitInputLine();
-    } finally {
-      slashSelectorActive = false;
-    }
+  const clearSubmittedPromptLine = (): void => {
+    if (!process.stdout.isTTY) return;
+    // 用户单独输入 "/" 后按回车时，readline 已经把 "❯ /" 留在上一行。
+    // 这里清掉它，再显示选择器，避免出现两个 "/" 输入面。
+    process.stdout.write('\x1b[1A\x1b[2K');
   };
 
-  // "/" 的完整命令面板由 selectOption 负责。不要在输入行下方画浮动菜单：
-  // 输入行靠近终端底部时，浮动菜单会触发滚屏，旧菜单内容无法稳定清除。
+  // "/" 的完整命令面板只在用户单独提交 "/" 时打开。
+  // 这样 "/后面接文字" 会作为正常用户输入，不会被 keypress 抢先截走。
 
   // ── 极简启动（CC 风格：安静，信息在需要时出现）──────────────────────
   const job = createRuntimeContext().activeJob;
@@ -2710,12 +2688,7 @@ export async function startChat(): Promise<void> {
 
   // Esc 单键中断（CC 同款）：生成中=打断；任务中=暂停；空闲=清空输入行
   process.stdin.on('keypress', (_s: unknown, key: { name?: string } | undefined) => {
-    if (key?.name !== 'escape') {
-      if (!slashSelectorActive) {
-        setImmediate(() => void openSlashSelector());
-      }
-      return;
-    }
+    if (key?.name !== 'escape') return;
     if (generating) {
       generating.abort();
       return;
@@ -2855,14 +2828,13 @@ export async function startChat(): Promise<void> {
     console.log(promptHeader());
     const draftToRestore = preservedInterventionDraft;
     preservedInterventionDraft = '';
-    mainInputActive = true;
     rl.question(chalk.green('❯ '), async (input) => {
-      mainInputActive = false;
       let text = await readFullInput(input);
       if (!text) { ask(); return; }
 
       // 单独输入 / → 弹出命令选择器（方向键选，不用记命令名）
       if (text === '/') {
+        clearSubmittedPromptLine();
         const { selectOption } = await import('./select');
         const entries = allEntries();
         const picked = await selectOption(
