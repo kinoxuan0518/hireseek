@@ -299,45 +299,48 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
       : `validation issues=${runnerIssues.map(issue => `${issue.tool}:${issue.problem}`).join(', ')}`,
   ));
 
+  const protocols = listPlatformProtocols();
+  const protocolChannels = protocols.map(protocol => protocol.channel);
   const harnessModes = ['dry_run', 'prepare', 'screen', 'execute'] as const;
-  const harnessAssemblyProblems = harnessModes.flatMap(mode => {
-    const assembly = buildHarnessRunAssembly('boss', mode);
+  const harnessAssemblyProblems = protocolChannels.flatMap(channel => harnessModes.flatMap(mode => {
+    const assembly = buildHarnessRunAssembly(channel, mode);
     const declared = new Set(assembly.tools.filter(tool => tool.declaredToModel).map(tool => tool.name));
     const problems: string[] = [];
-    if (!declared.has('browser')) problems.push(`${mode}:browser missing`);
+    const prefix = `${channel}/${mode}`;
+    if (!declared.has('browser')) problems.push(`${prefix}:browser missing`);
     if ((mode === 'dry_run' || mode === 'prepare') && declared.size !== 1) {
-      problems.push(`${mode}:should only declare browser`);
+      problems.push(`${prefix}:should only declare browser`);
     }
     if (
       mode === 'screen' &&
       (!declared.has('record_screened_candidate') || declared.has('prepare_contact') || declared.has('record_contacted'))
     ) {
-      problems.push(`${mode}:screen tool disclosure mismatch`);
+      problems.push(`${prefix}:screen tool disclosure mismatch`);
     }
     if (
       mode === 'execute' &&
       (!declared.has('prepare_contact') || !declared.has('record_contacted') || declared.has('record_screened_candidate'))
     ) {
-      problems.push(`${mode}:execute tool disclosure mismatch`);
+      problems.push(`${prefix}:execute tool disclosure mismatch`);
     }
     if (assembly.platformProtocol && !assembly.boundaries.includes('platform-protocol-overrides-legacy-skill')) {
-      problems.push(`${mode}:missing protocol/skill boundary`);
+      problems.push(`${prefix}:missing protocol/skill boundary`);
     }
     return problems;
-  });
+  }));
   checks.push(check(
     'lower',
     'Harness run assembly',
-    harnessAssemblyProblems.length === 0 ? 'pass' : 'fail',
+    protocolChannels.length > 0 && harnessAssemblyProblems.length === 0 ? 'pass' : 'fail',
     harnessAssemblyProblems.length === 0
-      ? 'mode-specific tool/context assembly is explicit for BOSS dry_run/prepare/screen/execute'
+      ? `mode-specific tool/context assembly is explicit for ${protocolChannels.join(', ')} dry_run/prepare/screen/execute`
       : harnessAssemblyProblems.join('; '),
   ));
 
   const chatHarnessContext = buildChatHarnessContext();
   const chatHarnessProblems = [
     chatHarnessContext.includes('HireSeek Chat Harness Assembly') ? '' : 'missing chat harness header',
-    chatHarnessContext.includes('boss-platform.v1') ? '' : 'missing boss platform protocol',
+    ...protocols.map(protocol => chatHarnessContext.includes(protocol.name) ? '' : `missing ${protocol.channel} platform protocol`),
     chatHarnessContext.includes('platform-protocol-overrides-legacy-skill') ? '' : 'missing protocol/skill boundary',
     chatHarnessContext.includes('mode=productized-fallback-only') ? '' : 'missing productized fallback skill mode',
   ].filter(Boolean);
@@ -539,13 +542,18 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
       : `classified ${failureReport.total} recent failure signal(s); unknown=${unknownFailures}; codes=${Object.entries(failureReport.byCode).map(([code, n]) => `${code}:${n}`).join(', ')}`,
   ));
 
-  const protocols = listPlatformProtocols();
   const boss = protocols.find(protocol => protocol.channel === 'boss');
+  const maimai = protocols.find(protocol => protocol.channel === 'maimai');
   checks.push(check(
     'middle',
     'Platform protocols',
-    boss ? 'pass' : 'fail',
-    boss ? `${protocols.length} protocol(s), boss=${boss.name}` : 'boss protocol missing',
+    boss && maimai ? 'pass' : 'fail',
+    boss && maimai
+      ? `${protocols.length} protocol(s): ${protocols.map(protocol => `${protocol.channel}=${protocol.name}`).join(', ')}`
+      : `missing protocol(s): ${[
+        boss ? '' : 'boss',
+        maimai ? '' : 'maimai',
+      ].filter(Boolean).join(', ')}`,
   ));
 
   const protocolManifest = buildPlatformProtocolManifest();

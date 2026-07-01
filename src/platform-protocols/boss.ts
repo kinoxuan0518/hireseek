@@ -130,6 +130,8 @@ const BOSS_PROTOCOL_STAGES: BossProtocolStage[] = [
   },
 ];
 
+export const BOSS_REQUIRED_STAGES_BEFORE_CONTACT = ['prefilter', 'dom-probe', 'candidate-screen'];
+
 export function bossProtocolStages(): BossProtocolStage[] {
   return BOSS_PROTOCOL_STAGES.map(stage => ({
     ...stage,

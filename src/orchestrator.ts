@@ -294,6 +294,69 @@ const LOGIN_OR_MISSING_PATTERNS: Partial<Record<Channel, RegExp>> = {
   linkedin: /Sign in|Join LinkedIn|登录/,
 };
 
+function prepareConstraintsForChannel(channel: Channel): string {
+  if (channel === 'boss') {
+    return [
+      '## Prepare 安全验收约束',
+      '',
+      '本轮必须自行通过 BOSS 页面内交互切到 active job，并完成筛选面板逐项设置与激活态验收。',
+      '如果筛选面板显示“确定/应用/确认”，必须成功点击提交；仅看到 active 状态不能算完成。',
+      '完成筛选后立即停止；禁止进入候选人处理、禁止打招呼、禁止发送消息、禁止调用 record_contacted。',
+    ].join('\n');
+  }
+  if (channel === 'maimai') {
+    return [
+      '## Prepare 安全验收约束',
+      '',
+      '本轮必须在脉脉页面内完成策略来源确认、搜索轮次设置和平台筛选器设置。',
+      '搜索轮次必须来自明确策略或 active job 原始事实；缺少来源时停止并说明缺口，不要泛搜。',
+      '完成筛选后立即停止；禁止进入候选人处理、禁止立即沟通、禁止发送消息、禁止调用 record_contacted。',
+    ].join('\n');
+  }
+  return [
+    '## Prepare 安全验收约束',
+    '',
+    '本轮只完成当前渠道的页面预检、搜索/筛选准备和可执行性确认。',
+    '完成准备后立即停止；禁止进入候选人处理、禁止真实触达、禁止调用 record_contacted。',
+  ].join('\n');
+}
+
+function screenConstraintsForChannel(channel: Channel): string {
+  if (channel === 'boss') {
+    return [
+      '## Screen 候选人筛选验收约束',
+      '',
+      '本轮只验证候选人查看和筛选判断，禁止任何真实触达。',
+      '先用 snapshot 依次留下 session-precheck、job-positioning、prefilter、dom-probe 的阶段证据；如果当前页面已经完成职位和筛选，也要用只读 snapshot 说明。',
+      '随后进入 candidate-screen：可以点击候选人卡片或详情查看证据、滚动加载更多、必要时 back 返回列表。',
+      '从候选人详情返回列表时，只能在 candidate-screen 阶段用 browser back，或使用页面内可见返回/推荐牛人入口；不要用 Escape。',
+      '职位定位/筛选阶段不要用 back，避免回到旧职位或旧筛选状态；返回后必须先 snapshot 再继续点 tab 或候选人。',
+      '点击 推荐/最新/精选 前要核对 ref 的 scope/rect/context，确认它是列表页签而不是候选人卡片。',
+      '禁止点击打招呼/立即沟通/发送消息/聊天等沟通控件，禁止调用 prepare_contact。',
+      '结束时输出：查看候选人数量、建议正式触达名单、跳过名单、证据、风险点。',
+    ].join('\n');
+  }
+  if (channel === 'maimai') {
+    return [
+      '## Screen 候选人筛选验收约束',
+      '',
+      '本轮只验证脉脉候选人查看和筛选判断，禁止任何真实触达。',
+      '先用 snapshot 依次留下 session-precheck、strategy-source、search-round、platform-prefilter 的阶段证据；如果当前页面已经完成搜索和筛选，也要用只读 snapshot 说明。',
+      '随后进入 candidate-screen：可以点击候选人卡片或详情查看证据、滚动加载更多、必要时返回列表。',
+      '候选人硬筛必须覆盖按钮状态、本科、年限、当前公司、方向、专业和去重；评分只能排序，不能替代硬筛。',
+      '禁止点击立即沟通/发送/消息等沟通控件，禁止调用 prepare_contact。',
+      '结束时输出：查看候选人数量、建议正式触达名单、跳过名单、证据、风险点。',
+    ].join('\n');
+  }
+  return [
+    '## Screen 候选人筛选验收约束',
+    '',
+    '本轮只验证候选人查看和筛选判断，禁止任何真实触达。',
+    '候选人判断必须写入结构化筛选记录；禁止调用 prepare_contact 和 record_contacted。',
+    '结束时输出：查看候选人数量、建议正式触达名单、跳过名单、证据、风险点。',
+  ].join('\n');
+}
+
 function taskPromptForChannel(
   channel: Channel,
   label: string,
@@ -311,33 +374,10 @@ function taskPromptForChannel(
     : fromCurrent ? TASK_PROMPT_HERE(label) : TASK_PROMPT(label);
   const baseWithResume = [base, pausedRunContext].filter(Boolean).join('\n\n---\n\n');
   if (prepare) {
-    return [
-      baseWithResume,
-      [
-        '## Prepare 安全验收约束',
-        '',
-        '本轮必须自行通过 BOSS 页面内交互切到 active job，并完成筛选面板逐项设置与激活态验收。',
-        '如果筛选面板显示“确定/应用/确认”，必须成功点击提交；仅看到 active 状态不能算完成。',
-        '完成筛选后立即停止；禁止进入候选人处理、禁止打招呼、禁止发送消息、禁止调用 record_contacted。',
-      ].join('\n'),
-    ].join('\n\n---\n\n');
+    return [baseWithResume, prepareConstraintsForChannel(channel)].join('\n\n---\n\n');
   }
   if (screen) {
-    return [
-      baseWithResume,
-      [
-        '## Screen 候选人筛选验收约束',
-        '',
-        '本轮只验证候选人查看和筛选判断，禁止任何真实触达。',
-        '先用 snapshot 依次留下 session-precheck、job-positioning、prefilter、dom-probe 的阶段证据；如果当前页面已经完成职位和筛选，也要用只读 snapshot 说明。',
-        '随后进入 candidate-screen：可以点击候选人卡片或详情查看证据、滚动加载更多、必要时 back 返回列表。',
-        '从候选人详情返回列表时，只能在 candidate-screen 阶段用 browser back，或使用页面内可见返回/推荐牛人入口；不要用 Escape。',
-        '职位定位/筛选阶段不要用 back，避免回到旧职位或旧筛选状态；返回后必须先 snapshot 再继续点 tab 或候选人。',
-        '点击 推荐/最新/精选 前要核对 ref 的 scope/rect/context，确认它是列表页签而不是候选人卡片。',
-        '禁止点击打招呼/立即沟通/发送消息/聊天等沟通控件，禁止调用 prepare_contact。',
-        '结束时输出：查看候选人数量、建议正式触达名单、跳过名单、证据、风险点。',
-      ].join('\n'),
-    ].join('\n\n---\n\n');
+    return [baseWithResume, screenConstraintsForChannel(channel)].join('\n\n---\n\n');
   }
   if (!dryRun) return [baseWithResume, screenGateContext].filter(Boolean).join('\n\n---\n\n');
   return [
@@ -366,7 +406,7 @@ export function runSkillOptionsForChannel(
     runId: runId ?? undefined,
     executionMode: prepare ? 'prepare' : screen ? 'screen' : dryRun ? 'dry_run' : 'execute',
     initialStageId: protocol?.stageManifest?.()[0]?.id,
-    requiredStagesBeforeContact: channel === 'boss' ? ['prefilter', 'dom-probe', 'candidate-screen'] : [],
+    requiredStagesBeforeContact: protocol?.requiredStagesBeforeContact ?? [],
     targetJobTitle: activeJobTitle,
     allowedContactNamesBeforeContact,
     completionPolicy: protocol?.completionPolicy,

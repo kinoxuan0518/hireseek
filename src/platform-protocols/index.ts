@@ -6,9 +6,19 @@ import {
   bossRunCompletionPolicy,
   bossProcessRules,
   bossProtocolStages,
+  BOSS_REQUIRED_STAGES_BEFORE_CONTACT,
   buildBossSystemContext,
   buildBossTaskPrompt,
 } from './boss';
+import {
+  maimaiBrowserActionPolicy,
+  maimaiRunCompletionPolicy,
+  maimaiProcessRules,
+  maimaiProtocolStages,
+  MAIMAI_REQUIRED_STAGES_BEFORE_CONTACT,
+  buildMaimaiSystemContext,
+  buildMaimaiTaskPrompt,
+} from './maimai';
 
 export interface PlatformTaskPromptOptions {
   channelLabel?: string;
@@ -30,6 +40,7 @@ export interface PlatformProtocol {
   contractName?: string;
   writes?: string[];
   stageManifest?: () => PlatformProtocolStage[];
+  requiredStagesBeforeContact?: string[];
   buildSystemContext?: () => string;
   buildTaskPrompt: (opts?: PlatformTaskPromptOptions) => string;
   browserActionPolicy?: BrowserActionPolicy;
@@ -45,6 +56,7 @@ export interface PlatformProtocolManifestEntry {
   writes: string[];
   stageCount: number;
   stageIds: string[];
+  requiredStagesBeforeContact: string[];
   hooks: {
     systemContext: boolean;
     taskPrompt: boolean;
@@ -61,11 +73,25 @@ const PROTOCOLS: Partial<Record<Channel, PlatformProtocol>> = {
     contractName: 'boss-greeting.v1',
     writes: ['contacted_candidates', 'run_trace', 'interaction_log'],
     stageManifest: bossProtocolStages,
+    requiredStagesBeforeContact: BOSS_REQUIRED_STAGES_BEFORE_CONTACT,
     buildSystemContext: buildBossSystemContext,
     buildTaskPrompt: buildBossTaskPrompt,
     browserActionPolicy: bossBrowserActionPolicy,
     completionPolicy: bossRunCompletionPolicy,
     processRules: bossProcessRules,
+  },
+  maimai: {
+    channel: 'maimai',
+    name: 'maimai-platform.v1',
+    contractName: 'maimai-outreach.v1',
+    writes: ['contacted_candidates', 'run_trace', 'interaction_log'],
+    stageManifest: maimaiProtocolStages,
+    requiredStagesBeforeContact: MAIMAI_REQUIRED_STAGES_BEFORE_CONTACT,
+    buildSystemContext: buildMaimaiSystemContext,
+    buildTaskPrompt: buildMaimaiTaskPrompt,
+    browserActionPolicy: maimaiBrowserActionPolicy,
+    completionPolicy: maimaiRunCompletionPolicy,
+    processRules: maimaiProcessRules,
   },
 };
 
@@ -93,6 +119,7 @@ export function buildPlatformProtocolManifest(): PlatformProtocolManifestEntry[]
       writes: [...(protocol.writes ?? [])],
       stageCount: stages.length,
       stageIds: stages.map(stage => stage.id),
+      requiredStagesBeforeContact: [...(protocol.requiredStagesBeforeContact ?? [])],
       hooks: {
         systemContext: !!protocol.buildSystemContext,
         taskPrompt: !!protocol.buildTaskPrompt,
@@ -116,6 +143,7 @@ export function formatPlatformProtocols(): string {
       `  契约: ${p.contractName ?? '未绑定'}`,
       `  写入: ${p.writes?.join(', ') || '未声明'}`,
       `  Stage manifest: ${p.stageManifest ? `${p.stageManifest().length} stages` : '未接入'}`,
+      `  Required before contact: ${p.requiredStagesBeforeContact?.join(', ') || '未声明'}`,
       `  System context: ${p.buildSystemContext ? '已接入' : '未接入'}`,
       `  Browser action policy: ${p.browserActionPolicy ? '已接入' : '未接入'}`,
       `  Compliance rules: ${p.processRules ? '已接入' : '未接入'}`,
@@ -137,6 +165,7 @@ export function formatPlatformProtocolManifest(): string {
       `  contract: ${entry.contractName ?? 'none'}`,
       `  writes: ${entry.writes.join(', ') || 'none'}`,
       `  stages: ${entry.stageCount} (${entry.stageIds.join(', ')})`,
+      `  requiredBeforeContact: ${entry.requiredStagesBeforeContact.join(', ') || 'none'}`,
       `  hooks: system=${entry.hooks.systemContext}, task=${entry.hooks.taskPrompt}, actionPolicy=${entry.hooks.browserActionPolicy}, completion=${entry.hooks.completionPolicy}, processRules=${entry.hooks.processRules}`,
     ].join('\n')),
   ].join('\n');

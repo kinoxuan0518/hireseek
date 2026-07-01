@@ -72,6 +72,38 @@ const FALLBACK_CONTRACTS: Record<string, Contract> = {
       'goalBoard 的累计触达不再是 0',
     ],
   },
+  'maimai-outreach.v1': {
+    name: 'maimai_outreach',
+    version: 1,
+    description: '在脉脉招聘端按明确搜索策略执行搜索、筛选、候选人判断和触达，产出结构化已触达候选人与可审计轨迹。',
+    requires: {
+      context: [
+        { key: 'company_profile', visibility: 'private' },
+        { key: 'active_job', visibility: 'private' },
+        { key: 'candidate_evaluation_policy', visibility: 'public' },
+        { key: 'outreach_policy', visibility: 'public' },
+        { key: 'maimai_channel_strategy', visibility: 'public' },
+        { key: 'recent_candidate_memory', visibility: 'private' },
+      ],
+    },
+    writes: ['contacted_candidates', 'run_trace', 'interaction_log'],
+    outputs: {
+      contacted_candidates: { schema: 'contacted-candidate.v1' },
+      outreach_output: {
+        schema: 'outreach-output.v1',
+        description: '每条脉脉真实触达必须带候选人证据、搜索轮次、筛选依据、个性化触达文案和发送后状态。',
+      },
+    },
+    tools: ['browser', 'database'],
+    acceptance: [
+      '一轮 run 结束后 task_runs 有本轮记录',
+      'run_actions 有本轮 search-round、platform-prefilter、candidate-screen 轨迹',
+      '已触达候选人必须写入 contacted_candidates 和 interaction_log',
+      '每次真实发送后必须立即 record_contacted',
+      'complianceCheck(runId) 能审到本轮轨迹',
+      '0 触达时必须能区分策略缺失、筛选无结果、权限/验证码、用户停止或平台限制',
+    ],
+  },
 };
 
 /** 读一份契约。优先外部 sandbox，缺失则内置兜底。 */

@@ -19,6 +19,11 @@ import {
   formatBossProtocolStages,
   formatBossPrefilterPlan,
 } from '../src/platform-protocols/boss';
+import {
+  MAIMAI_REQUIRED_STAGES_BEFORE_CONTACT,
+  maimaiBrowserActionPolicy,
+  maimaiProtocolStages,
+} from '../src/platform-protocols/maimai';
 import { loadSkill } from '../src/skills/loader';
 import { channelSkillAssetContext, runSkillOptionsForChannel } from '../src/orchestrator';
 import { buildSkillAssetManifest, formatSkillAssetManifest } from '../src/skills/skill-asset-manifest';
@@ -439,6 +444,112 @@ describe('boss platform protocol middle layer', () => {
       executionMode: 'execute',
       allowedContactNamesBeforeContact: ['温磊'],
     });
+  });
+
+  it('registers MaimaI protocol without preloading the legacy skill as runtime core', () => {
+    const protocol = getPlatformProtocol('maimai');
+    const stages = maimaiProtocolStages();
+    const prompt = protocol?.buildTaskPrompt({ channelLabel: '脉脉', fromCurrent: true, activeJob: agentJob });
+
+    expect(protocol?.name).toBe('maimai-platform.v1');
+    expect(protocol?.contractName).toBe('maimai-outreach.v1');
+    expect(contractNameForChannel('maimai')).toBe('maimai-outreach.v1');
+    expect(protocol?.writes).toEqual(['contacted_candidates', 'run_trace', 'interaction_log']);
+    expect(stages.map(stage => stage.id)).toEqual([
+      'session-precheck',
+      'strategy-source',
+      'search-round',
+      'platform-prefilter',
+      'candidate-screen',
+      'batch-confirmation',
+      'single-contact',
+      'exhaustion-and-risk',
+    ]);
+    expect(prompt).toContain('真实 Chrome');
+    expect(prompt).toContain('search-round');
+    expect(prompt).toContain('platform-prefilter');
+    expect(prompt).toContain('candidate-screen');
+    expect(protocol?.buildSystemContext?.()).toContain('maimai-recruiter skill');
+    expect(protocol?.processRules?.()).toContain('关键词 × 公司桶');
+
+    const manifest = buildPlatformProtocolManifest();
+    const maimaiManifest = manifest.find(entry => entry.channel === 'maimai');
+    expect(maimaiManifest).toMatchObject({
+      name: 'maimai-platform.v1',
+      version: 1,
+      contractName: 'maimai-outreach.v1',
+      stageCount: 8,
+      requiredStagesBeforeContact: MAIMAI_REQUIRED_STAGES_BEFORE_CONTACT,
+    });
+    expect(maimaiManifest?.hooks).toMatchObject({
+      systemContext: true,
+      taskPrompt: true,
+      browserActionPolicy: true,
+      completionPolicy: true,
+      processRules: true,
+    });
+    expect(formatPlatformProtocols()).toContain('maimai-platform.v1');
+    expect(formatPlatformProtocols()).toContain('Required before contact: search-round, platform-prefilter, candidate-screen');
+    expect(formatPlatformProtocolManifest()).toContain('maimai-outreach.v1');
+
+    const missingPrerequisite = maimaiBrowserActionPolicy(
+      { action: 'click', ref: 12, stage_id: 'platform-prefilter' },
+      { observedStageIds: ['session-precheck', 'strategy-source'], executionMode: 'execute' },
+    );
+    const allowedPrefilter = maimaiBrowserActionPolicy(
+      { action: 'click', ref: 12, stage_id: 'platform-prefilter' },
+      { observedStageIds: ['session-precheck', 'strategy-source', 'search-round'], executionMode: 'execute' },
+    );
+    const blockedGoto = maimaiBrowserActionPolicy(
+      { action: 'goto', url: 'https://maimai.cn/ent/v41/recruit/talents?tab=1' },
+      {},
+    );
+    const blockedScreenContact = maimaiBrowserActionPolicy(
+      { action: 'click', ref: 18, stage_id: 'candidate-screen' },
+      {
+        observedStageIds: ['session-precheck', 'strategy-source', 'search-round', 'platform-prefilter'],
+        executionMode: 'screen',
+        actionLabel: '[ref=18] <button> 立即沟通',
+      },
+    );
+
+    expect(missingPrerequisite.allowed).toBe(false);
+    expect(missingPrerequisite.reason).toContain('search-round');
+    expect(missingPrerequisite.recovery).toContain('stage_id=search-round');
+    expect(allowedPrefilter.allowed).toBe(true);
+    expect(blockedGoto.allowed).toBe(false);
+    expect(blockedGoto.reason).toContain('直接跳转 URL');
+    expect(blockedScreenContact.allowed).toBe(false);
+    expect(blockedScreenContact.reason).toContain('禁止触达');
+
+    expect(runSkillOptionsForChannel('maimai', 223, true, false, true, false, 'Agent工程师')).toMatchObject({
+      executionMode: 'prepare',
+      initialStageId: 'session-precheck',
+      requiredStagesBeforeContact: MAIMAI_REQUIRED_STAGES_BEFORE_CONTACT,
+      targetJobTitle: 'Agent工程师',
+    });
+
+    const assetManifest = buildSkillAssetManifest();
+    const maimaiAsset = assetManifest.find(entry => entry.channel === 'maimai');
+    expect(maimaiAsset).toMatchObject({
+      productProtocol: 'maimai-platform.v1',
+      mode: 'productized-fallback-only',
+      preloadLegacy: false,
+    });
+    expect(channelSkillAssetContext('maimai')).toMatchObject({
+      mode: 'fallback-only',
+    });
+
+    const assembly = buildHarnessRunAssembly('maimai', 'screen');
+    expect(assembly.platformProtocol).toBe('maimai-platform.v1');
+    expect(assembly.contractName).toBe('maimai-outreach.v1');
+    expect(assembly.skillAssetMode).toBe('productized-fallback-only');
+    expect(formatHarnessRunAssembly('maimai', 'screen')).toContain('maimai-platform.v1');
+
+    const chatContext = buildChatHarnessContext();
+    expect(chatContext).toContain('maimai-platform.v1');
+    expect(chatContext).toContain('maimai-outreach.v1');
+    expect(chatContext).toContain('maimai: mode=productized-fallback-only');
   });
 
   it('keeps legacy skill assets below product protocols', () => {
