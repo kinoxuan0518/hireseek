@@ -2545,8 +2545,9 @@ export async function startChat(): Promise<void> {
     process.stdout.write('\x1b[1A\x1b[2K');
   };
 
-  // "/" 的完整命令面板只在用户单独提交 "/" 时打开。
-  // 这样 "/后面接文字" 会作为正常用户输入，不会被 keypress 抢先截走。
+  // "/" 是输入联想，不是命令模式切换：
+  // 单独提交 "/" 时打开联想面板；选中项只回填输入框，用户还能继续补参数或文字。
+  // "/后面接文字" 会作为正常用户输入，不会被 keypress 抢先截走。
 
   // ── 极简启动（CC 风格：安静，信息在需要时出现）──────────────────────
   const job = createRuntimeContext().activeJob;
@@ -2727,6 +2728,7 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /export [标题]      导出会话      /sessions  查看会话'),
       chalk.gray('  /resume [ID/序号]   恢复历史会话，空参数时弹出列表'),
       chalk.gray('  /<技能名> [参数]    直接触发技能，如 /rbt、/找候选人'),
+      chalk.gray('  /                  打开命令联想；选中后只补全输入框，可继续补文字'),
       chalk.gray('  Esc                 打断生成 / 暂停任务 / 清空输入（Ctrl+C 同效）'),
       chalk.gray('  工具执行中           显示独立插话输入框，可编辑后 Enter 发送'),
       '',
@@ -2832,17 +2834,20 @@ export async function startChat(): Promise<void> {
       let text = await readFullInput(input);
       if (!text) { ask(); return; }
 
-      // 单独输入 / → 弹出命令选择器（方向键选，不用记命令名）
+      // 单独输入 / → 弹出联想面板。选中项只补全到输入框，不直接执行。
       if (text === '/') {
         clearSubmittedPromptLine();
         const { selectOption } = await import('./select');
         const entries = allEntries();
         const picked = await selectOption(
-          '选择命令',
+          '命令联想',
           entries.map(e => ({ label: e.cmd, hint: e.desc })),
+          { echo: false },
         );
         if (picked == null) { ask(); return; }
-        text = entries[picked].cmd;
+        preservedInterventionDraft = `${entries[picked].cmd} `;
+        ask();
+        return;
       }
 
       // 写入跨会话历史（多行压平成单行，↑ 调出时仍可直接复用）

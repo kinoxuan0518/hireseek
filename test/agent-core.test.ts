@@ -39,9 +39,13 @@ describe('agent core lower layer', () => {
 
     expect(source).toContain("if (text === '/')");
     expect(source).toContain('clearSubmittedPromptLine();');
+    expect(source).toContain('命令联想');
+    expect(source).toContain('选中项只补全到输入框，不直接执行');
+    expect(source).toContain('preservedInterventionDraft = `${entries[picked].cmd} `');
     expect(source).toContain('"/后面接文字" 会作为正常用户输入');
     expect(source).not.toContain('openSlashSelector');
     expect(source).not.toContain('setImmediate(() => void openSlashSelector())');
+    expect(source).not.toContain('text = entries[picked].cmd');
   });
 
   it('registers tools with schemas and side-effect policy', async () => {
