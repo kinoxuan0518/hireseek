@@ -1475,6 +1475,95 @@ describe('agent core lower layer', () => {
     }
   });
 
+  it('tracks live evidence for productized maimai run modes', async () => {
+    const { db } = await import('../src/db');
+    const {
+      collectDoctorReport,
+      hasPassingChannelDryRunEvidence,
+      hasPassingChannelPrepareEvidence,
+      hasPassingChannelScreenEvidence,
+      latestChannelDryRunEvidence,
+      latestChannelPrepareEvidence,
+      latestChannelScreenEvidence,
+    } = await import('../src/doctor');
+    const dryRunId = 17801;
+    const prepareRunId = 17802;
+    const screenRunId = 17803;
+    const ids = [dryRunId, prepareRunId, screenRunId];
+
+    const cleanup = () => {
+      for (const id of ids) {
+        db.prepare(`DELETE FROM screen_candidates WHERE run_id = ?`).run(id);
+        db.prepare(`DELETE FROM interaction_log WHERE run_id = ?`).run(id);
+        db.prepare(`DELETE FROM run_candidates WHERE run_id = ?`).run(id);
+        db.prepare(`DELETE FROM run_actions WHERE run_id = ?`).run(id);
+        db.prepare(`DELETE FROM agent_tool_calls WHERE run_id = ?`).run(id);
+        db.prepare(`DELETE FROM task_runs WHERE id = ?`).run(id);
+      }
+    };
+
+    cleanup();
+    try {
+      db.prepare(`
+        INSERT INTO task_runs (id, job_id, channel, mode, started_at, finished_at, status, contacted_count, skipped_count)
+        VALUES (?, 'agent-engineer', 'maimai', 'dry_run', datetime('now','localtime'), datetime('now','localtime'), 'completed', 0, 0)
+      `).run(dryRunId);
+      db.prepare(`
+        INSERT INTO run_actions (run_id, job_id, channel, seq, action, target, detail, ok, stage_id, action_label)
+        VALUES (?, 'agent-engineer', 'maimai', 1, 'snapshot', 'page', 'observe maimai page', 1, 'session-precheck', '脉脉招聘页')
+      `).run(dryRunId);
+      db.prepare(`
+        INSERT INTO agent_tool_calls (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, side_effect, mode, stage_id)
+        VALUES (?, 'maimai-dry-run-test', 'maimai-dry-1', 'browser', '{"action":"snapshot"}', 'ok', 1, 0, 'dry_run', 'session-precheck')
+      `).run(dryRunId);
+
+      db.prepare(`
+        INSERT INTO task_runs (id, job_id, channel, mode, started_at, finished_at, status, contacted_count, skipped_count)
+        VALUES (?, 'agent-engineer', 'maimai', 'prepare', datetime('now','localtime'), datetime('now','localtime'), 'completed', 0, 0)
+      `).run(prepareRunId);
+      db.prepare(`
+        INSERT INTO run_actions (run_id, job_id, channel, seq, action, target, detail, ok, stage_id, action_label)
+        VALUES (?, 'agent-engineer', 'maimai', 1, 'type', 'keyword', 'set search keyword', 1, 'search-round', '关键词输入框')
+      `).run(prepareRunId);
+      db.prepare(`
+        INSERT INTO agent_tool_calls (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, side_effect, mode, stage_id)
+        VALUES (?, 'maimai-prepare-test', 'maimai-prepare-1', 'browser', '{"action":"type"}', 'ok', 1, 1, 'prepare', 'search-round')
+      `).run(prepareRunId);
+      db.prepare(`
+        INSERT INTO agent_tool_calls (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, side_effect, mode, stage_id)
+        VALUES (?, 'maimai-prepare-test', 'maimai-prepare-2', 'browser', '{"action":"click"}', 'ok', 1, 1, 'prepare', 'platform-prefilter')
+      `).run(prepareRunId);
+
+      db.prepare(`
+        INSERT INTO task_runs (id, job_id, channel, mode, started_at, finished_at, status, contacted_count, skipped_count)
+        VALUES (?, 'agent-engineer', 'maimai', 'screen', datetime('now','localtime'), datetime('now','localtime'), 'completed', 0, 0)
+      `).run(screenRunId);
+      db.prepare(`
+        INSERT INTO run_actions (run_id, job_id, channel, seq, action, target, detail, ok, stage_id, action_label)
+        VALUES (?, 'agent-engineer', 'maimai', 1, 'click', 'candidate-card', 'open candidate detail', 1, 'candidate-screen', '候选人卡片')
+      `).run(screenRunId);
+      db.prepare(`
+        INSERT INTO agent_tool_calls (run_id, session_id, tool_call_id, tool_name, input_summary, output_summary, ok, side_effect, mode, stage_id)
+        VALUES (?, 'maimai-screen-test', 'maimai-screen-1', 'browser', '{"action":"click"}', 'ok', 1, 1, 'screen', 'candidate-screen')
+      `).run(screenRunId);
+      db.prepare(`
+        INSERT INTO screen_candidates (run_id, candidate_fingerprint, job_id, channel, recommendation, score, evidence, risk_flags, fit_tags)
+        VALUES (?, 'maimai-screen-candidate', 'agent-engineer', 'maimai', 'contact', 82, 'Agent platform experience', '[]', '["Agent"]')
+      `).run(screenRunId);
+
+      expect(hasPassingChannelDryRunEvidence(latestChannelDryRunEvidence('maimai'))).toBe(true);
+      expect(hasPassingChannelPrepareEvidence(latestChannelPrepareEvidence('maimai'))).toBe(true);
+      expect(hasPassingChannelScreenEvidence(latestChannelScreenEvidence('maimai'))).toBe(true);
+
+      const report = collectDoctorReport();
+      expect(report.checks.find(check => check.name === 'Live 脉脉 prepare')).toMatchObject({ status: 'pass' });
+      expect(report.checks.find(check => check.name === 'Live 脉脉 screen')).toMatchObject({ status: 'pass' });
+      expect(report.checks.find(check => check.name === 'Live 脉脉 run')).toMatchObject({ status: 'pass' });
+    } finally {
+      cleanup();
+    }
+  });
+
   it('formats product doctor report without executing live browser workflows', async () => {
     const { collectDoctorReport, formatDoctorReport } = await import('../src/doctor');
     const { createToolRegistry } = await import('../src/agent-core/tool-registry');
@@ -1537,10 +1626,14 @@ describe('agent core lower layer', () => {
     expect(text).toContain('HireSeek Doctor');
     expect(text).toContain('下层 Agent Core');
     expect(text).toContain('BOSS protocol wiring');
+    expect(text).toContain('脉脉 protocol wiring');
     expect(text).toContain('Recruiting capabilities');
     expect(text).toContain('Live BOSS run');
     expect(text).toContain('Live BOSS prepare');
     expect(text).toContain('Live BOSS screen');
+    expect(text).toContain('Live 脉脉 run');
+    expect(text).toContain('Live 脉脉 prepare');
+    expect(text).toContain('Live 脉脉 screen');
     expect(text).toContain('Pending run states');
     expect(text).toContain('Task run lifecycle');
     expect(text).toContain('Context compaction ledger');
@@ -1554,6 +1647,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Platform protocol manifest');
     expect(text).toContain('Capability manifest');
     expect(text).toContain('Skill asset manifest');
+    expect(text).toContain('Legacy 脉脉 skill availability');
     expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Runner tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Pending run states' && c.status === 'warn')).toBe(true);

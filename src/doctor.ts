@@ -16,6 +16,7 @@ import { collectSessionIntegrityReport } from './agent-core/session-integrity';
 import { collectHarnessFailureReport } from './agent-core/failure-classifier';
 import { latestRunAssemblySnapshots } from './agent-core/run-assembly-store';
 import { contractWritesForChannel } from './contracts';
+import type { Channel } from './types';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 export type DoctorLayer = 'lower' | 'middle' | 'upper' | 'external';
@@ -84,7 +85,8 @@ function recentPendingRunStateDetails(limit = 3): string[] {
     });
 }
 
-export interface BossDryRunEvidence {
+export interface ChannelDryRunEvidence {
+  channel: Channel;
   id: number;
   status: string;
   contactedCount: number;
@@ -95,18 +97,22 @@ export interface BossDryRunEvidence {
   sideEffects: number;
 }
 
-export interface BossPrepareEvidence extends BossDryRunEvidence {
+export interface ChannelPrepareEvidence extends ChannelDryRunEvidence {
   successfulSideEffects: number;
   unsafeSuccessfulActions: number;
 }
 
-export interface BossScreenEvidence extends BossPrepareEvidence {
+export interface ChannelScreenEvidence extends ChannelPrepareEvidence {
   candidateScreenActions: number;
   screenCandidates: number;
   recommendedContacts: number;
 }
 
-export function hasPassingBossDryRunEvidence(evidence: BossDryRunEvidence | null): boolean {
+export type BossDryRunEvidence = ChannelDryRunEvidence;
+export type BossPrepareEvidence = ChannelPrepareEvidence;
+export type BossScreenEvidence = ChannelScreenEvidence;
+
+export function hasPassingChannelDryRunEvidence(evidence: ChannelDryRunEvidence | null): boolean {
   return !!evidence
     && evidence.status === 'completed'
     && evidence.contactedCount === 0
@@ -117,10 +123,15 @@ export function hasPassingBossDryRunEvidence(evidence: BossDryRunEvidence | null
     && evidence.sideEffects === 0;
 }
 
-function latestBossDryRunEvidence(): BossDryRunEvidence | null {
+export function hasPassingBossDryRunEvidence(evidence: BossDryRunEvidence | null): boolean {
+  return hasPassingChannelDryRunEvidence(evidence);
+}
+
+export function latestChannelDryRunEvidence(channel: Channel): ChannelDryRunEvidence | null {
   try {
     return db.prepare(`
       SELECT
+        task_runs.channel,
         task_runs.id,
         task_runs.status,
         task_runs.contacted_count AS contactedCount,
@@ -130,16 +141,16 @@ function latestBossDryRunEvidence(): BossDryRunEvidence | null {
         (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id) AS toolCalls,
         (SELECT COUNT(*) FROM agent_tool_calls WHERE run_id = task_runs.id AND side_effect = 1) AS sideEffects
       FROM task_runs
-      WHERE channel = 'boss' AND mode = 'dry_run' AND status = 'completed'
+      WHERE channel = ? AND mode = 'dry_run' AND status = 'completed'
       ORDER BY id DESC
       LIMIT 1
-    `).get() as BossDryRunEvidence | undefined ?? null;
+    `).get(channel) as ChannelDryRunEvidence | undefined ?? null;
   } catch {
     return null;
   }
 }
 
-export function hasPassingBossPrepareEvidence(evidence: BossPrepareEvidence | null): boolean {
+export function hasPassingChannelPrepareEvidence(evidence: ChannelPrepareEvidence | null): boolean {
   return !!evidence
     && evidence.status === 'completed'
     && evidence.contactedCount === 0
@@ -151,10 +162,15 @@ export function hasPassingBossPrepareEvidence(evidence: BossPrepareEvidence | nu
     && evidence.unsafeSuccessfulActions === 0;
 }
 
-function latestBossPrepareEvidence(): BossPrepareEvidence | null {
+export function hasPassingBossPrepareEvidence(evidence: BossPrepareEvidence | null): boolean {
+  return hasPassingChannelPrepareEvidence(evidence);
+}
+
+export function latestChannelPrepareEvidence(channel: Channel): ChannelPrepareEvidence | null {
   try {
     return db.prepare(`
       SELECT
+        task_runs.channel,
         task_runs.id,
         task_runs.status,
         task_runs.contacted_count AS contactedCount,
@@ -167,23 +183,24 @@ function latestBossPrepareEvidence(): BossPrepareEvidence | null {
         (
           SELECT COUNT(*) FROM agent_tool_calls
           WHERE run_id = task_runs.id AND ok = 1 AND (
-            tool_name = 'record_contacted' OR (
+            tool_name IN ('prepare_contact', 'record_contacted') OR
+            stage_id IN ('candidate-screen', 'batch-confirmation', 'single-contact') OR (
               tool_name = 'browser' AND json_valid(input_summary) = 1
-              AND json_extract(input_summary, '$.action') IN ('type', 'press', 'goto')
+              AND json_extract(input_summary, '$.action') = 'goto'
             )
           )
         ) AS unsafeSuccessfulActions
       FROM task_runs
-      WHERE channel = 'boss' AND mode = 'prepare' AND status = 'completed'
+      WHERE channel = ? AND mode = 'prepare' AND status = 'completed'
       ORDER BY id DESC
       LIMIT 1
-    `).get() as BossPrepareEvidence | undefined ?? null;
+    `).get(channel) as ChannelPrepareEvidence | undefined ?? null;
   } catch {
     return null;
   }
 }
 
-export function hasPassingBossScreenEvidence(evidence: BossScreenEvidence | null): boolean {
+export function hasPassingChannelScreenEvidence(evidence: ChannelScreenEvidence | null): boolean {
   return !!evidence
     && evidence.status === 'completed'
     && evidence.contactedCount === 0
@@ -198,10 +215,15 @@ export function hasPassingBossScreenEvidence(evidence: BossScreenEvidence | null
     && evidence.unsafeSuccessfulActions === 0;
 }
 
-function latestBossScreenEvidence(): BossScreenEvidence | null {
+export function hasPassingBossScreenEvidence(evidence: BossScreenEvidence | null): boolean {
+  return hasPassingChannelScreenEvidence(evidence);
+}
+
+export function latestChannelScreenEvidence(channel: Channel): ChannelScreenEvidence | null {
   try {
     return db.prepare(`
       SELECT
+        task_runs.channel,
         task_runs.id,
         task_runs.status,
         task_runs.contacted_count AS contactedCount,
@@ -223,20 +245,50 @@ function latestBossScreenEvidence(): BossScreenEvidence | null {
                 json_valid(input_summary) = 0 OR COALESCE(json_extract(input_summary, '$.greeting_sent'), 1) != 0
               )
             ) OR
-            (tool_name != 'record_contacted' AND stage_id = 'single-contact') OR (
+            (tool_name != 'record_contacted' AND stage_id IN ('batch-confirmation', 'single-contact')) OR (
               tool_name = 'browser' AND json_valid(input_summary) = 1
               AND json_extract(input_summary, '$.action') IN ('type', 'press', 'goto')
             )
           )
         ) AS unsafeSuccessfulActions
       FROM task_runs
-      WHERE channel = 'boss' AND mode = 'screen' AND status = 'completed'
+      WHERE channel = ? AND mode = 'screen' AND status = 'completed'
       ORDER BY id DESC
       LIMIT 1
-    `).get() as BossScreenEvidence | undefined ?? null;
+    `).get(channel) as ChannelScreenEvidence | undefined ?? null;
   } catch {
     return null;
   }
+}
+
+function channelLabel(channel: Channel): string {
+  switch (channel) {
+    case 'boss': return 'BOSS';
+    case 'maimai': return '脉脉';
+    case 'linkedin': return 'LinkedIn';
+    case 'followup': return 'Followup';
+  }
+}
+
+function liveDryRunDetail(channel: Channel, evidence: ChannelDryRunEvidence | null): string {
+  const label = channelLabel(channel);
+  return evidence
+    ? `latest dry-run #${evidence.id}: status=${evidence.status}, contacted=${evidence.contactedCount}, candidates=${evidence.runCandidates}, interactions=${evidence.interactions}, actions=${evidence.runActions}, toolCalls=${evidence.toolCalls}, sideEffects=${evidence.sideEffects}`
+    : `no ${label} dry-run evidence; run hireseek run ${channel} --here --dry-run before real outreach`;
+}
+
+function livePrepareDetail(channel: Channel, evidence: ChannelPrepareEvidence | null): string {
+  const label = channelLabel(channel);
+  return evidence
+    ? `latest prepare #${evidence.id}: status=${evidence.status}, contacted=${evidence.contactedCount}, candidates=${evidence.runCandidates}, interactions=${evidence.interactions}, actions=${evidence.runActions}, toolCalls=${evidence.toolCalls}, successfulSideEffects=${evidence.successfulSideEffects}, unsafeSuccessfulActions=${evidence.unsafeSuccessfulActions}`
+    : `no ${label} prepare evidence; run hireseek run ${channel} --here --prepare before real outreach`;
+}
+
+function liveScreenDetail(channel: Channel, evidence: ChannelScreenEvidence | null): string {
+  const label = channelLabel(channel);
+  return evidence
+    ? `latest screen #${evidence.id}: status=${evidence.status}, contacted=${evidence.contactedCount}, candidates=${evidence.runCandidates}, interactions=${evidence.interactions}, actions=${evidence.runActions}, toolCalls=${evidence.toolCalls}, candidateScreenActions=${evidence.candidateScreenActions}, screenCandidates=${evidence.screenCandidates}, recommendedContacts=${evidence.recommendedContacts}, successfulSideEffects=${evidence.successfulSideEffects}, unsafeSuccessfulActions=${evidence.unsafeSuccessfulActions}`
+    : `no ${label} screen evidence; run hireseek run ${channel} --here --screen before real outreach`;
 }
 
 export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
@@ -585,15 +637,16 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
       : `${protocolManifest.length} protocol manifest entr${protocolManifest.length === 1 ? 'y' : 'ies'} with contract-aligned writes`,
   ));
 
-  if (boss) {
-    const bossEntry = protocolManifest.find(entry => entry.channel === 'boss');
+  for (const protocol of protocols) {
+    const entry = protocolManifest.find(item => item.channel === protocol.channel);
+    const label = channelLabel(protocol.channel);
     checks.push(check(
       'middle',
-      'BOSS protocol wiring',
-      bossEntry && protocolProblems.every(problem => !problem.startsWith('boss:')) ? 'pass' : 'fail',
-      bossEntry
-        ? `contract=${bossEntry.contractName}, stages=${bossEntry.stageCount}, writes=${bossEntry.writes.join(', ')}`
-        : 'boss protocol manifest missing',
+      `${label} protocol wiring`,
+      entry && protocolProblems.every(problem => !problem.startsWith(`${protocol.channel}:`)) ? 'pass' : 'fail',
+      entry
+        ? `contract=${entry.contractName}, stages=${entry.stageCount}, writes=${entry.writes.join(', ')}`
+        : `${protocol.channel} protocol manifest missing`,
     ));
   }
 
@@ -641,43 +694,38 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
       : `${capabilityManifest.length} manifest entries with explicit contracts`,
   ));
 
-  const prepare = latestBossPrepareEvidence();
-  const preparePassed = hasPassingBossPrepareEvidence(prepare);
-  checks.push(check(
-    'upper',
-    'Live BOSS prepare',
-    preparePassed ? 'pass' : 'warn',
-    prepare
-      ? `latest prepare #${prepare.id}: status=${prepare.status}, contacted=${prepare.contactedCount}, candidates=${prepare.runCandidates}, interactions=${prepare.interactions}, actions=${prepare.runActions}, toolCalls=${prepare.toolCalls}, successfulSideEffects=${prepare.successfulSideEffects}, unsafeSuccessfulActions=${prepare.unsafeSuccessfulActions}`
-      : 'no BOSS prepare evidence; run hireseek run boss --here --prepare before real outreach',
-  ));
+  for (const channel of protocolChannels) {
+    const label = channelLabel(channel);
+    const prepare = latestChannelPrepareEvidence(channel);
+    checks.push(check(
+      'upper',
+      `Live ${label} prepare`,
+      hasPassingChannelPrepareEvidence(prepare) ? 'pass' : 'warn',
+      livePrepareDetail(channel, prepare),
+    ));
 
-  const screen = latestBossScreenEvidence();
-  const screenPassed = hasPassingBossScreenEvidence(screen);
-  checks.push(check(
-    'upper',
-    'Live BOSS screen',
-    screenPassed ? 'pass' : 'warn',
-    screen
-      ? `latest screen #${screen.id}: status=${screen.status}, contacted=${screen.contactedCount}, candidates=${screen.runCandidates}, interactions=${screen.interactions}, actions=${screen.runActions}, toolCalls=${screen.toolCalls}, candidateScreenActions=${screen.candidateScreenActions}, screenCandidates=${screen.screenCandidates}, recommendedContacts=${screen.recommendedContacts}, successfulSideEffects=${screen.successfulSideEffects}, unsafeSuccessfulActions=${screen.unsafeSuccessfulActions}`
-      : 'no BOSS screen evidence; run hireseek run boss --here --screen before real outreach',
-  ));
+    const screen = latestChannelScreenEvidence(channel);
+    checks.push(check(
+      'upper',
+      `Live ${label} screen`,
+      hasPassingChannelScreenEvidence(screen) ? 'pass' : 'warn',
+      liveScreenDetail(channel, screen),
+    ));
 
-  const dryRun = latestBossDryRunEvidence();
-  const dryRunPassed = hasPassingBossDryRunEvidence(dryRun);
-  checks.push(check(
-    'upper',
-    'Live BOSS run',
-    dryRunPassed ? 'pass' : 'warn',
-    dryRun
-      ? `latest dry-run #${dryRun.id}: status=${dryRun.status}, contacted=${dryRun.contactedCount}, candidates=${dryRun.runCandidates}, interactions=${dryRun.interactions}, actions=${dryRun.runActions}, toolCalls=${dryRun.toolCalls}, sideEffects=${dryRun.sideEffects}`
-      : 'no BOSS dry-run evidence; run hireseek run boss --here --dry-run before real outreach',
-  ));
+    const dryRun = latestChannelDryRunEvidence(channel);
+    checks.push(check(
+      'upper',
+      `Live ${label} run`,
+      hasPassingChannelDryRunEvidence(dryRun) ? 'pass' : 'warn',
+      liveDryRunDetail(channel, dryRun),
+    ));
+  }
 
   const skillHomes = runtime.paths.skillHomes;
   const existingSkillHomes = skillHomes.filter(home => fs.existsSync(home));
   const externalSkills = listClaudeSkills();
   const hasBossSkill = externalSkills.some(skill => /boss|boss直聘|bossz/i.test(`${skill.name} ${skill.description}`));
+  const hasMaimaiSkill = externalSkills.some(skill => /maimai|脉脉/i.test(`${skill.name} ${skill.description}`));
   checks.push(check(
     'external',
     'External skill homes',
@@ -689,6 +737,12 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     'Legacy BOSS skill availability',
     hasBossSkill ? 'pass' : 'warn',
     hasBossSkill ? 'BOSS skill asset is visible as external knowledge/fallback' : 'no BOSS external skill found in configured homes',
+  ));
+  checks.push(check(
+    'external',
+    'Legacy 脉脉 skill availability',
+    hasMaimaiSkill ? 'pass' : 'warn',
+    hasMaimaiSkill ? '脉脉 skill asset is visible as external knowledge/fallback' : 'no 脉脉 external skill found in configured homes',
   ));
   checks.push(check(
     'external',
@@ -723,20 +777,23 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   const status = worstStatus(checks.map(c => c.status));
   const nextSteps: string[] = [];
   if (status === 'fail') nextSteps.push('先修复 fail 项，再跑真实渠道任务。');
-  if (checks.some(c => c.name === 'Live BOSS run' && c.status === 'warn')) {
-    nextSteps.push('真实页面验收从 `hireseek run boss --here --dry-run` 开始，不要直接真实触达。');
+  for (const channel of protocolChannels) {
+    const label = channelLabel(channel);
+    if (checks.some(c => c.name === `Live ${label} run` && c.status === 'warn')) {
+      nextSteps.push(`真实页面验收从 \`hireseek run ${channel} --here --dry-run\` 开始，不要直接真实触达。`);
+    }
+    if (checks.some(c => c.name === `Live ${label} prepare` && c.status === 'warn')) {
+      nextSteps.push(`真实触达前运行 \`hireseek run ${channel} --here --prepare\`，确认页面准备和筛选提交安全通过。`);
+    }
+    if (checks.some(c => c.name === `Live ${label} screen` && c.status === 'warn')) {
+      nextSteps.push(`真实触达前运行 \`hireseek run ${channel} --here --screen\`，确认候选人查看与筛选判断安全通过。`);
+    }
   }
   if (checks.some(c => c.name === 'Pending run states' && c.status === 'warn')) {
     nextSteps.push('有暂停/失败的 run state：先用 `hireseek core` 查看停在哪，再从当前真实页面继续。');
   }
   if (checks.some(c => c.name === 'Task run lifecycle' && c.status === 'warn')) {
     nextSteps.push('有超时 running run：先用 `hireseek runs cleanup` 预览，再用 `hireseek runs cleanup --apply` 收口。');
-  }
-  if (checks.some(c => c.name === 'Live BOSS prepare' && c.status === 'warn')) {
-    nextSteps.push('真实触达前运行 `hireseek run boss --here --prepare`，确认自动切职位和筛选提交安全通过。');
-  }
-  if (checks.some(c => c.name === 'Live BOSS screen' && c.status === 'warn')) {
-    nextSteps.push('真实触达前运行 `hireseek run boss --here --screen`，确认候选人查看与筛选判断安全通过。');
   }
   if (checks.some(c => c.layer === 'middle' && c.status !== 'pass')) {
     nextSteps.push('中层协议/能力不完整时，先补产品协议，不回退到复制 skill。');
