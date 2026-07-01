@@ -42,10 +42,10 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 type SkillExecutionMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
 
 // ── 风控规则（代码层硬约束，不依赖模型遵守 prompt）──────────────────────
-/** 打招呼类按钮的最小点击间隔（毫秒） */
+/** 招聘触达类按钮的最小点击间隔（毫秒） */
 export const GREETING_MIN_INTERVAL_MS = 5000;
-/** 打招呼类按钮文案特征 */
-export const GREETING_PATTERN = /打招呼|立即沟通|继续沟通|和Ta聊聊|聊一聊/;
+/** 招聘触达类按钮文案特征。平台细节仍由中层协议进一步约束。 */
+export const GREETING_PATTERN = /打招呼|立即沟通|继续沟通|和Ta聊聊|聊一聊|发送(?:消息|后留在此页|后继续沟通)?/;
 /** 每日上限弹窗特征 → 立即硬终止 */
 export const DAILY_LIMIT_PATTERN = /今日主动沟通数已达上限|需付费购买|今日沟通已达上限|超出今日限制/;
 /** 频率告警特征 → 软退避 10-30 秒 */
@@ -277,14 +277,13 @@ const DRY_RUN_GUIDE = `
 const PREPARE_GUIDE = `
 ## Prepare 安全验收模式（代码硬约束）
 
-本轮只允许完成 BOSS 的目标职位定位与筛选面板前置，不允许查看或联系候选人：
-- 只能通过当前页面内 click/scroll 切换到 active job，并逐项设置筛选条件。
-- type 和 press 在 prepare 中一律禁止，避免误把导航词写入聊天框或触发发送。
-- 所有有副作用动作必须填写 stage_id，且只能使用 job-positioning 或 prefilter。
-- 点击只允许目标职位导航和筛选控件；无法识别语义的控件会被拒绝。
+本轮只允许完成当前渠道的页面准备、站内定位、搜索和筛选前置，不允许查看或联系候选人：
+- 只能使用当前页面内的真实入口完成准备动作；不要用 URL 深链绕过站内流程。
+- 所有有副作用动作必须填写 stage_id，且只能使用当前平台协议声明的准备阶段。
+- click/type/press 是否允许由当前平台协议判定；不确定时先 snapshot，不要试探候选人沟通控件。
 - 禁止点击打招呼/立即沟通/发送消息等候选人沟通控件。
-- 如果筛选面板显示“确定/应用/确认”，必须成功点击提交；不能只凭 active 文案宣称完成。
-- 完成目标职位确认和筛选激活态验收后立即输出总结，不进入 candidate-screen/single-contact。
+- 如果筛选或搜索面板显示“确定/应用/确认/搜索”，必须成功提交；不能只凭 active 文案宣称完成。
+- 完成页面准备、搜索和筛选激活态验收后立即输出总结，不进入候选人处理或触达阶段。
 `.trim();
 
 const SCREEN_GUIDE = `
@@ -295,9 +294,9 @@ const SCREEN_GUIDE = `
 - 禁止 type / press / goto，避免写入聊天框、发送消息或跳过站内流程。
 - 禁止点击打招呼/立即沟通/发送消息等沟通控件；代码层会拒绝。
 - 禁止调用 prepare_contact 建立真实触达检查点。
-- 从候选人详情回列表只能在 candidate-screen 阶段用 browser back，或使用页面内可见返回/推荐牛人入口；不要用 press Escape。
+- 从候选人详情回列表只能在 candidate-screen 阶段用 browser back，或使用页面内可见返回/列表入口；不要用 press Escape。
 - 职位定位/筛选阶段禁止用 back，避免回到旧职位或旧筛选状态。
-- 返回列表或切换 推荐/最新/精选 tab 前必须重新 snapshot，并确认目标 ref 的 scope/rect/context 是列表导航或页签，不是候选人卡片。
+- 返回列表或切换候选人列表页签前必须重新 snapshot，并确认目标 ref 的 scope/rect/context 是列表导航或页签，不是候选人卡片。
 - 每查看并判断一个候选人后必须调用 record_screened_candidate，记录 contact/maybe/skip、证据和风险。
 - 不要用 record_contacted 做 screen 记录；record_contacted 只属于正式触达。
 - 结束时输出：查看了哪些候选人、谁值得正式触达、谁应跳过、证据和风险点。
@@ -804,7 +803,7 @@ export class DomRunner implements LLMRunner {
 
       // 兜底：循环里若有 tool_call 走了未知/非 function 分支没回 tool 响应，会留下
       // 悬空 tool_call_id，下一次请求被 OpenAI 兼容端 400 拒。每次发请求前先补齐，
-      // 保证 assistant 的每个 tool_call 都有对应 tool 消息（真实 BOSS run 的稳定性兜底）。
+      // 保证 assistant 的每个 tool_call 都有对应 tool 消息，避免下轮请求因悬空 tool_call 失败。
       repairToolMessageHistoryInPlace(messages);
       const response = await this.client.chat.completions.create({
         model: this.model,
@@ -915,7 +914,7 @@ export class DomRunner implements LLMRunner {
           let error: string | null = null;
           let output: string;
           let parsed: Record<string, unknown> = {};
-          const requiredStages = ['prefilter', 'dom-probe', 'candidate-screen'];
+          const requiredStages = options.requiredStagesBeforeContact ?? [];
           const observedStages = new Set(successfulStageIds(result.trace));
           const missingStages = requiredStages.filter(stageId => !observedStages.has(stageId));
           try {

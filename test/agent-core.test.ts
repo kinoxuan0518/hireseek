@@ -633,6 +633,15 @@ describe('agent core lower layer', () => {
     expect(browserActionHasSideEffect({ action: 'click', ref: 1 }, 'screen')).toBe(true);
   });
 
+  it('keeps runner mode guides platform-neutral', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'src', 'runners', 'dom-runner.ts'), 'utf8');
+
+    expect(source).not.toContain('本轮只允许完成 BOSS');
+    expect(source).not.toContain('type 和 press 在 prepare 中一律禁止');
+    expect(source).not.toContain("const requiredStages = ['prefilter', 'dom-probe', 'candidate-screen']");
+    expect(source).toContain('const requiredStages = options.requiredStagesBeforeContact ?? []');
+  });
+
   it('does not treat failed or blocked actions as completed protocol stages', async () => {
     const { successfulStageIds } = await import('../src/runners/dom-runner');
 
@@ -740,6 +749,115 @@ describe('agent core lower layer', () => {
       }),
     ]);
     expect(result.trace).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'prepare_contact', ok: true, stageId: 'candidate-screen' }),
+      expect.objectContaining({ action: 'click', target: 'ref=2', ok: true, stageId: 'single-contact' }),
+    ]));
+  });
+
+  it('uses platform required stages for maimai contact checkpoints', async () => {
+    const { DomRunner } = await import('../src/runners/dom-runner');
+    const {
+      MAIMAI_REQUIRED_STAGES_BEFORE_CONTACT,
+      maimaiBrowserActionPolicy,
+      maimaiRunCompletionPolicy,
+    } = await import('../src/platform-protocols/maimai');
+    const runner = new DomRunner('https://example.invalid', 'test-key', 'test-model') as any;
+    const toolCall = (id: string, name: string, args: Record<string, unknown>) => ({
+      role: 'assistant',
+      content: null,
+      tool_calls: [{
+        id,
+        type: 'function',
+        function: { name, arguments: JSON.stringify(args) },
+      }],
+    });
+    const prepared = {
+      name: '脉脉候选人',
+      company: '示例科技',
+      title: 'Agent 工程师',
+      evidence: '页面显示 2 年 Agent 平台研发经验',
+      personalization_evidence: '2 年 Agent 平台研发经验',
+      message_intent: '讨论 Agent 工程化岗位',
+      greeting_text: '您好，看到您有 Agent 平台研发经验，想和您聊聊工程化方向。',
+      fit_score: 84,
+    };
+    const responses = [
+      toolCall('tm-strategy', 'browser', { action: 'snapshot', stage_id: 'strategy-source' }),
+      toolCall('tm-search', 'browser', { action: 'snapshot', stage_id: 'search-round' }),
+      toolCall('tm-filter', 'browser', { action: 'snapshot', stage_id: 'platform-prefilter' }),
+      toolCall('tm-screen', 'browser', { action: 'click', ref: 1, stage_id: 'candidate-screen' }),
+      toolCall('tm-confirm', 'browser', { action: 'snapshot', stage_id: 'batch-confirmation' }),
+      toolCall('tm-prepare', 'prepare_contact', prepared),
+      toolCall('tm-send', 'browser', { action: 'click', ref: 2, stage_id: 'single-contact' }),
+      toolCall('tm-record', 'record_contacted', {
+        ...prepared,
+        greeting_sent: true,
+        contact_token: 'contact-901-1',
+      }),
+      { role: 'assistant', content: '触达人数: 1\n跳过人数: 0\n候选人摘要: 脉脉单人触达完成' },
+    ];
+    const create = vi.fn(async () => ({ choices: [{ message: responses.shift() }] }));
+    runner.client = { chat: { completions: { create } } };
+
+    let snapshot = [
+      'URL: https://maimai.cn/ent/v41/recruit/talents?tab=1',
+      '[ref=1] <div> 脉脉候选人 2年 Agent 平台研发经验 class="candidate-card" pointer=true',
+      'Agent 开发工程师',
+    ].join('\n');
+    const actions: Array<{ action: string; ref?: number; stage_id?: string }> = [];
+    const session = {
+      kind: 'chrome-applescript' as const,
+      label: 'fake maimai session',
+      async goto() {},
+      async url() { return 'https://maimai.cn/ent/v41/recruit/talents?tab=1'; },
+      async bodyText() { return snapshot; },
+      async snapshot() { return snapshot; },
+      async act(input: { action: string; ref?: number; stage_id?: string }) {
+        actions.push(input);
+        if (input.action === 'click' && input.ref === 1) {
+          snapshot = [
+            'URL: https://maimai.cn/ent/v41/recruit/talents?tab=1',
+            '[ref=2] <button> 发送 class="contact-btn" context="脉脉候选人 2年 Agent 平台研发经验"',
+            'Agent 开发工程师',
+          ].join('\n');
+        } else if (input.action === 'click' && input.ref === 2) {
+          snapshot = [
+            'URL: https://maimai.cn/ent/v41/recruit/talents?tab=1',
+            '[ref=2] <button> 沟通 class="contact-btn" context="脉脉候选人"',
+            'Agent 开发工程师',
+          ].join('\n');
+        }
+        return snapshot;
+      },
+    };
+
+    const result = await runner.runSkill(session, 'system', 'task', undefined, {
+      executionMode: 'execute',
+      runId: 901,
+      sessionId: 'maimai-contact-handshake-test',
+      initialStageId: 'session-precheck',
+      requiredStagesBeforeContact: MAIMAI_REQUIRED_STAGES_BEFORE_CONTACT,
+      browserActionPolicy: maimaiBrowserActionPolicy,
+      completionPolicy: maimaiRunCompletionPolicy,
+      targetJobTitle: 'Agent工程师',
+    });
+
+    expect(actions.filter(action => action.action === 'click')).toEqual([
+      { action: 'click', ref: 1, stage_id: 'candidate-screen' },
+      { action: 'click', ref: 2, stage_id: 'single-contact' },
+    ]);
+    expect(result.contacted).toBe(1);
+    expect(result.contactedList).toEqual([
+      expect.objectContaining({
+        name: '脉脉候选人',
+        greetingSent: true,
+        score: 84,
+        evidence: '页面显示 2 年 Agent 平台研发经验',
+      }),
+    ]);
+    expect(result.trace).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'snapshot', ok: true, stageId: 'search-round' }),
+      expect.objectContaining({ action: 'snapshot', ok: true, stageId: 'platform-prefilter' }),
       expect.objectContaining({ action: 'prepare_contact', ok: true, stageId: 'candidate-screen' }),
       expect.objectContaining({ action: 'click', target: 'ref=2', ok: true, stageId: 'single-contact' }),
     ]));
