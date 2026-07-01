@@ -2556,13 +2556,8 @@ export async function startChat(): Promise<void> {
 
   const clearSlashSuggestionVisual = (): void => {
     if (!process.stdout.isTTY || slashSuggestRenderedLines <= 0) return;
-    process.stdout.write('\x1b7');
-    process.stdout.write('\n');
-    for (let i = 0; i < slashSuggestRenderedLines; i += 1) {
-      process.stdout.write('\x1b[2K');
-      if (i < slashSuggestRenderedLines - 1) process.stdout.write('\n');
-    }
-    process.stdout.write('\x1b8');
+    process.stdout.write(`\x1b[${slashSuggestRenderedLines}A\r`);
+    process.stdout.write(`\x1b[${slashSuggestRenderedLines}M`);
     slashSuggestRenderedLines = 0;
   };
 
@@ -2596,9 +2591,9 @@ export async function startChat(): Promise<void> {
     });
     lines.push(chalk.gray('    ↑↓ 移动 · Tab 补全 · Enter 发送当前输入 · Esc 收起'));
 
-    process.stdout.write('\x1b7');
-    process.stdout.write('\n' + lines.map(lineText => `\x1b[2K${lineText}`).join('\n'));
-    process.stdout.write('\x1b8');
+    process.stdout.write('\r\x1b[2K');
+    process.stdout.write(lines.map(lineText => `\x1b[2K${lineText}`).join('\n'));
+    process.stdout.write('\n');
     slashSuggestRenderedLines = lines.length;
     (rl as ReadlineInternals)._refreshLine?.();
   };
