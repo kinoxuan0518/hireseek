@@ -45,6 +45,9 @@ describe('agent core lower layer', () => {
     expect(source).toContain('SlashSuggestionController');
     expect(source).toContain('renderSlashSuggestionAnsi');
     expect(source).toContain('clearSlashSuggestionAnsi');
+    expect(source).toContain("cmd: '/completion'");
+    expect(source).toContain("text === '/completion'");
+    expect(source).toContain('formatCompletionAudit');
     expect(source).not.toContain("process.stdout.write('\\x1b7')");
     expect(source).not.toContain("process.stdout.write('\\n' + lines.map");
     expect(source).not.toContain('openSlashSelector');
@@ -80,6 +83,16 @@ describe('agent core lower layer', () => {
     expect(registry.validate()).toEqual([]);
     expect(registry.get('browser_act')?.policy.sideEffect).toBe(true);
     expect(registry.get('read_file')?.policy.sideEffect).toBe(false);
+    const completionRegistry = createToolRegistry([{
+      type: 'function',
+      function: {
+        name: 'completion_audit',
+        description: 'completion',
+        parameters: { type: 'object', properties: {} },
+      },
+    }]);
+    expect(completionRegistry.validate()).toEqual([]);
+    expect(completionRegistry.get('completion_audit')?.policy.sideEffect).toBe(false);
 
     const unclassified = createToolRegistry([{
       type: 'function',

@@ -1096,6 +1096,15 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'completion_audit',
+      description:
+        '只读判断当前证据是否足以标记整轮 HireSeek 迭代完成；输出阻塞项和下一步，不会运行真实招聘任务。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'platform_protocols',
       description:
         '只读查看 HireSeek 中层平台协议注册表：哪些渠道已经产品化、绑定了什么契约、是否接入 system context/action policy/compliance。',
@@ -1225,6 +1234,7 @@ export function describeToolCall(name: string, args: Record<string, unknown>): s
     case 'core_status':      return '🧱 查看 Agent Core';
     case 'harness_failure_review': return '🧯 复盘 Harness 失败';
     case 'product_doctor':   return '🩺 产品结构体检';
+    case 'completion_audit': return '✅ 判断完成状态';
     case 'platform_protocols': return '🧩 查看平台协议';
     case 'recruiting_capabilities': return '🧩 查看招聘能力';
     default:                 return `⚙ ${name}`;
@@ -2134,6 +2144,12 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
       return formatDoctorReport(collectDoctorReport(CHAT_TOOL_REGISTRY));
     }
 
+    case 'completion_audit': {
+      const { collectDoctorReport } = await import('./doctor');
+      const { collectCompletionAudit, formatCompletionAudit } = await import('./completion-audit');
+      return formatCompletionAudit(collectCompletionAudit(collectDoctorReport(CHAT_TOOL_REGISTRY)));
+    }
+
     case 'platform_protocols': {
       const { formatPlatformProtocols } = await import('./platform-protocols');
       return formatPlatformProtocols();
@@ -2486,6 +2502,7 @@ export async function startChat(): Promise<void> {
     { cmd: '/core', desc: 'Agent Core 状态（工具 / trace / memory / session）' },
     { cmd: '/failures', desc: 'Harness 失败复盘（环境 / 工具 / 协议）' },
     { cmd: '/doctor', desc: '产品结构体检（下层 / 中层 / skill 边界）' },
+    { cmd: '/completion', desc: '完成判定（是否可标记整轮迭代完成）' },
     { cmd: '/protocols', desc: '中层平台协议（产品化能力）' },
     { cmd: '/capabilities', desc: '中层招聘能力（话术 / 判断 / 搜索）' },
     { cmd: '/model', desc: '切换模型（flash/pro/自定义）' },
@@ -2797,6 +2814,7 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /core               Agent Core 状态（工具 / trace / memory / session）'),
       chalk.gray('  /failures           Harness 失败复盘（环境 / 工具 / 协议）'),
       chalk.gray('  /doctor             产品结构体检（下层 / 中层 / skill 边界）'),
+      chalk.gray('  /completion         完成判定（是否可标记整轮迭代完成）'),
       chalk.gray('  /protocols          中层平台协议（产品化能力）'),
       chalk.gray('  /capabilities       中层招聘能力（话术 / 判断 / 搜索）'),
       chalk.gray('  /model [名称]       切换模型（不带参数弹选择器）'),
@@ -2980,6 +2998,14 @@ export async function startChat(): Promise<void> {
       if (text === '/doctor') {
         const { collectDoctorReport, formatDoctorReport } = await import('./doctor');
         console.log('\n' + formatDoctorReport(collectDoctorReport(CHAT_TOOL_REGISTRY)) + '\n');
+        ask();
+        return;
+      }
+
+      if (text === '/completion' || text === '/complete' || text === '/done') {
+        const { collectDoctorReport } = await import('./doctor');
+        const { collectCompletionAudit, formatCompletionAudit } = await import('./completion-audit');
+        console.log('\n' + formatCompletionAudit(collectCompletionAudit(collectDoctorReport(CHAT_TOOL_REGISTRY))) + '\n');
         ask();
         return;
       }

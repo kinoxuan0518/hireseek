@@ -91,6 +91,7 @@ export const CORE_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
   core_status: { category: 'workflow', sideEffect: false },
   harness_failure_review: { category: 'workflow', sideEffect: false },
   product_doctor: { category: 'workflow', sideEffect: false },
+  completion_audit: { category: 'workflow', sideEffect: false },
   platform_protocols: { category: 'workflow', sideEffect: false },
   recruiting_capabilities: { category: 'workflow', sideEffect: false },
   update_config: { category: 'file', sideEffect: true, requiresApproval: true },
