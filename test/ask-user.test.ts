@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 
 const baseQuestion = {
@@ -61,5 +63,31 @@ describe('ask_user_question contract', () => {
     expect(questionsSchema.maxItems).toBe(3);
     expect(optionsSchema.minItems).toBe(2);
     expect(optionsSchema.maxItems).toBe(4);
+  });
+
+  it('uses editable choice input instead of hard-confirm selectors', () => {
+    const askUserSource = fs.readFileSync(path.join(process.cwd(), 'src', 'ask-user.ts'), 'utf8');
+    const chatSource = fs.readFileSync(path.join(process.cwd(), 'src', 'chat.ts'), 'utf8');
+
+    expect(askUserSource).toContain('askEditableChoice');
+    expect(askUserSource).not.toContain('selectOption');
+    expect(askUserSource).not.toContain('selectMultipleOptions');
+    expect(chatSource).toContain('Tab 把候选填入输入框，Enter 发送当前输入');
+    expect(chatSource).toContain('用户仍可补充或改写输入');
+  });
+
+  it('parses editable multi-select answers without requiring an "other" option', async () => {
+    const { parseEditableMultiChoiceAnswer } = await import('../src/ask-user');
+
+    expect(parseEditableMultiChoiceAnswer('继续, 停止，稍后处理')).toEqual(['继续', '停止', '稍后处理']);
+    expect(parseEditableMultiChoiceAnswer('我来补充一个新方案')).toEqual(['我来补充一个新方案']);
+  });
+
+  it('appends multi-select candidates without duplicating existing choices', async () => {
+    const { appendMultiChoiceDraft } = await import('../src/select');
+
+    expect(appendMultiChoiceDraft('', '继续')).toBe('继续');
+    expect(appendMultiChoiceDraft('继续', '停止')).toBe('继续, 停止');
+    expect(appendMultiChoiceDraft('继续, 停止', '继续')).toBe('继续, 停止');
   });
 });

@@ -5,7 +5,7 @@
 
 import readline from 'readline';
 import chalk from 'chalk';
-import { selectMultipleOptions, selectOption } from './select';
+import { askEditableChoice } from './select';
 
 export interface QuestionOption {
   label: string;
@@ -70,11 +70,11 @@ function askLine(prompt: string): Promise<string> {
   });
 }
 
-function optionChoices(question: Question): QuestionOption[] {
-  return [
-    ...question.options,
-    { label: '其他', description: '自定义输入' },
-  ];
+export function parseEditableMultiChoiceAnswer(answer: string): string[] {
+  return answer
+    .split(/[,\uFF0C\u3001]+/)
+    .map(part => part.trim())
+    .filter(Boolean);
 }
 
 export function validateAskUserQuestions(params: AskUserQuestionParams): void {
@@ -185,36 +185,24 @@ async function askSingleQuestion(
     return askWithTextFallback(question, prompt);
   }
 
-  const choices = optionChoices(question);
+  const choices = question.options;
   const selectQuestion = question.question;
   const options = choices.map(o => ({ label: o.label, hint: o.description }));
 
   if (question.multiSelect) {
-    const picked = await selectMultipleOptions(selectQuestion, options);
-    if (picked == null) {
+    const picked = await askEditableChoice(selectQuestion, options, { multiSelect: true });
+    if (picked == null || !picked.value.trim()) {
       throw new AskUserQuestionCancelled();
     }
-    const customIndex = choices.length - 1;
-    const results = picked
-      .filter(i => i !== customIndex)
-      .map(i => choices[i].label);
-    if (picked.includes(customIndex)) {
-      const customInput = await askLine('请输入自定义内容: ');
-      if (customInput.trim()) results.push(customInput.trim());
-    }
+    const results = parseEditableMultiChoiceAnswer(picked.value);
     return results.length > 0 ? results : askSingleQuestion(question, questionIndex, totalQuestions);
   }
 
-  const picked = await selectOption(selectQuestion, options);
-  if (picked == null) {
+  const picked = await askEditableChoice(selectQuestion, options);
+  if (picked == null || !picked.value.trim()) {
     throw new AskUserQuestionCancelled();
   }
-  if (picked === choices.length - 1) {
-    const customInput = await askLine('请输入自定义内容: ');
-    return customInput.trim() || '未指定';
-  }
-
-  return choices[picked].label;
+  return picked.value.trim();
 }
 
 /**
