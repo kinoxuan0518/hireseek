@@ -1773,6 +1773,7 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Live 脉脉 run');
     expect(text).toContain('Live 脉脉 prepare');
     expect(text).toContain('Live 脉脉 screen');
+    expect(text).toContain('Browser readiness');
     expect(text).toContain('Pending run states');
     expect(text).toContain('Task run lifecycle');
     expect(text).toContain('Context compaction ledger');

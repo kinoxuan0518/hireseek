@@ -1,3 +1,4 @@
+import * as chromeApi from './chrome-applescript';
 import type { Channel } from './types';
 
 export type BrowserReadinessStatus = 'ready' | 'not_ready' | 'unavailable';
@@ -129,6 +130,10 @@ export function assessBrowserReadiness(input: BrowserReadinessInput): BrowserRea
 }
 
 export async function probeBrowserReadiness(channel: Channel): Promise<BrowserReadinessReport> {
+  return probeBrowserReadinessSync(channel);
+}
+
+export function probeBrowserReadinessSync(channel: Channel): BrowserReadinessReport {
   if (process.platform !== 'darwin') {
     return {
       channel,
@@ -138,14 +143,13 @@ export async function probeBrowserReadiness(channel: Channel): Promise<BrowserRe
     };
   }
 
-  const chrome = await import('./chrome-applescript');
-  if (!chrome.chromeRunning()) {
+  if (!chromeApi.chromeRunning()) {
     return assessBrowserReadiness({ channel, chromeRunning: false, tabFound: false });
   }
 
-  let tabs: ReturnType<typeof chrome.listChromeTabs>;
+  let tabs: ReturnType<typeof chromeApi.listChromeTabs>;
   try {
-    tabs = chrome.listChromeTabs();
+    tabs = chromeApi.listChromeTabs();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -160,13 +164,13 @@ export async function probeBrowserReadiness(channel: Channel): Promise<BrowserRe
     return assessBrowserReadiness({ channel, chromeRunning: true, tabFound: false });
   }
 
-  const jsPermissionIssue = chrome.probeJsPermission(tab);
-  const state = chrome.tabState(tab);
+  const jsPermissionIssue = chromeApi.probeJsPermission(tab);
+  const state = chromeApi.tabState(tab);
   let bodyText = '';
   let bodyReadIssue = jsPermissionIssue;
   if (!jsPermissionIssue) {
     try {
-      bodyText = chrome.execJS(tab, "(document.body ? document.body.innerText : '').slice(0, 8000)");
+      bodyText = chromeApi.execJS(tab, "(document.body ? document.body.innerText : '').slice(0, 8000)");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       bodyReadIssue = `无法读取页面正文：${message.slice(0, 160)}`;
@@ -185,9 +189,13 @@ export async function probeBrowserReadiness(channel: Channel): Promise<BrowserRe
 }
 
 export async function probeBrowserReadinessMany(channels: Channel[]): Promise<BrowserReadinessSummary> {
+  return probeBrowserReadinessManySync(channels);
+}
+
+export function probeBrowserReadinessManySync(channels: Channel[]): BrowserReadinessSummary {
   const reports: BrowserReadinessReport[] = [];
   for (const channel of channels) {
-    reports.push(await probeBrowserReadiness(channel));
+    reports.push(probeBrowserReadinessSync(channel));
   }
   const ready = reports.filter(report => report.status === 'ready').length;
   const notReady = reports.filter(report => report.status === 'not_ready').length;

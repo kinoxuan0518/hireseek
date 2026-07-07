@@ -17,6 +17,7 @@ import { collectSessionIntegrityReport } from './agent-core/session-integrity';
 import { collectHarnessFailureReport } from './agent-core/failure-classifier';
 import { latestRunAssemblySnapshots } from './agent-core/run-assembly-store';
 import { contractWritesForChannel } from './contracts';
+import { probeBrowserReadinessManySync, type BrowserReadinessSummary } from './browser-readiness';
 import type { Channel } from './types';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
@@ -340,6 +341,18 @@ function liveScreenDetail(channel: Channel, evidence: ChannelScreenEvidence | nu
   return evidence
     ? `latest screen #${evidence.id}: status=${evidence.status}, contacted=${evidence.contactedCount}, candidates=${evidence.runCandidates}, interactions=${evidence.interactions}, actions=${evidence.runActions}, toolCalls=${evidence.toolCalls}, candidateScreenActions=${evidence.candidateScreenActions}, screenCandidates=${evidence.screenCandidates}, recommendedContacts=${evidence.recommendedContacts}, successfulSideEffects=${evidence.successfulSideEffects}, unsafeSuccessfulActions=${evidence.unsafeSuccessfulActions}`
     : `no ${label} screen evidence; run hireseek run ${channel} --here --screen before real outreach`;
+}
+
+function browserReadinessDetail(summary: BrowserReadinessSummary): string {
+  if (summary.reports.length === 0) return 'no enabled protocol channels to probe';
+  return [
+    `ready=${summary.ready}, notReady=${summary.notReady}, unavailable=${summary.unavailable}`,
+    summary.reports.map(report => {
+      const label = channelLabel(report.channel);
+      const issue = report.issues[0] ? ` (${report.issues[0]})` : '';
+      return `${label}:${report.status}${issue}`;
+    }).join(' | '),
+  ].join('; ');
 }
 
 export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
@@ -809,6 +822,14 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     ));
   }
 
+  const browserReadiness = probeBrowserReadinessManySync(protocolChannels);
+  checks.push(check(
+    'upper',
+    'Browser readiness',
+    browserReadiness.ok ? 'pass' : 'warn',
+    browserReadinessDetail(browserReadiness),
+  ));
+
   const skillHomes = runtime.paths.skillHomes;
   const existingSkillHomes = skillHomes.filter(home => fs.existsSync(home));
   const externalSkills = listClaudeSkills();
@@ -865,6 +886,9 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   const status = worstStatus(checks.map(c => c.status));
   const nextSteps: string[] = [];
   if (status === 'fail') nextSteps.push('先修复 fail 项，再跑真实渠道任务。');
+  if (checks.some(c => c.name === 'Browser readiness' && c.status === 'warn')) {
+    nextSteps.push('浏览器 readiness 未全绿：先运行 `hireseek readiness` 查看哪个渠道缺登录页或权限。');
+  }
   for (const channel of protocolChannels) {
     const label = channelLabel(channel);
     if (checks.some(c => c.name === `Live ${label} run` && c.status === 'warn')) {
