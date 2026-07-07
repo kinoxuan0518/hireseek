@@ -34,7 +34,7 @@ const USAGE = `
   hireseek core                Agent Core 状态：工具注册 / trace / session / memory
   hireseek failures            Harness 失败复盘：环境 / 工具 / 协议 / 登录态优先级
   hireseek readiness [渠道]    只读检查当前 Chrome 是否适合跑真实渠道验收（不创建 run；--strict 可作脚本门禁）
-  hireseek validate <渠道>     真实渠道验收：先 readiness，再依次 dry-run / prepare / screen
+  hireseek validate [渠道]     真实渠道验收：先 readiness，再依次 dry-run / prepare / screen
   hireseek runs [all|ID]       查看最近暂停/失败 run；all 显示最近全部；ID 显示详情
   hireseek runs cleanup [--apply]  收口超时 running run（默认预览，不删除 trace）
   hireseek doctor              产品结构体检：下层基座 / 中层协议 / skill 边界 / 真实验收缺口
@@ -273,22 +273,40 @@ async function main(): Promise<void> {
     process.exit(0);
 
   } else if (command === 'validate' || command === 'acceptance') {
-    const target = args[1] as Channel | undefined;
-    if (!target || !CHANNELS.includes(target)) {
-      console.log(chalk.yellow('用法：hireseek validate <boss|maimai|linkedin|followup> [--dry-run-only|--prepare-only|--screen-only]'));
+    const target = args.slice(1).find(arg => !arg.startsWith('-')) as Channel | undefined;
+    if (target && !CHANNELS.includes(target)) {
+      console.log(chalk.yellow('用法：hireseek validate [boss|maimai|linkedin|followup] [--dry-run-only|--prepare-only|--screen-only]'));
       db.close();
       process.exit(1);
     }
     const {
       channelValidationSteps,
+      formatChannelValidationBatchPlan,
+      formatChannelValidationBatchResult,
       formatChannelValidationPlan,
       formatChannelValidationResult,
       validateChannel,
+      validateChannels,
     } = await import('./channel-validation');
-    const steps = channelValidationSteps(args.slice(2));
-    console.log(formatChannelValidationPlan(target, steps) + '\n');
-    const result = await validateChannel(target, steps);
-    console.log('\n' + formatChannelValidationResult(result) + '\n');
+    const steps = channelValidationSteps(args.slice(1));
+    if (target) {
+      console.log(formatChannelValidationPlan(target, steps) + '\n');
+      const result = await validateChannel(target, steps);
+      console.log('\n' + formatChannelValidationResult(result) + '\n');
+      db.close();
+      process.exit(result.ok ? 0 : 1);
+    }
+
+    const runtime = createRuntimeContext();
+    const channels = runtime.enabledChannels.map(entry => entry.channel);
+    if (channels.length === 0) {
+      console.log(chalk.yellow('当前 active job 没有启用渠道。也可以指定：hireseek validate <boss|maimai|linkedin|followup>'));
+      db.close();
+      process.exit(1);
+    }
+    console.log(formatChannelValidationBatchPlan(channels, steps) + '\n');
+    const result = await validateChannels(channels, steps);
+    console.log('\n' + formatChannelValidationBatchResult(result) + '\n');
     db.close();
     process.exit(result.ok ? 0 : 1);
 

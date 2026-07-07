@@ -1,5 +1,12 @@
 import type { Channel } from './types';
-import { formatBrowserReadiness, probeBrowserReadiness, type BrowserReadinessReport } from './browser-readiness';
+import {
+  formatBrowserReadiness,
+  formatBrowserReadinessSummary,
+  probeBrowserReadiness,
+  probeBrowserReadinessMany,
+  type BrowserReadinessReport,
+  type BrowserReadinessSummary,
+} from './browser-readiness';
 
 export type ChannelValidationStep = 'dry-run' | 'prepare' | 'screen';
 
@@ -8,6 +15,13 @@ export interface ChannelValidationResult {
   readiness: BrowserReadinessReport;
   attemptedSteps: ChannelValidationStep[];
   runIds: Array<{ step: ChannelValidationStep; runId: number }>;
+  ok: boolean;
+}
+
+export interface ChannelValidationBatchResult {
+  channels: Channel[];
+  readiness: BrowserReadinessSummary;
+  results: ChannelValidationResult[];
   ok: boolean;
 }
 
@@ -51,6 +65,15 @@ export function formatChannelValidationPlan(channel: Channel, steps: ChannelVali
   ].join('\n');
 }
 
+export function formatChannelValidationBatchPlan(channels: Channel[], steps: ChannelValidationStep[]): string {
+  return [
+    `Channel validation: ${channels.join(', ')}`,
+    'Plan:',
+    '- readiness 只读预检全部启用渠道',
+    ...channels.flatMap(channel => steps.map(step => `- ${channel}: ${STEP_LABEL[step]}`)),
+  ].join('\n');
+}
+
 export function formatChannelValidationResult(result: ChannelValidationResult): string {
   const lines = [
     formatBrowserReadiness(result.readiness),
@@ -60,6 +83,22 @@ export function formatChannelValidationResult(result: ChannelValidationResult): 
   if (result.runIds.length > 0) {
     lines.push('Run evidence:');
     lines.push(...result.runIds.map(row => `- ${row.step}: run#${row.runId}`));
+  }
+  return lines.join('\n');
+}
+
+export function formatChannelValidationBatchResult(result: ChannelValidationBatchResult): string {
+  const lines = [
+    formatBrowserReadinessSummary(result.readiness),
+    '',
+    result.ok ? 'Channel validation completed.' : 'Channel validation stopped.',
+  ];
+  if (result.results.length > 0) {
+    lines.push('Run evidence:');
+    for (const channelResult of result.results) {
+      lines.push(`- ${channelResult.channel}: ${channelResult.ok ? 'completed' : 'stopped'}`);
+      lines.push(...channelResult.runIds.map(row => `  - ${row.step}: run#${row.runId}`));
+    }
   }
   return lines.join('\n');
 }
@@ -83,4 +122,26 @@ export async function validateChannel(
   }
 
   return { channel, readiness, attemptedSteps, runIds, ok: true };
+}
+
+export async function validateChannels(
+  channels: Channel[],
+  steps: ChannelValidationStep[] = DEFAULT_STEPS,
+): Promise<ChannelValidationBatchResult> {
+  const readiness = await probeBrowserReadinessMany(channels);
+  if (!readiness.ok) {
+    return { channels, readiness, results: [], ok: false };
+  }
+
+  const results: ChannelValidationResult[] = [];
+  for (const channel of channels) {
+    results.push(await validateChannel(channel, steps));
+  }
+
+  return {
+    channels,
+    readiness,
+    results,
+    ok: results.length === channels.length && results.every(result => result.ok),
+  };
 }

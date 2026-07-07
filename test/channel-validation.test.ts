@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   channelValidationSteps,
+  formatChannelValidationBatchPlan,
+  formatChannelValidationBatchResult,
   formatChannelValidationPlan,
   formatChannelValidationResult,
   runOptionsForValidationStep,
@@ -31,6 +33,17 @@ describe('channel validation command planning', () => {
     expect(plan).toContain('dry-run 预检');
     expect(plan).toContain('prepare 安全验收');
     expect(plan).toContain('screen 候选人筛选验收');
+  });
+
+  it('formats an active-job multi-channel validation plan', () => {
+    const plan = formatChannelValidationBatchPlan(['boss', 'maimai'], ['dry-run', 'screen']);
+
+    expect(plan).toContain('Channel validation: boss, maimai');
+    expect(plan).toContain('readiness 只读预检全部启用渠道');
+    expect(plan).toContain('boss: dry-run 预检');
+    expect(plan).toContain('boss: screen 候选人筛选验收');
+    expect(plan).toContain('maimai: dry-run 预检');
+    expect(plan).toContain('maimai: screen 候选人筛选验收');
   });
 
   it('formats stopped validation results without run evidence', () => {
@@ -74,5 +87,37 @@ describe('channel validation command planning', () => {
     expect(output).toContain('- dry-run: run#101');
     expect(output).toContain('- prepare: run#102');
     expect(output).toContain('- screen: run#103');
+  });
+
+  it('formats stopped multi-channel validation without run evidence', () => {
+    const output = formatChannelValidationBatchResult({
+      channels: ['boss', 'maimai'],
+      readiness: {
+        ready: 1,
+        notReady: 1,
+        unavailable: 0,
+        ok: false,
+        reports: [
+          {
+            channel: 'boss',
+            status: 'ready',
+            issues: [],
+            nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+          },
+          {
+            channel: 'maimai',
+            status: 'not_ready',
+            issues: ['未找到 脉脉 标签页'],
+            nextSteps: ['在 Chrome 打开脉脉页面。'],
+          },
+        ],
+      },
+      results: [],
+      ok: false,
+    });
+
+    expect(output).toContain('Browser readiness summary: NOT READY');
+    expect(output).toContain('Channel validation stopped.');
+    expect(output).not.toContain('Run evidence:');
   });
 });
