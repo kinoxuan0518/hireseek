@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   channelValidationSteps,
@@ -227,5 +229,13 @@ describe('channel validation command planning', () => {
 
     expect(output).toContain('Channel validation stopped after waiting for login.');
     expect(output).toContain('Wait: attempts=3, timeoutMs=30000, intervalMs=10000, timedOut=true');
+  });
+
+  it('keeps full-channel validation closed by doctor status', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'src', 'index.ts'), 'utf8');
+
+    expect(source).toContain('── 验收后 Doctor 收口 ──');
+    expect(source).toContain('collectDoctorReport(CHAT_TOOL_REGISTRY)');
+    expect(source).toContain("process.exit(doctor.status === 'pass' ? 0 : 1)");
   });
 });

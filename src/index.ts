@@ -333,8 +333,17 @@ async function main(): Promise<void> {
     console.log(formatChannelValidationBatchPlan(channels, steps) + '\n');
     const result = await validateChannels(channels, steps, { openMissing, wait });
     console.log('\n' + formatChannelValidationBatchResult(result) + '\n');
+    if (result.ok) {
+      const { CHAT_TOOL_REGISTRY } = await import('./chat');
+      const { collectDoctorReport, formatDoctorReport } = await import('./doctor');
+      const doctor = collectDoctorReport(CHAT_TOOL_REGISTRY);
+      console.log('\n── 验收后 Doctor 收口 ──\n');
+      console.log(formatDoctorReport(doctor) + '\n');
+      db.close();
+      process.exit(doctor.status === 'pass' ? 0 : 1);
+    }
     db.close();
-    process.exit(result.ok ? 0 : 1);
+    process.exit(1);
 
   } else if (command === 'runs' || command === 'run-state' || command === 'run-states') {
     if (args[1] === 'cleanup' || args[1] === 'reconcile') {
