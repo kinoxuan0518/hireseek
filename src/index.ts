@@ -45,8 +45,8 @@ const USAGE = `
   hireseek run --plan          计划模式：先分析生成计划，用户确认后执行
   hireseek run <渠道>          指定渠道立即执行
   hireseek run <渠道> --dry-run  预检模式：接管真实页面但禁止打招呼/输入/点击副作用
-  hireseek run boss --here --prepare  安全验收：自动切到目标职位并设置筛选，但绝不触达候选人
-  hireseek run boss --here --screen   候选人筛选验收：可查看候选人，但禁止打招呼/发消息
+  hireseek run <渠道> --here --prepare  安全验收：自动切到目标职位并设置筛选，但绝不触达候选人
+  hireseek run <渠道> --here --screen   候选人筛选验收：可查看候选人，但禁止打招呼/发消息
   hireseek run boss --here     就地接管当前 BOSS 页面，由产品协议自行定位目标职位并执行
   hireseek scan                扫描收件箱，更新已回复候选人
   hireseek update <姓名> <状态>  手动更新候选人状态

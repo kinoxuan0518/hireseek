@@ -25,7 +25,13 @@ import {
   maimaiProtocolStages,
 } from '../src/platform-protocols/maimai';
 import { loadSkill } from '../src/skills/loader';
-import { channelSkillAssetContext, runSkillOptionsForChannel } from '../src/orchestrator';
+import {
+  channelSkillAssetContext,
+  channelUsesScreenContactGate,
+  formatScreenContactGate,
+  runSkillOptionsForChannel,
+  screenAllowedContactNames,
+} from '../src/orchestrator';
 import { buildSkillAssetManifest, formatSkillAssetManifest } from '../src/skills/skill-asset-manifest';
 import { buildChatHarnessContext, buildHarnessRunAssembly, formatHarnessRunAssembly } from '../src/harness/run-assembly';
 import { domRunnerToolNamesForMode } from '../src/runners/dom-runner';
@@ -444,6 +450,9 @@ describe('boss platform protocol middle layer', () => {
       executionMode: 'execute',
       allowedContactNamesBeforeContact: ['温磊'],
     });
+    expect(channelUsesScreenContactGate('boss', 'execute')).toBe(true);
+    expect(channelUsesScreenContactGate('boss', 'screen')).toBe(false);
+    expect(formatScreenContactGate('boss', [])).toContain('hireseek run boss --here --screen');
   });
 
   it('registers MaimaI protocol without preloading the legacy skill as runtime core', () => {
@@ -528,6 +537,17 @@ describe('boss platform protocol middle layer', () => {
       requiredStagesBeforeContact: MAIMAI_REQUIRED_STAGES_BEFORE_CONTACT,
       targetJobTitle: 'Agent工程师',
     });
+    expect(runSkillOptionsForChannel('maimai', 224, true, false, false, false, 'Agent工程师', ['脉脉候选人'])).toMatchObject({
+      executionMode: 'execute',
+      allowedContactNamesBeforeContact: ['脉脉候选人'],
+    });
+    expect(channelUsesScreenContactGate('maimai', 'execute')).toBe(true);
+    expect(channelUsesScreenContactGate('maimai', 'prepare')).toBe(false);
+    expect(formatScreenContactGate('maimai', [])).toContain('hireseek run maimai --here --screen');
+    expect(screenAllowedContactNames([
+      { runId: 1, name: '应触达', recommendation: 'contact' },
+      { runId: 1, name: '应跳过', recommendation: 'skip' },
+    ])).toEqual(['应触达']);
 
     const assetManifest = buildSkillAssetManifest();
     const maimaiAsset = assetManifest.find(entry => entry.channel === 'maimai');

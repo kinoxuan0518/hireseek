@@ -1785,12 +1785,14 @@ describe('agent core lower layer', () => {
     expect(text).toContain('Interaction model');
     expect(text).toContain('Session history integrity');
     expect(text).toContain('Platform protocol manifest');
+    expect(text).toContain('Screen contact gate');
     expect(text).toContain('Capability manifest');
     expect(text).toContain('Skill asset manifest');
     expect(text).toContain('Legacy 脉脉 skill availability');
     expect(report.checks.some(c => c.name === 'Tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Runner tool registry' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Interaction model' && c.status === 'pass')).toBe(true);
+    expect(report.checks.some(c => c.name === 'Screen contact gate' && c.status === 'pass')).toBe(true);
     expect(report.checks.some(c => c.name === 'Pending run states' && c.status === 'warn')).toBe(true);
   });
 });

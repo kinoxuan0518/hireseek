@@ -27,7 +27,7 @@ import { upsertExecutionEnvironment } from './agent-core/environment-store';
 
 export { channelSkillAssetContext } from './harness/run-assembly';
 
-type ChannelRunMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
+export type ChannelRunMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
 
 function latestScreenCandidatesForJob(channel: Channel, jobId: string): Array<ScreenedCandidate & { runId: number }> {
   try {
@@ -67,14 +67,27 @@ function latestScreenCandidatesForJob(channel: Channel, jobId: string): Array<Sc
   }
 }
 
-function formatScreenContactGate(candidates: Array<ScreenedCandidate & { runId: number }>): string {
+export function channelUsesScreenContactGate(channel: Channel, mode: ChannelRunMode): boolean {
+  const protocol = getPlatformProtocol(channel);
+  return mode === 'execute' && !!protocol?.requiredStagesBeforeContact?.includes('candidate-screen');
+}
+
+export function screenAllowedContactNames(candidates: Array<ScreenedCandidate & { runId: number }>): string[] {
+  return candidates.filter(c => c.recommendation === 'contact').map(c => c.name);
+}
+
+export function formatScreenContactGate(
+  channel: Channel,
+  candidates: Array<ScreenedCandidate & { runId: number }>,
+): string {
+  const label = CHANNEL_LABEL[channel];
   const contact = candidates.filter(c => c.recommendation === 'contact');
   if (contact.length === 0) {
     return [
       '## Screen 候选人白名单',
       '',
       '没有可用于正式触达的结构化 screen 候选人。',
-      '本轮禁止建立 prepare_contact；请先运行 `hireseek run boss --here --screen` 并用 record_screened_candidate 记录建议触达名单。',
+      `本轮禁止建立 prepare_contact；请先运行 \`hireseek run ${channel} --here --screen\` 完成 ${label} 候选人筛选，并用 record_screened_candidate 记录建议触达名单。`,
     ].join('\n');
   }
   return [
@@ -559,14 +572,15 @@ export async function runChannel(
   let taskPrompt = '';
 
   try {
-    const screenCandidates = channel === 'boss' && runMode === 'execute'
+    const useScreenGate = channelUsesScreenContactGate(channel, runMode);
+    const screenCandidates = useScreenGate
       ? latestScreenCandidatesForJob(channel, jobId)
       : [];
-    const allowedContactNames = channel === 'boss' && runMode === 'execute'
-      ? screenCandidates.filter(c => c.recommendation === 'contact').map(c => c.name)
+    const allowedContactNames = useScreenGate
+      ? screenAllowedContactNames(screenCandidates)
       : undefined;
-    const screenGateContext = channel === 'boss' && runMode === 'execute'
-      ? formatScreenContactGate(screenCandidates)
+    const screenGateContext = useScreenGate
+      ? formatScreenContactGate(channel, screenCandidates)
       : '';
     const pausedRunContext = opts.fromCurrent
       ? formatPausedRunContext(latestPausedRunState({ jobId, channel, maxAgeHours: 24 }))

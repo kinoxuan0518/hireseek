@@ -10,6 +10,7 @@ import { buildSkillAssetManifest } from './skills/skill-asset-manifest';
 import { buildChatHarnessContext, buildHarnessRunAssembly } from './harness/run-assembly';
 import { DOM_RUNNER_TOOL_REGISTRY } from './runners/dom-runner';
 import { GENERIC_VISION_TOOL_REGISTRY } from './runners/generic-vision';
+import { channelUsesScreenContactGate } from './orchestrator';
 import { listPendingAgentRunStates } from './agent-core/run-state-store';
 import { listInconsistentRunStates, listStaleExecutionEnvironments, listStaleTaskRuns } from './agent-core/task-run-lifecycle';
 import { collectSessionIntegrityReport } from './agent-core/session-integrity';
@@ -666,6 +667,33 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
         boss ? '' : 'boss',
         maimai ? '' : 'maimai',
       ].filter(Boolean).join(', ')}`,
+  ));
+
+  const screenGateProblems = protocols
+    .filter(protocol => (protocol.requiredStagesBeforeContact ?? []).includes('candidate-screen'))
+    .flatMap(protocol => {
+      const problems: string[] = [];
+      if (!channelUsesScreenContactGate(protocol.channel, 'execute')) {
+        problems.push(`${protocol.channel}:execute missing screen gate`);
+      }
+      if (channelUsesScreenContactGate(protocol.channel, 'prepare')) {
+        problems.push(`${protocol.channel}:prepare must not require screen gate`);
+      }
+      if (channelUsesScreenContactGate(protocol.channel, 'screen')) {
+        problems.push(`${protocol.channel}:screen must not require prior screen gate`);
+      }
+      if (channelUsesScreenContactGate(protocol.channel, 'dry_run')) {
+        problems.push(`${protocol.channel}:dry_run must not require screen gate`);
+      }
+      return problems;
+    });
+  checks.push(check(
+    'middle',
+    'Screen contact gate',
+    screenGateProblems.length === 0 ? 'pass' : 'fail',
+    screenGateProblems.length === 0
+      ? 'execute mode requires latest screen whitelist for protocol channels with candidate-screen'
+      : screenGateProblems.join('; '),
   ));
 
   const protocolManifest = buildPlatformProtocolManifest();
