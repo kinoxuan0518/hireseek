@@ -33,7 +33,7 @@ const USAGE = `
   hireseek verify              双轴独立质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)（--push 推送）
   hireseek core                Agent Core 状态：工具注册 / trace / session / memory
   hireseek failures            Harness 失败复盘：环境 / 工具 / 协议 / 登录态优先级
-  hireseek readiness <渠道>    只读检查当前 Chrome 是否适合跑真实渠道验收（不创建 run）
+  hireseek readiness [渠道]    只读检查当前 Chrome 是否适合跑真实渠道验收（不创建 run；--strict 可作脚本门禁）
   hireseek validate <渠道>     真实渠道验收：先 readiness，再依次 dry-run / prepare / screen
   hireseek runs [all|ID]       查看最近暂停/失败 run；all 显示最近全部；ID 显示详情
   hireseek runs cleanup [--apply]  收口超时 running run（默认预览，不删除 trace）
@@ -244,12 +244,30 @@ async function main(): Promise<void> {
 
   } else if (command === 'readiness' || command === 'ready' || command === 'preflight') {
     const target = args[1] as Channel | undefined;
-    if (!target || !CHANNELS.includes(target)) {
-      console.log(chalk.yellow('用法：hireseek readiness <boss|maimai|linkedin|followup>'));
+    const {
+      probeBrowserReadiness,
+      probeBrowserReadinessMany,
+      formatBrowserReadiness,
+      formatBrowserReadinessSummary,
+    } = await import('./browser-readiness');
+    if (!target) {
+      const runtime = createRuntimeContext();
+      const channels = runtime.enabledChannels.map(entry => entry.channel);
+      if (channels.length === 0) {
+        console.log(chalk.yellow('当前 active job 没有启用渠道。也可以指定：hireseek readiness <boss|maimai|linkedin|followup>'));
+        db.close();
+        process.exit(1);
+      }
+      const summary = await probeBrowserReadinessMany(channels);
+      console.log(formatBrowserReadinessSummary(summary) + '\n');
+      db.close();
+      process.exit(args.includes('--strict') && !summary.ok ? 1 : 0);
+    }
+    if (!CHANNELS.includes(target)) {
+      console.log(chalk.yellow('用法：hireseek readiness [boss|maimai|linkedin|followup]'));
       db.close();
       process.exit(1);
     }
-    const { probeBrowserReadiness, formatBrowserReadiness } = await import('./browser-readiness');
     console.log(formatBrowserReadiness(await probeBrowserReadiness(target)) + '\n');
     db.close();
     process.exit(0);

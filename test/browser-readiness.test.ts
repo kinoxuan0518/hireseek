@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assessBrowserReadiness,
   formatBrowserReadiness,
+  formatBrowserReadinessSummary,
   selectTabForChannel,
   tabMatchesChannel,
 } from '../src/browser-readiness';
@@ -85,5 +86,34 @@ describe('browser readiness preflight', () => {
     expect(output).toContain('Browser readiness: UNAVAILABLE');
     expect(output).toContain('Channel: LinkedIn');
     expect(output).toContain('- Google Chrome 未运行');
+  });
+
+  it('formats a multi-channel readiness summary', () => {
+    const output = formatBrowserReadinessSummary({
+      ready: 1,
+      notReady: 1,
+      unavailable: 0,
+      ok: false,
+      reports: [
+        {
+          channel: 'boss',
+          status: 'ready',
+          url: 'https://www.zhipin.com/web/chat/index',
+          issues: [],
+          nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+        },
+        {
+          channel: 'maimai',
+          status: 'not_ready',
+          issues: ['未找到 脉脉 标签页'],
+          nextSteps: ['在 Chrome 打开脉脉页面。'],
+        },
+      ],
+    });
+
+    expect(output).toContain('Browser readiness summary: NOT READY');
+    expect(output).toContain('2 total, 1 ready, 1 not ready, 0 unavailable');
+    expect(output).toContain('- BOSS直聘: READY');
+    expect(output).toContain('- 脉脉: NOT READY — 未找到 脉脉 标签页');
   });
 });

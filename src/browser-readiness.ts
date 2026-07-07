@@ -21,6 +21,14 @@ export interface BrowserReadinessReport {
   nextSteps: string[];
 }
 
+export interface BrowserReadinessSummary {
+  reports: BrowserReadinessReport[];
+  ready: number;
+  notReady: number;
+  unavailable: number;
+  ok: boolean;
+}
+
 interface TabLike {
   title: string;
   url: string;
@@ -176,6 +184,23 @@ export async function probeBrowserReadiness(channel: Channel): Promise<BrowserRe
   });
 }
 
+export async function probeBrowserReadinessMany(channels: Channel[]): Promise<BrowserReadinessSummary> {
+  const reports: BrowserReadinessReport[] = [];
+  for (const channel of channels) {
+    reports.push(await probeBrowserReadiness(channel));
+  }
+  const ready = reports.filter(report => report.status === 'ready').length;
+  const notReady = reports.filter(report => report.status === 'not_ready').length;
+  const unavailable = reports.filter(report => report.status === 'unavailable').length;
+  return {
+    reports,
+    ready,
+    notReady,
+    unavailable,
+    ok: reports.length > 0 && reports.every(report => report.status === 'ready'),
+  };
+}
+
 export function formatBrowserReadiness(report: BrowserReadinessReport): string {
   const statusLabel = report.status === 'ready' ? 'READY' : report.status === 'not_ready' ? 'NOT READY' : 'UNAVAILABLE';
   const lines = [
@@ -192,5 +217,22 @@ export function formatBrowserReadiness(report: BrowserReadinessReport): string {
   }
   lines.push('Next steps:');
   lines.push(...report.nextSteps.map(step => `- ${step}`));
+  return lines.join('\n');
+}
+
+export function formatBrowserReadinessSummary(summary: BrowserReadinessSummary): string {
+  const lines = [
+    `Browser readiness summary: ${summary.ok ? 'READY' : 'NOT READY'}`,
+    `Channels: ${summary.reports.length} total, ${summary.ready} ready, ${summary.notReady} not ready, ${summary.unavailable} unavailable`,
+    '',
+  ];
+  for (const report of summary.reports) {
+    const statusLabel = report.status === 'ready' ? 'READY' : report.status === 'not_ready' ? 'NOT READY' : 'UNAVAILABLE';
+    const issue = report.issues[0] ? ` — ${report.issues[0]}` : '';
+    lines.push(`- ${CHANNEL_LABEL[report.channel]}: ${statusLabel}${issue}`);
+    if (report.url) lines.push(`  URL: ${report.url}`);
+    const firstStep = report.nextSteps[0];
+    if (firstStep) lines.push(`  Next: ${firstStep}`);
+  }
   return lines.join('\n');
 }
