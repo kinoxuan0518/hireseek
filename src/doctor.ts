@@ -887,6 +887,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   const nextSteps: string[] = [];
   if (status === 'fail') nextSteps.push('先修复 fail 项，再跑真实渠道任务。');
   if (checks.some(c => c.name === 'Browser readiness' && c.status === 'warn')) {
+    nextSteps.push('可运行 `hireseek readiness --open-missing` 打开缺失渠道入口页；完成登录后再验收。');
     nextSteps.push('可直接运行 `hireseek validate` 做 active job 全渠道验收；readiness 没过就不创建 run。');
     nextSteps.push('浏览器 readiness 未全绿：先运行 `hireseek readiness` 查看哪个渠道缺登录页或权限。');
   }

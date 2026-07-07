@@ -112,6 +112,13 @@ export function gotoUrl(tab: ChromeTab, url: string): void {
   jxa(['goto', String(tab.wi), String(tab.ti), url]);
 }
 
+export function openUrl(url: string): void {
+  execFileSync('open', ['-a', 'Google Chrome', url], {
+    encoding: 'utf-8',
+    timeout: 10000,
+  });
+}
+
 export function activateTab(tab: ChromeTab): void {
   try {
     jxa(['activate', String(tab.wi), String(tab.ti)], 5000);

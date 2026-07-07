@@ -30,6 +30,18 @@ export interface BrowserReadinessSummary {
   ok: boolean;
 }
 
+export interface BrowserOpenTarget {
+  channel: Channel;
+  url: string;
+  reason: string;
+}
+
+export interface BrowserOpenMissingResult {
+  before: BrowserReadinessSummary;
+  opened: BrowserOpenTarget[];
+  skipped: Array<{ channel: Channel; reason: string }>;
+}
+
 interface TabLike {
   title: string;
   url: string;
@@ -70,6 +82,10 @@ export function tabMatchesChannel(tab: TabLike, channel: Channel): boolean {
 
 export function selectTabForChannel<T extends TabLike>(tabs: T[], channel: Channel): T | null {
   return tabs.find(tab => tabMatchesChannel(tab, channel)) ?? null;
+}
+
+export function targetUrlForChannel(channel: Channel): string | null {
+  return CHANNEL_URL[channel] ?? null;
 }
 
 export function assessBrowserReadiness(input: BrowserReadinessInput): BrowserReadinessReport {
@@ -209,6 +225,53 @@ export function probeBrowserReadinessManySync(channels: Channel[]): BrowserReadi
   };
 }
 
+export function browserOpenTargetsForReadiness(summary: BrowserReadinessSummary): BrowserOpenTarget[] {
+  const targets: BrowserOpenTarget[] = [];
+  for (const report of summary.reports) {
+    if (report.status === 'ready') continue;
+    const url = targetUrlForChannel(report.channel);
+    if (!url) continue;
+    const shouldOpen = !report.url || report.issues.some(issue => issue.startsWith('未找到 ') || issue.includes('Google Chrome 未运行'));
+    if (!shouldOpen) continue;
+    targets.push({
+      channel: report.channel,
+      url,
+      reason: report.issues[0] ?? 'channel page missing',
+    });
+  }
+  return targets;
+}
+
+export async function openMissingBrowserChannels(channels: Channel[]): Promise<BrowserOpenMissingResult> {
+  const before = await probeBrowserReadinessMany(channels);
+  const targets = browserOpenTargetsForReadiness(before);
+  const opened: BrowserOpenTarget[] = [];
+  const skipped: BrowserOpenMissingResult['skipped'] = [];
+  if (process.platform !== 'darwin') {
+    return {
+      before,
+      opened,
+      skipped: targets.map(target => ({
+        channel: target.channel,
+        reason: '真实 Chrome 页面打开目前只支持 macOS。',
+      })),
+    };
+  }
+  for (const target of targets) {
+    try {
+      chromeApi.openUrl(target.url);
+      opened.push(target);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      skipped.push({
+        channel: target.channel,
+        reason: `打开失败：${message.slice(0, 160)}`,
+      });
+    }
+  }
+  return { before, opened, skipped };
+}
+
 export function formatBrowserReadiness(report: BrowserReadinessReport): string {
   const statusLabel = report.status === 'ready' ? 'READY' : report.status === 'not_ready' ? 'NOT READY' : 'UNAVAILABLE';
   const lines = [
@@ -242,5 +305,24 @@ export function formatBrowserReadinessSummary(summary: BrowserReadinessSummary):
     const firstStep = report.nextSteps[0];
     if (firstStep) lines.push(`  Next: ${firstStep}`);
   }
+  return lines.join('\n');
+}
+
+export function formatOpenMissingBrowserChannels(result: BrowserOpenMissingResult): string {
+  const lines = [
+    formatBrowserReadinessSummary(result.before),
+    '',
+    result.opened.length > 0
+      ? `Opened ${result.opened.length} missing channel page(s):`
+      : 'No missing channel pages opened.',
+  ];
+  lines.push(...result.opened.map(target => `- ${CHANNEL_LABEL[target.channel]}: ${target.url} (${target.reason})`));
+  if (result.skipped.length > 0) {
+    lines.push('', 'Skipped:');
+    lines.push(...result.skipped.map(item => `- ${CHANNEL_LABEL[item.channel]}: ${item.reason}`));
+  }
+  lines.push('', 'Next steps:');
+  lines.push('- 在新打开的页面完成登录。');
+  lines.push('- 然后运行 `hireseek readiness`，全部 READY 后再运行 `hireseek validate`。');
   return lines.join('\n');
 }

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   assessBrowserReadiness,
+  browserOpenTargetsForReadiness,
   formatBrowserReadiness,
   formatBrowserReadinessSummary,
+  formatOpenMissingBrowserChannels,
   selectTabForChannel,
   tabMatchesChannel,
 } from '../src/browser-readiness';
@@ -115,5 +117,72 @@ describe('browser readiness preflight', () => {
     expect(output).toContain('2 total, 1 ready, 1 not ready, 0 unavailable');
     expect(output).toContain('- BOSS直聘: READY');
     expect(output).toContain('- 脉脉: NOT READY — 未找到 脉脉 标签页');
+  });
+
+  it('plans opening only missing channel entry pages', () => {
+    const targets = browserOpenTargetsForReadiness({
+      ready: 1,
+      notReady: 1,
+      unavailable: 0,
+      ok: false,
+      reports: [
+        {
+          channel: 'boss',
+          status: 'ready',
+          url: 'https://www.zhipin.com/web/chat/index',
+          issues: [],
+          nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+        },
+        {
+          channel: 'maimai',
+          status: 'not_ready',
+          issues: ['未找到 脉脉 标签页'],
+          nextSteps: ['在 Chrome 打开脉脉页面。'],
+        },
+      ],
+    });
+
+    expect(targets).toEqual([{
+      channel: 'maimai',
+      url: 'https://maimai.cn/ent/v41/recruit/talents?tab=1',
+      reason: '未找到 脉脉 标签页',
+    }]);
+  });
+
+  it('formats opened missing channel pages with login next steps', () => {
+    const output = formatOpenMissingBrowserChannels({
+      before: {
+        ready: 1,
+        notReady: 1,
+        unavailable: 0,
+        ok: false,
+        reports: [
+          {
+            channel: 'boss',
+            status: 'ready',
+            url: 'https://www.zhipin.com/web/chat/index',
+            issues: [],
+            nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+          },
+          {
+            channel: 'maimai',
+            status: 'not_ready',
+            issues: ['未找到 脉脉 标签页'],
+            nextSteps: ['在 Chrome 打开脉脉页面。'],
+          },
+        ],
+      },
+      opened: [{
+        channel: 'maimai',
+        url: 'https://maimai.cn/ent/v41/recruit/talents?tab=1',
+        reason: '未找到 脉脉 标签页',
+      }],
+      skipped: [],
+    });
+
+    expect(output).toContain('Opened 1 missing channel page(s):');
+    expect(output).toContain('https://maimai.cn/ent/v41/recruit/talents?tab=1');
+    expect(output).toContain('完成登录');
+    expect(output).toContain('hireseek validate');
   });
 });
