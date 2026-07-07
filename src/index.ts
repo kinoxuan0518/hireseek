@@ -300,6 +300,7 @@ async function main(): Promise<void> {
     const {
       channelValidationSteps,
       channelValidationWaitOptions,
+      formatChannelValidationWaitProgress,
       formatChannelValidationBatchPlan,
       formatChannelValidationBatchResult,
       formatChannelValidationPlan,
@@ -312,7 +313,11 @@ async function main(): Promise<void> {
     if (target) {
       console.log(formatChannelValidationPlan(target, steps) + '\n');
       if (openMissing || wait.enabled) {
-        const batchResult = await validateChannels([target], steps, { openMissing, wait });
+        const batchResult = await validateChannels([target], steps, {
+          openMissing,
+          wait,
+          onWaitProgress: progress => console.log(chalk.gray(formatChannelValidationWaitProgress(progress))),
+        });
         console.log('\n' + formatChannelValidationBatchResult(batchResult) + '\n');
         db.close();
         process.exit(batchResult.ok ? 0 : 1);
@@ -331,7 +336,11 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     console.log(formatChannelValidationBatchPlan(channels, steps) + '\n');
-    const result = await validateChannels(channels, steps, { openMissing, wait });
+    const result = await validateChannels(channels, steps, {
+      openMissing,
+      wait,
+      onWaitProgress: progress => console.log(chalk.gray(formatChannelValidationWaitProgress(progress))),
+    });
     console.log('\n' + formatChannelValidationBatchResult(result) + '\n');
     if (result.ok) {
       const { CHAT_TOOL_REGISTRY } = await import('./chat');

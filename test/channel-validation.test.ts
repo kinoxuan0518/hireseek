@@ -8,6 +8,7 @@ import {
   formatChannelValidationBatchResult,
   formatChannelValidationPlan,
   formatChannelValidationResult,
+  formatChannelValidationWaitProgress,
   runOptionsForValidationStep,
 } from '../src/channel-validation';
 
@@ -229,6 +230,47 @@ describe('channel validation command planning', () => {
 
     expect(output).toContain('Channel validation stopped after waiting for login.');
     expect(output).toContain('Wait: attempts=3, timeoutMs=30000, intervalMs=10000, timedOut=true');
+  });
+
+  it('formats wait progress so login waits are visible', () => {
+    const output = formatChannelValidationWaitProgress({
+      attempt: 2,
+      elapsedMs: 12000,
+      timeoutMs: 30000,
+      intervalMs: 5000,
+      readiness: {
+        ready: 1,
+        notReady: 1,
+        unavailable: 0,
+        ok: false,
+        reports: [
+          {
+            channel: 'boss',
+            status: 'ready',
+            issues: [],
+            nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+          },
+          {
+            channel: 'maimai',
+            status: 'not_ready',
+            issues: ['未找到 脉脉 标签页'],
+            nextSteps: ['在 Chrome 打开脉脉页面。'],
+          },
+        ],
+      },
+    });
+
+    expect(output).toContain('等待浏览器 readiness：1/2 ready');
+    expect(output).toContain('attempt=2');
+    expect(output).toContain('elapsed=12s/30s');
+    expect(output).toContain('missing=maimai:未找到 脉脉 标签页');
+  });
+
+  it('wires wait progress output into validation CLI', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'src', 'index.ts'), 'utf8');
+
+    expect(source).toContain('formatChannelValidationWaitProgress');
+    expect(source).toContain('onWaitProgress: progress => console.log');
   });
 
   it('keeps full-channel validation closed by doctor status', () => {

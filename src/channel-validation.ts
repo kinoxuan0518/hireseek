@@ -45,6 +45,14 @@ export interface ChannelValidationWaitResult extends ChannelValidationWaitOption
   timedOut: boolean;
 }
 
+export interface ChannelValidationWaitProgress {
+  attempt: number;
+  elapsedMs: number;
+  timeoutMs: number;
+  intervalMs: number;
+  readiness: BrowserReadinessSummary;
+}
+
 const STEP_LABEL: Record<ChannelValidationStep, string> = {
   'dry-run': 'dry-run 预检',
   prepare: 'prepare 安全验收',
@@ -150,19 +158,47 @@ export function formatChannelValidationBatchResult(result: ChannelValidationBatc
   return lines.join('\n');
 }
 
+export function formatChannelValidationWaitProgress(progress: ChannelValidationWaitProgress): string {
+  const missing = progress.readiness.reports
+    .filter(report => report.status !== 'ready')
+    .map(report => `${report.channel}:${report.issues[0] ?? report.status}`)
+    .join(' | ');
+  return [
+    `等待浏览器 readiness：${progress.readiness.ready}/${progress.readiness.reports.length} ready`,
+    `attempt=${progress.attempt}`,
+    `elapsed=${Math.round(progress.elapsedMs / 1000)}s/${Math.round(progress.timeoutMs / 1000)}s`,
+    missing ? `missing=${missing}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 async function waitForReadiness(
   channels: Channel[],
   opts: ChannelValidationWaitOptions,
+  onProgress?: (progress: ChannelValidationWaitProgress) => void,
 ): Promise<{ readiness: BrowserReadinessSummary; wait: ChannelValidationWaitResult }> {
   const started = Date.now();
   let attempts = 0;
   let readiness = await probeBrowserReadinessMany(channels);
+  onProgress?.({
+    attempt: attempts,
+    elapsedMs: Date.now() - started,
+    timeoutMs: opts.timeoutMs,
+    intervalMs: opts.intervalMs,
+    readiness,
+  });
   while (!readiness.ok && Date.now() - started < opts.timeoutMs) {
     attempts++;
     await sleep(opts.intervalMs);
     readiness = await probeBrowserReadinessMany(channels);
+    onProgress?.({
+      attempt: attempts,
+      elapsedMs: Date.now() - started,
+      timeoutMs: opts.timeoutMs,
+      intervalMs: opts.intervalMs,
+      readiness,
+    });
   }
   return {
     readiness,
@@ -198,7 +234,11 @@ export async function validateChannel(
 export async function validateChannels(
   channels: Channel[],
   steps: ChannelValidationStep[] = DEFAULT_STEPS,
-  opts: { openMissing?: boolean; wait?: ChannelValidationWaitOptions } = {},
+  opts: {
+    openMissing?: boolean;
+    wait?: ChannelValidationWaitOptions;
+    onWaitProgress?: (progress: ChannelValidationWaitProgress) => void;
+  } = {},
 ): Promise<ChannelValidationBatchResult> {
   const readiness = await probeBrowserReadinessMany(channels);
   if (!readiness.ok) {
@@ -206,7 +246,7 @@ export async function validateChannels(
     if (!opts.wait?.enabled) {
       return { channels, readiness, results: [], openedMissing, ok: false };
     }
-    const waited = await waitForReadiness(channels, opts.wait);
+    const waited = await waitForReadiness(channels, opts.wait, opts.onWaitProgress);
     if (!waited.readiness.ok) {
       return {
         channels,
