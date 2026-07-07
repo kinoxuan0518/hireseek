@@ -85,6 +85,56 @@ function recentPendingRunStateDetails(limit = 3): string[] {
     });
 }
 
+function readSourceForDoctor(relativePath: string): string {
+  return fs.readFileSync(path.join(process.cwd(), 'src', relativePath), 'utf8');
+}
+
+function collectInteractionModelProblems(): string[] {
+  try {
+    const chat = readSourceForDoctor('chat.ts');
+    const askUser = readSourceForDoctor('ask-user.ts');
+    const select = readSourceForDoctor('select.ts');
+    const slash = readSourceForDoctor(path.join('chat', 'slash-suggestions.ts'));
+    const problems: string[] = [];
+
+    if (!slash.includes('SlashSuggestionController')) {
+      problems.push('slash suggestions are not isolated in a controller');
+    }
+    if (chat.includes("if (text === '/')") || chat.includes('clearSubmittedPromptLine') || chat.includes('命令联想')) {
+      problems.push('slash input regressed to command selector behavior');
+    }
+    if (!chat.includes('acceptSlashSuggestion') || !chat.includes('renderSlashSuggestions')) {
+      problems.push('chat slash suggestion hooks missing');
+    }
+    if (!askUser.includes('askEditableChoice')) {
+      problems.push('ask_user_question does not use editable choice input');
+    }
+    if (/select(?:Multiple)?Options?/.test(askUser)) {
+      problems.push('ask_user_question still imports hard-confirm selectors');
+    }
+    if (!chat.includes('const { askEditableChoice }') || /case 'ask_user_choice':[\s\S]{0,700}selectOption/.test(chat)) {
+      problems.push('ask_user_choice does not use editable choice input');
+    }
+    if (!chat.includes('需要用户做决定时用 ask_user_choice 给可编辑候选')) {
+      problems.push('system prompt does not describe editable user-choice behavior');
+    }
+    if (!select.includes('Tab 把候选填入输入框') || !select.includes('Enter 提交当前输入')) {
+      problems.push('editable choice affordance text missing');
+    }
+
+    const hardSelectorQuestions = [...chat.matchAll(/selectOption\('([^']+)'/g)].map(match => match[1]);
+    const allowedHardSelectorQuestions = new Set(['切换到哪个模型？', '恢复哪个会话？']);
+    const unexpectedHardSelectors = hardSelectorQuestions.filter(question => !allowedHardSelectorQuestions.has(question));
+    if (unexpectedHardSelectors.length > 0) {
+      problems.push(`unexpected hard selectors: ${unexpectedHardSelectors.join(', ')}`);
+    }
+
+    return problems;
+  } catch (err: any) {
+    return [`interaction model source check failed: ${err.message}`];
+  }
+}
+
 export interface ChannelDryRunEvidence {
   channel: Channel;
   id: number;
@@ -427,6 +477,16 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
     chatMemoryProblems.length === 0
       ? 'chat prompt includes memory for enabled channels'
       : chatMemoryProblems.join('; '),
+  ));
+
+  const interactionModelProblems = collectInteractionModelProblems();
+  checks.push(check(
+    'lower',
+    'Interaction model',
+    interactionModelProblems.length === 0 ? 'pass' : 'fail',
+    interactionModelProblems.length === 0
+      ? 'slash and ask-user use editable suggestions; hard selectors are limited to closed system menus'
+      : interactionModelProblems.join('; '),
   ));
 
   const agentTables = [
