@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   channelValidationSteps,
+  channelValidationWaitOptions,
   formatChannelValidationBatchPlan,
   formatChannelValidationBatchResult,
   formatChannelValidationPlan,
@@ -17,6 +18,23 @@ describe('channel validation command planning', () => {
     expect(channelValidationSteps(['--dry-run-only'])).toEqual(['dry-run']);
     expect(channelValidationSteps(['--prepare-only'])).toEqual(['prepare']);
     expect(channelValidationSteps(['--screen-only'])).toEqual(['screen']);
+  });
+
+  it('parses explicit wait options for login handoff', () => {
+    expect(channelValidationWaitOptions()).toMatchObject({
+      enabled: false,
+      timeoutMs: 300000,
+      intervalMs: 5000,
+    });
+    expect(channelValidationWaitOptions(['--wait', '--wait-seconds=30', '--wait-interval-ms=1000'])).toEqual({
+      enabled: true,
+      timeoutMs: 30000,
+      intervalMs: 1000,
+    });
+    expect(channelValidationWaitOptions(['--wait', '--wait-ms=120000'])).toMatchObject({
+      enabled: true,
+      timeoutMs: 120000,
+    });
   });
 
   it('maps validation stages to current-page safe run options', () => {
@@ -179,5 +197,35 @@ describe('channel validation command planning', () => {
     expect(output).toContain('Opened 1 missing channel page(s):');
     expect(output).toContain('Channel validation paused for login.');
     expect(output).not.toContain('Channel validation stopped.');
+  });
+
+  it('formats wait timeout as a stopped validation', () => {
+    const output = formatChannelValidationBatchResult({
+      channels: ['maimai'],
+      readiness: {
+        ready: 0,
+        notReady: 1,
+        unavailable: 0,
+        ok: false,
+        reports: [{
+          channel: 'maimai',
+          status: 'not_ready',
+          issues: ['未找到 脉脉 标签页'],
+          nextSteps: ['在 Chrome 打开脉脉页面。'],
+        }],
+      },
+      wait: {
+        enabled: true,
+        attempts: 3,
+        timeoutMs: 30000,
+        intervalMs: 10000,
+        timedOut: true,
+      },
+      results: [],
+      ok: false,
+    });
+
+    expect(output).toContain('Channel validation stopped after waiting for login.');
+    expect(output).toContain('Wait: attempts=3, timeoutMs=30000, intervalMs=10000, timedOut=true');
   });
 });

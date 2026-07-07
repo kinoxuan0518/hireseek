@@ -34,7 +34,7 @@ const USAGE = `
   hireseek core                Agent Core 状态：工具注册 / trace / session / memory
   hireseek failures            Harness 失败复盘：环境 / 工具 / 协议 / 登录态优先级
   hireseek readiness [渠道]    只读检查当前 Chrome 是否适合跑真实渠道验收（--open-missing 打开缺失入口；--strict 可作脚本门禁）
-  hireseek validate [渠道]     真实渠道验收：先 readiness，再依次 dry-run / prepare / screen
+  hireseek validate [渠道]     真实渠道验收：先 readiness，再依次 dry-run / prepare / screen（--open-missing --wait 可等登录）
   hireseek runs [all|ID]       查看最近暂停/失败 run；all 显示最近全部；ID 显示详情
   hireseek runs cleanup [--apply]  收口超时 running run（默认预览，不删除 trace）
   hireseek doctor              产品结构体检：下层基座 / 中层协议 / skill 边界 / 真实验收缺口
@@ -299,6 +299,7 @@ async function main(): Promise<void> {
     }
     const {
       channelValidationSteps,
+      channelValidationWaitOptions,
       formatChannelValidationBatchPlan,
       formatChannelValidationBatchResult,
       formatChannelValidationPlan,
@@ -307,10 +308,11 @@ async function main(): Promise<void> {
       validateChannels,
     } = await import('./channel-validation');
     const steps = channelValidationSteps(args.slice(1));
+    const wait = channelValidationWaitOptions(args.slice(1));
     if (target) {
       console.log(formatChannelValidationPlan(target, steps) + '\n');
-      if (openMissing) {
-        const batchResult = await validateChannels([target], steps, { openMissing: true });
+      if (openMissing || wait.enabled) {
+        const batchResult = await validateChannels([target], steps, { openMissing, wait });
         console.log('\n' + formatChannelValidationBatchResult(batchResult) + '\n');
         db.close();
         process.exit(batchResult.ok ? 0 : 1);
@@ -329,7 +331,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     console.log(formatChannelValidationBatchPlan(channels, steps) + '\n');
-    const result = await validateChannels(channels, steps, { openMissing });
+    const result = await validateChannels(channels, steps, { openMissing, wait });
     console.log('\n' + formatChannelValidationBatchResult(result) + '\n');
     db.close();
     process.exit(result.ok ? 0 : 1);

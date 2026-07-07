@@ -26,10 +26,24 @@ export interface ChannelValidationBatchResult {
   readiness: BrowserReadinessSummary;
   results: ChannelValidationResult[];
   openedMissing?: BrowserOpenMissingResult;
+  wait?: ChannelValidationWaitResult;
   ok: boolean;
 }
 
 const DEFAULT_STEPS: ChannelValidationStep[] = ['dry-run', 'prepare', 'screen'];
+const DEFAULT_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_WAIT_INTERVAL_MS = 5000;
+
+export interface ChannelValidationWaitOptions {
+  enabled: boolean;
+  timeoutMs: number;
+  intervalMs: number;
+}
+
+export interface ChannelValidationWaitResult extends ChannelValidationWaitOptions {
+  attempts: number;
+  timedOut: boolean;
+}
 
 const STEP_LABEL: Record<ChannelValidationStep, string> = {
   'dry-run': 'dry-run 预检',
@@ -42,6 +56,24 @@ export function channelValidationSteps(args: string[] = []): ChannelValidationSt
   if (args.includes('--prepare-only')) return ['prepare'];
   if (args.includes('--screen-only')) return ['screen'];
   return [...DEFAULT_STEPS];
+}
+
+export function channelValidationWaitOptions(args: string[] = []): ChannelValidationWaitOptions {
+  const enabled = args.includes('--wait');
+  const timeoutArg = args.find(arg => arg.startsWith('--wait-ms='));
+  const secondsArg = args.find(arg => arg.startsWith('--wait-seconds='));
+  const intervalArg = args.find(arg => arg.startsWith('--wait-interval-ms='));
+  const parsedTimeout = timeoutArg
+    ? Number(timeoutArg.split('=')[1])
+    : secondsArg
+      ? Number(secondsArg.split('=')[1]) * 1000
+      : DEFAULT_WAIT_TIMEOUT_MS;
+  const parsedInterval = intervalArg ? Number(intervalArg.split('=')[1]) : DEFAULT_WAIT_INTERVAL_MS;
+  return {
+    enabled,
+    timeoutMs: Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : DEFAULT_WAIT_TIMEOUT_MS,
+    intervalMs: Number.isFinite(parsedInterval) && parsedInterval > 0 ? parsedInterval : DEFAULT_WAIT_INTERVAL_MS,
+  };
 }
 
 export function runOptionsForValidationStep(step: ChannelValidationStep): {
@@ -99,10 +131,15 @@ export function formatChannelValidationBatchResult(result: ChannelValidationBatc
     '',
     result.ok
       ? 'Channel validation completed.'
+      : result.wait?.timedOut
+        ? 'Channel validation stopped after waiting for login.'
       : result.openedMissing?.opened.length
         ? 'Channel validation paused for login.'
         : 'Channel validation stopped.',
   ];
+  if (result.wait) {
+    lines.push(`Wait: attempts=${result.wait.attempts}, timeoutMs=${result.wait.timeoutMs}, intervalMs=${result.wait.intervalMs}, timedOut=${result.wait.timedOut}`);
+  }
   if (result.results.length > 0) {
     lines.push('Run evidence:');
     for (const channelResult of result.results) {
@@ -111,6 +148,30 @@ export function formatChannelValidationBatchResult(result: ChannelValidationBatc
     }
   }
   return lines.join('\n');
+}
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+async function waitForReadiness(
+  channels: Channel[],
+  opts: ChannelValidationWaitOptions,
+): Promise<{ readiness: BrowserReadinessSummary; wait: ChannelValidationWaitResult }> {
+  const started = Date.now();
+  let attempts = 0;
+  let readiness = await probeBrowserReadinessMany(channels);
+  while (!readiness.ok && Date.now() - started < opts.timeoutMs) {
+    attempts++;
+    await sleep(opts.intervalMs);
+    readiness = await probeBrowserReadinessMany(channels);
+  }
+  return {
+    readiness,
+    wait: {
+      ...opts,
+      attempts,
+      timedOut: !readiness.ok,
+    },
+  };
 }
 
 export async function validateChannel(
@@ -137,12 +198,37 @@ export async function validateChannel(
 export async function validateChannels(
   channels: Channel[],
   steps: ChannelValidationStep[] = DEFAULT_STEPS,
-  opts: { openMissing?: boolean } = {},
+  opts: { openMissing?: boolean; wait?: ChannelValidationWaitOptions } = {},
 ): Promise<ChannelValidationBatchResult> {
   const readiness = await probeBrowserReadinessMany(channels);
   if (!readiness.ok) {
     const openedMissing = opts.openMissing ? await openMissingBrowserChannels(channels) : undefined;
-    return { channels, readiness, results: [], openedMissing, ok: false };
+    if (!opts.wait?.enabled) {
+      return { channels, readiness, results: [], openedMissing, ok: false };
+    }
+    const waited = await waitForReadiness(channels, opts.wait);
+    if (!waited.readiness.ok) {
+      return {
+        channels,
+        readiness: waited.readiness,
+        results: [],
+        openedMissing,
+        wait: waited.wait,
+        ok: false,
+      };
+    }
+    const results: ChannelValidationResult[] = [];
+    for (const channel of channels) {
+      results.push(await validateChannel(channel, steps));
+    }
+    return {
+      channels,
+      readiness: waited.readiness,
+      results,
+      openedMissing,
+      wait: waited.wait,
+      ok: results.length === channels.length && results.every(result => result.ok),
+    };
   }
 
   const results: ChannelValidationResult[] = [];
