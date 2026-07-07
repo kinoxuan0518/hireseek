@@ -120,4 +120,64 @@ describe('channel validation command planning', () => {
     expect(output).toContain('Channel validation stopped.');
     expect(output).not.toContain('Run evidence:');
   });
+
+  it('formats opened missing pages as paused for login', () => {
+    const output = formatChannelValidationBatchResult({
+      channels: ['boss', 'maimai'],
+      readiness: {
+        ready: 1,
+        notReady: 1,
+        unavailable: 0,
+        ok: false,
+        reports: [
+          {
+            channel: 'boss',
+            status: 'ready',
+            issues: [],
+            nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+          },
+          {
+            channel: 'maimai',
+            status: 'not_ready',
+            issues: ['未找到 脉脉 标签页'],
+            nextSteps: ['在 Chrome 打开脉脉页面。'],
+          },
+        ],
+      },
+      openedMissing: {
+        before: {
+          ready: 1,
+          notReady: 1,
+          unavailable: 0,
+          ok: false,
+          reports: [
+            {
+              channel: 'boss',
+              status: 'ready',
+              issues: [],
+              nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+            },
+            {
+              channel: 'maimai',
+              status: 'not_ready',
+              issues: ['未找到 脉脉 标签页'],
+              nextSteps: ['在 Chrome 打开脉脉页面。'],
+            },
+          ],
+        },
+        opened: [{
+          channel: 'maimai',
+          url: 'https://maimai.cn/ent/v41/recruit/talents?tab=1',
+          reason: '未找到 脉脉 标签页',
+        }],
+        skipped: [],
+      },
+      results: [],
+      ok: false,
+    });
+
+    expect(output).toContain('Opened 1 missing channel page(s):');
+    expect(output).toContain('Channel validation paused for login.');
+    expect(output).not.toContain('Channel validation stopped.');
+  });
 });

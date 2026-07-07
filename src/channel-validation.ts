@@ -2,8 +2,11 @@ import type { Channel } from './types';
 import {
   formatBrowserReadiness,
   formatBrowserReadinessSummary,
+  formatOpenMissingBrowserChannels,
+  openMissingBrowserChannels,
   probeBrowserReadiness,
   probeBrowserReadinessMany,
+  type BrowserOpenMissingResult,
   type BrowserReadinessReport,
   type BrowserReadinessSummary,
 } from './browser-readiness';
@@ -22,6 +25,7 @@ export interface ChannelValidationBatchResult {
   channels: Channel[];
   readiness: BrowserReadinessSummary;
   results: ChannelValidationResult[];
+  openedMissing?: BrowserOpenMissingResult;
   ok: boolean;
 }
 
@@ -89,9 +93,15 @@ export function formatChannelValidationResult(result: ChannelValidationResult): 
 
 export function formatChannelValidationBatchResult(result: ChannelValidationBatchResult): string {
   const lines = [
-    formatBrowserReadinessSummary(result.readiness),
+    result.openedMissing
+      ? formatOpenMissingBrowserChannels(result.openedMissing)
+      : formatBrowserReadinessSummary(result.readiness),
     '',
-    result.ok ? 'Channel validation completed.' : 'Channel validation stopped.',
+    result.ok
+      ? 'Channel validation completed.'
+      : result.openedMissing?.opened.length
+        ? 'Channel validation paused for login.'
+        : 'Channel validation stopped.',
   ];
   if (result.results.length > 0) {
     lines.push('Run evidence:');
@@ -127,10 +137,12 @@ export async function validateChannel(
 export async function validateChannels(
   channels: Channel[],
   steps: ChannelValidationStep[] = DEFAULT_STEPS,
+  opts: { openMissing?: boolean } = {},
 ): Promise<ChannelValidationBatchResult> {
   const readiness = await probeBrowserReadinessMany(channels);
   if (!readiness.ok) {
-    return { channels, readiness, results: [], ok: false };
+    const openedMissing = opts.openMissing ? await openMissingBrowserChannels(channels) : undefined;
+    return { channels, readiness, results: [], openedMissing, ok: false };
   }
 
   const results: ChannelValidationResult[] = [];

@@ -291,8 +291,9 @@ async function main(): Promise<void> {
 
   } else if (command === 'validate' || command === 'acceptance') {
     const target = args.slice(1).find(arg => !arg.startsWith('-')) as Channel | undefined;
+    const openMissing = args.includes('--open-missing') || args.includes('--open');
     if (target && !CHANNELS.includes(target)) {
-      console.log(chalk.yellow('用法：hireseek validate [boss|maimai|linkedin|followup] [--dry-run-only|--prepare-only|--screen-only]'));
+      console.log(chalk.yellow('用法：hireseek validate [boss|maimai|linkedin|followup] [--dry-run-only|--prepare-only|--screen-only] [--open-missing]'));
       db.close();
       process.exit(1);
     }
@@ -308,6 +309,12 @@ async function main(): Promise<void> {
     const steps = channelValidationSteps(args.slice(1));
     if (target) {
       console.log(formatChannelValidationPlan(target, steps) + '\n');
+      if (openMissing) {
+        const batchResult = await validateChannels([target], steps, { openMissing: true });
+        console.log('\n' + formatChannelValidationBatchResult(batchResult) + '\n');
+        db.close();
+        process.exit(batchResult.ok ? 0 : 1);
+      }
       const result = await validateChannel(target, steps);
       console.log('\n' + formatChannelValidationResult(result) + '\n');
       db.close();
@@ -322,7 +329,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     console.log(formatChannelValidationBatchPlan(channels, steps) + '\n');
-    const result = await validateChannels(channels, steps);
+    const result = await validateChannels(channels, steps, { openMissing });
     console.log('\n' + formatChannelValidationBatchResult(result) + '\n');
     db.close();
     process.exit(result.ok ? 0 : 1);
