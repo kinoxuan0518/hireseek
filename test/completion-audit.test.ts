@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { collectCompletionAudit, formatCompletionAudit } from '../src/completion-audit';
+import {
+  classifyCompletionBlocker,
+  collectCompletionAudit,
+  formatCompletionAudit,
+} from '../src/completion-audit';
 import type { DoctorReport } from '../src/doctor';
 
 describe('completion audit', () => {
@@ -17,6 +21,9 @@ describe('completion audit', () => {
       complete: true,
       status: 'pass',
       blockers: [],
+      classifiedBlockers: [],
+      internalBlockerCount: 0,
+      externalValidationBlockerCount: 0,
     });
   });
 
@@ -39,7 +46,47 @@ describe('completion audit', () => {
 
     expect(audit.complete).toBe(false);
     expect(audit.blockers.map(blocker => blocker.name)).toEqual(['Live 脉脉 run']);
+    expect(audit.classifiedBlockers?.map(blocker => blocker.kind)).toEqual(['live_evidence']);
+    expect(audit.internalBlockerCount).toBe(0);
+    expect(audit.externalValidationBlockerCount).toBe(1);
     expect(audit.nextSteps[0]).toContain('validate');
+  });
+
+  it('classifies blocker kinds so incomplete status is actionable', () => {
+    expect(classifyCompletionBlocker({
+      layer: 'upper',
+      name: 'Browser readiness',
+      status: 'warn',
+      detail: 'maimai not ready',
+    }).kind).toBe('browser_readiness');
+
+    expect(classifyCompletionBlocker({
+      layer: 'upper',
+      name: 'Live 脉脉 prepare',
+      status: 'warn',
+      detail: 'no evidence',
+    }).kind).toBe('live_evidence');
+
+    expect(classifyCompletionBlocker({
+      layer: 'lower',
+      name: 'Pending run states',
+      status: 'warn',
+      detail: 'run #54 failed/external_control reason=用户接管保护',
+    }).kind).toBe('external_control');
+
+    expect(classifyCompletionBlocker({
+      layer: 'middle',
+      name: 'BOSS protocol',
+      status: 'fail',
+      detail: 'missing',
+    }).kind).toBe('product_contract');
+
+    expect(classifyCompletionBlocker({
+      layer: 'lower',
+      name: 'RuntimeContext',
+      status: 'fail',
+      detail: 'missing',
+    }).kind).toBe('agent_core');
   });
 
   it('formats blockers and next steps for the CLI', () => {
@@ -58,8 +105,29 @@ describe('completion audit', () => {
     expect(output).toContain('HireSeek Completion Audit');
     expect(output).toContain('Complete: NO');
     expect(output).toContain('Doctor status: WARN');
+    expect(output).toContain('Internal implementation blockers: none');
+    expect(output).toContain('External validation blockers: 1');
     expect(output).toContain('Blocking checks (1)');
-    expect(output).toContain('WARN Browser readiness: 脉脉:not_ready');
+    expect(output).toContain('Blocking categories: browser readiness=1');
+    expect(output).toContain('WARN [browser readiness] Browser readiness: 脉脉:not_ready');
     expect(output).toContain('Next steps');
+  });
+
+  it('counts external browser control separately from internal implementation blockers', () => {
+    const audit = collectCompletionAudit({
+      status: 'warn',
+      checks: [{
+        layer: 'lower',
+        name: 'Pending run states',
+        status: 'warn',
+        detail: 'run #54 failed/external_control reason=用户接管保护',
+      }],
+      nextSteps: [],
+    });
+
+    expect(audit.internalBlockerCount).toBe(0);
+    expect(audit.externalValidationBlockerCount).toBe(1);
+    expect(formatCompletionAudit(audit)).toContain('External validation blockers: 1');
+    expect(formatCompletionAudit(audit)).toContain('[external browser control]');
   });
 });

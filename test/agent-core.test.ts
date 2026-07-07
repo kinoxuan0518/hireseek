@@ -249,6 +249,7 @@ describe('agent core lower layer', () => {
       formatRunStateForContext,
       formatRunStateDetail,
       formatRunStateList,
+      isAgentRunStateSuperseded,
       latestPausedRunState,
       listPendingAgentRunStates,
       listAgentRunStates,
@@ -332,6 +333,23 @@ describe('agent core lower layer', () => {
     expect(formatRunStateList([], 'All', '没有 run state。')).toContain('没有 run state。');
     expect(listPendingAgentRunStates(3).some(s => s.runId === 304)).toBe(true);
     expect(listAgentRunStates(2).some(s => s.runId === 304)).toBe(true);
+
+    db.prepare(`DELETE FROM task_runs WHERE id = ?`).run(305);
+    db.prepare(`
+      INSERT INTO task_runs (id, job_id, channel, mode, started_at, finished_at, status, contacted_count, skipped_count)
+      VALUES (?, ?, ?, 'execute', datetime('now','localtime'), datetime('now','localtime'), 'completed', 0, 0)
+    `).run(305, 'Agent工程师', 'boss');
+    upsertAgentRunState({
+      runId: 305,
+      status: 'completed',
+      phase: 'completed',
+      lastAction: 'final_response',
+      lastUrl: 'https://www.zhipin.com/web/chat/aiform',
+    });
+
+    expect(isAgentRunStateSuperseded(loadAgentRunState(304)!)).toBe(true);
+    expect(listPendingAgentRunStates(3).some(s => s.runId === 304)).toBe(false);
+    expect(latestPausedRunState({ jobId: 'Agent工程师', channel: 'boss' })?.runId).not.toBe(304);
   });
 
   it('tracks execution environment ownership separately from run state', async () => {

@@ -1,4 +1,5 @@
 import type { Channel } from './types';
+import { loadAgentRunState } from './agent-core/run-state-store';
 import {
   formatBrowserReadiness,
   formatBrowserReadinessSummary,
@@ -17,8 +18,17 @@ export interface ChannelValidationResult {
   channel: Channel;
   readiness: BrowserReadinessReport;
   attemptedSteps: ChannelValidationStep[];
-  runIds: Array<{ step: ChannelValidationStep; runId: number }>;
+  runIds: ChannelValidationRunEvidence[];
   ok: boolean;
+}
+
+export interface ChannelValidationRunEvidence {
+  step: ChannelValidationStep;
+  runId: number;
+  status?: string;
+  phase?: string;
+  ok?: boolean;
+  reason?: string | null;
 }
 
 export interface ChannelValidationBatchResult {
@@ -126,7 +136,7 @@ export function formatChannelValidationResult(result: ChannelValidationResult): 
   ];
   if (result.runIds.length > 0) {
     lines.push('Run evidence:');
-    lines.push(...result.runIds.map(row => `- ${row.step}: run#${row.runId}`));
+    lines.push(...result.runIds.map(row => `- ${formatRunEvidence(row)}`));
   }
   return lines.join('\n');
 }
@@ -152,10 +162,17 @@ export function formatChannelValidationBatchResult(result: ChannelValidationBatc
     lines.push('Run evidence:');
     for (const channelResult of result.results) {
       lines.push(`- ${channelResult.channel}: ${channelResult.ok ? 'completed' : 'stopped'}`);
-      lines.push(...channelResult.runIds.map(row => `  - ${row.step}: run#${row.runId}`));
+      lines.push(...channelResult.runIds.map(row => `  - ${formatRunEvidence(row)}`));
     }
   }
   return lines.join('\n');
+}
+
+function formatRunEvidence(row: ChannelValidationRunEvidence): string {
+  const state = [row.status, row.phase].filter(Boolean).join('/');
+  const suffix = state ? ` (${state})` : '';
+  const reason = !row.ok && row.reason ? ` — ${row.reason.slice(0, 140)}` : '';
+  return `${row.step}: run#${row.runId}${suffix}${reason}`;
 }
 
 export function formatChannelValidationWaitProgress(progress: ChannelValidationWaitProgress): string {
@@ -225,7 +242,17 @@ export async function validateChannel(
   for (const step of steps) {
     attemptedSteps.push(step);
     const runId = await runChannel(channel, undefined, runOptionsForValidationStep(step));
-    runIds.push({ step, runId });
+    const state = loadAgentRunState(runId);
+    const ok = state?.taskStatus === 'completed' && state.status === 'completed';
+    runIds.push({
+      step,
+      runId,
+      status: state?.taskStatus ?? state?.status ?? 'unknown',
+      phase: state?.phase ?? undefined,
+      ok,
+      reason: state?.reason ?? null,
+    });
+    if (!ok) return { channel, readiness, attemptedSteps, runIds, ok: false };
   }
 
   return { channel, readiness, attemptedSteps, runIds, ok: true };

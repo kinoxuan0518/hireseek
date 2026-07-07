@@ -164,11 +164,30 @@ export function listAgentRunStates(limit = 8): AgentRunState[] {
 export function listPendingAgentRunStates(limit = 8, maxAgeHours = 24): AgentRunState[] {
   return listAgentRunStates(Math.max(limit * 4, 20))
     .filter(state => state.status === 'paused' || state.status === 'failed')
+    .filter(state => !isAgentRunStateSuperseded(state))
     .filter(state => {
       if (!state.updatedAt) return true;
       return Date.now() - new Date(state.updatedAt).getTime() <= maxAgeHours * 60 * 60 * 1000;
     })
     .slice(0, limit);
+}
+
+export function isAgentRunStateSuperseded(state: AgentRunState): boolean {
+  if (!state.jobId || !state.channel || !state.runMode) return false;
+  const row = db.prepare(`
+    SELECT newer.id
+    FROM task_runs newer
+    JOIN agent_run_states newer_state ON newer_state.run_id = newer.id
+    WHERE newer.id > ?
+      AND newer.job_id = ?
+      AND newer.channel = ?
+      AND newer.mode = ?
+      AND newer.status = 'completed'
+      AND newer_state.status = 'completed'
+    ORDER BY newer.id DESC
+    LIMIT 1
+  `).get(state.runId, state.jobId, state.channel, state.runMode) as { id: number } | undefined;
+  return !!row;
 }
 
 export function latestPausedRunState(input: {
@@ -190,7 +209,7 @@ export function latestPausedRunState(input: {
     filters.push(`tr.channel = ?`);
     args.push(input.channel);
   }
-  const row = db.prepare(`
+  const rows = db.prepare(`
     SELECT ars.run_id, ars.session_id, tr.job_id, tr.channel, tr.mode AS run_mode,
            tr.status AS task_status, ars.status, ars.phase, ars.stage_id, ars.last_action,
            ars.last_url, ars.reason, ars.snapshot_summary, ars.created_at, ars.updated_at
@@ -198,9 +217,13 @@ export function latestPausedRunState(input: {
     LEFT JOIN task_runs tr ON tr.id = ars.run_id
     WHERE ${filters.join(' AND ')}
     ORDER BY ars.updated_at DESC, ars.run_id DESC
-    LIMIT 1
-  `).get(...args) as Parameters<typeof rowToState>[0] | undefined;
-  return row ? rowToState(row) : null;
+    LIMIT 10
+  `).all(...args) as Parameters<typeof rowToState>[0][];
+  for (const row of rows) {
+    const state = rowToState(row);
+    if (!isAgentRunStateSuperseded(state)) return state;
+  }
+  return null;
 }
 
 export function formatRunStateForContext(state: AgentRunState): string {

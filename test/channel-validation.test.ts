@@ -110,6 +110,33 @@ describe('channel validation command planning', () => {
     expect(output).toContain('- screen: run#103');
   });
 
+  it('formats paused run evidence as stopped instead of completed', () => {
+    const output = formatChannelValidationResult({
+      channel: 'maimai',
+      readiness: {
+        channel: 'maimai',
+        status: 'ready',
+        issues: [],
+        nextSteps: ['可以继续运行：hireseek run maimai --here --dry-run'],
+      },
+      attemptedSteps: ['prepare'],
+      runIds: [{
+        step: 'prepare',
+        runId: 53,
+        status: 'paused',
+        phase: 'external_control',
+        ok: false,
+        reason: '当前受控 Chrome 标签页已不再是激活标签',
+      }],
+      ok: false,
+    });
+
+    expect(output).toContain('Channel validation stopped.');
+    expect(output).not.toContain('Channel validation completed.');
+    expect(output).toContain('- prepare: run#53 (paused/external_control)');
+    expect(output).toContain('当前受控 Chrome 标签页已不再是激活标签');
+  });
+
   it('formats stopped multi-channel validation without run evidence', () => {
     const output = formatChannelValidationBatchResult({
       channels: ['boss', 'maimai'],
