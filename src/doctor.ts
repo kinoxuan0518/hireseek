@@ -868,6 +868,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   for (const channel of protocolChannels) {
     const label = channelLabel(channel);
     if (checks.some(c => c.name === `Live ${label} run` && c.status === 'warn')) {
+      nextSteps.push(`先运行 \`hireseek readiness ${channel}\`，确认当前 Chrome 登录态和页面适合真实验收。`);
       nextSteps.push(`真实页面验收从 \`hireseek run ${channel} --here --dry-run\` 开始，不要直接真实触达。`);
     }
     if (checks.some(c => c.name === `Live ${label} prepare` && c.status === 'warn')) {
