@@ -35,6 +35,7 @@ const USAGE = `
   hireseek failures            Harness 失败复盘：环境 / 工具 / 协议 / 登录态优先级
   hireseek readiness [渠道]    只读检查当前 Chrome 是否适合跑真实渠道验收（--open-missing 打开缺失入口；--strict 可作脚本门禁）
   hireseek validate [渠道]     真实渠道验收：先 readiness，再依次 dry-run / prepare / screen（--open-missing --wait 可等登录）
+  hireseek completion [--json] 判断当前证据是否足以标记整轮迭代完成
   hireseek runs [all|ID]       查看最近暂停/失败 run；all 显示最近全部；ID 显示详情
   hireseek runs cleanup [--apply]  收口超时 running run（默认预览，不删除 trace）
   hireseek doctor              产品结构体检：下层基座 / 中层协议 / skill 边界 / 真实验收缺口
@@ -406,6 +407,19 @@ async function main(): Promise<void> {
     console.log(formatDoctorReport(collectDoctorReport(CHAT_TOOL_REGISTRY)) + '\n');
     db.close();
     process.exit(0);
+
+  } else if (command === 'completion' || command === 'complete' || command === 'done') {
+    const { CHAT_TOOL_REGISTRY } = await import('./chat');
+    const { collectDoctorReport } = await import('./doctor');
+    const { collectCompletionAudit, formatCompletionAudit } = await import('./completion-audit');
+    const audit = collectCompletionAudit(collectDoctorReport(CHAT_TOOL_REGISTRY));
+    if (args.includes('--json')) {
+      console.log(JSON.stringify(audit, null, 2) + '\n');
+    } else {
+      console.log(formatCompletionAudit(audit) + '\n');
+    }
+    db.close();
+    process.exit(audit.complete ? 0 : 1);
 
   } else if (command === 'protocols') {
     const { formatPlatformProtocols } = await import('./platform-protocols');
