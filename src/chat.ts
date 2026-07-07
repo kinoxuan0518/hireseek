@@ -30,6 +30,12 @@ import { offloadToolResultForContext } from './agent-core/tool-output-store';
 import { buildRecruitingCapabilityContext } from './capabilities';
 import { createRuntimeContext } from './agent-core/runtime-context';
 import { buildChatHarnessContext } from './harness/run-assembly';
+import {
+  SlashSuggestionController,
+  clearSlashSuggestionAnsi,
+  formatSlashSuggestionLines,
+  renderSlashSuggestionAnsi,
+} from './chat/slash-suggestions';
 
 /**
  * 如果配置了 MCP 服务器，则初始化它们
@@ -2541,82 +2547,59 @@ export async function startChat(): Promise<void> {
   // "/" 是输入联想，不是命令模式切换：
   // 敲下 "/" 当场显示联想；↑↓ 只移动候选，Tab 才补全，Enter 始终提交当前输入框内容。
   // "/后面接文字" 会作为正常用户输入，不会被命令选择器抢走。
-  const slashSuggestionLimit = 10;
-  let slashSuggestVisible = false;
-  let slashSuggestIndex = 0;
+  const slashSuggestions = new SlashSuggestionController(allEntries, 10);
   let slashSuggestRenderedLines = 0;
-  let slashSuggestInput = '';
-
-  const slashSuggestionsFor = (line: string): Array<{ cmd: string; desc: string }> => {
-    if (!line.startsWith('/') || /\s/.test(line)) return [];
-    return allEntries()
-      .filter(e => e.cmd.startsWith(line))
-      .slice(0, slashSuggestionLimit);
-  };
 
   const clearSlashSuggestionVisual = (): void => {
     if (!process.stdout.isTTY || slashSuggestRenderedLines <= 0) return;
-    process.stdout.write(`\x1b[${slashSuggestRenderedLines}A\r`);
-    process.stdout.write(`\x1b[${slashSuggestRenderedLines}M`);
+    process.stdout.write(clearSlashSuggestionAnsi(slashSuggestRenderedLines));
     slashSuggestRenderedLines = 0;
   };
 
   const hideSlashSuggestions = (): void => {
     clearSlashSuggestionVisual();
-    slashSuggestVisible = false;
-    slashSuggestIndex = 0;
-    slashSuggestInput = '';
+    slashSuggestions.hide();
     (rl as ReadlineInternals)._refreshLine?.();
   };
 
   const renderSlashSuggestions = (line: string): void => {
     if (!process.stdout.isTTY) return;
-    const entries = slashSuggestionsFor(line);
     clearSlashSuggestionVisual();
-    if (entries.length === 0) {
-      slashSuggestVisible = false;
-      slashSuggestIndex = 0;
-      slashSuggestInput = '';
+    const snapshot = slashSuggestions.update(line);
+    if (!snapshot.visible) {
       (rl as ReadlineInternals)._refreshLine?.();
       return;
     }
 
-    slashSuggestVisible = true;
-    slashSuggestInput = line;
-    slashSuggestIndex = Math.max(0, Math.min(slashSuggestIndex, entries.length - 1));
-    const lines = entries.map((entry, index) => {
-      const marker = index === slashSuggestIndex ? chalk.cyan('▸') : ' ';
-      const label = index === slashSuggestIndex ? chalk.cyan.bold(entry.cmd) : entry.cmd;
-      return `  ${marker} ${label}${entry.desc ? chalk.gray(`  ${entry.desc}`) : ''}`;
+    const lines = formatSlashSuggestionLines(snapshot.entries, snapshot.index, {
+      marker: text => chalk.cyan(text),
+      selectedCommand: text => chalk.cyan.bold(text),
+      hint: text => chalk.gray(text),
     });
-    lines.push(chalk.gray('    ↑↓ 移动 · Tab 补全 · Enter 发送当前输入 · Esc 收起'));
 
-    process.stdout.write('\r\x1b[2K');
-    process.stdout.write(lines.map(lineText => `\x1b[2K${lineText}`).join('\n'));
-    process.stdout.write('\n');
+    process.stdout.write(renderSlashSuggestionAnsi(lines));
     slashSuggestRenderedLines = lines.length;
     (rl as ReadlineInternals)._refreshLine?.();
   };
 
   const updateSlashSuggestionsFromInput = (): void => {
     if (exiting || generating || toolLoopActive) {
-      if (slashSuggestVisible) hideSlashSuggestions();
+      if (slashSuggestions.snapshot().visible) hideSlashSuggestions();
       return;
     }
     const line = ((rl as ReadlineInternals).line ?? '');
     if (!line.startsWith('/') || /\s/.test(line)) {
-      if (slashSuggestVisible) hideSlashSuggestions();
+      if (slashSuggestions.snapshot().visible) hideSlashSuggestions();
       return;
     }
     renderSlashSuggestions(line);
   };
 
   const acceptSlashSuggestion = (): void => {
-    const entries = slashSuggestionsFor(slashSuggestInput);
-    const picked = entries[slashSuggestIndex];
-    if (!picked) return;
-    hideSlashSuggestions();
-    setInputLine(`${picked.cmd} `);
+    const accepted = slashSuggestions.accept();
+    if (!accepted) return;
+    clearSlashSuggestionVisual();
+    setInputLine(accepted);
   };
 
   // ── 极简启动（CC 风格：安静，信息在需要时出现）──────────────────────
@@ -2759,18 +2742,18 @@ export async function startChat(): Promise<void> {
 
   // Esc 单键中断（CC 同款）：生成中=打断；任务中=暂停；空闲=清空输入行
   process.stdin.on('keypress', (_s: unknown, key: { name?: string; sequence?: string } | undefined) => {
-    if (slashSuggestVisible && (key?.name === 'up' || key?.name === 'down')) {
-      const entries = slashSuggestionsFor(slashSuggestInput);
-      if (entries.length > 0) {
-        slashSuggestIndex = key.name === 'up'
-          ? (slashSuggestIndex - 1 + entries.length) % entries.length
-          : (slashSuggestIndex + 1) % entries.length;
-        setInputLine(slashSuggestInput);
-        renderSlashSuggestions(slashSuggestInput);
+    const slashSnapshot = slashSuggestions.snapshot();
+    if (slashSnapshot.visible && (key?.name === 'up' || key?.name === 'down')) {
+      const next = slashSuggestions.move(key.name);
+      if (next.visible) {
+        setInputLine(next.input);
+        renderSlashSuggestions(next.input);
+      } else {
+        hideSlashSuggestions();
       }
       return;
     }
-    if (slashSuggestVisible && key?.name === 'tab') {
+    if (slashSnapshot.visible && key?.name === 'tab') {
       acceptSlashSuggestion();
       return;
     }
@@ -2780,7 +2763,7 @@ export async function startChat(): Promise<void> {
       }
       return;
     }
-    if (slashSuggestVisible) {
+    if (slashSnapshot.visible) {
       hideSlashSuggestions();
       return;
     }
@@ -2925,7 +2908,7 @@ export async function startChat(): Promise<void> {
     const draftToRestore = preservedInterventionDraft;
     preservedInterventionDraft = '';
     rl.question(chalk.green('❯ '), async (input) => {
-      if (slashSuggestVisible) hideSlashSuggestions();
+      if (slashSuggestions.snapshot().visible) hideSlashSuggestions();
       let text = await readFullInput(input);
       if (!text) { ask(); return; }
 

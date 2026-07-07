@@ -42,8 +42,9 @@ describe('agent core lower layer', () => {
     expect(source).toContain('Enter 始终提交当前输入框内容');
     expect(source).toContain('renderSlashSuggestions');
     expect(source).toContain('acceptSlashSuggestion');
-    expect(source).toContain("setInputLine(`${picked.cmd} `)");
-    expect(source).toContain("process.stdout.write(`\\x1b[${slashSuggestRenderedLines}M`)");
+    expect(source).toContain('SlashSuggestionController');
+    expect(source).toContain('renderSlashSuggestionAnsi');
+    expect(source).toContain('clearSlashSuggestionAnsi');
     expect(source).not.toContain("process.stdout.write('\\x1b7')");
     expect(source).not.toContain("process.stdout.write('\\n' + lines.map");
     expect(source).not.toContain('openSlashSelector');
