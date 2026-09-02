@@ -2,6 +2,7 @@ import * as dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { DEFAULT_MODELS, normalizeProviderId } from './llm/provider';
 
 dotenv.config();
 
@@ -9,16 +10,7 @@ function resolveHome(p: string): string {
   return p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p;
 }
 
-const provider = (process.env.LLM_PROVIDER || 'deepseek') as 'deepseek' | 'claude' | 'openai' | 'minimax' | string;
-
-// 每个 provider 的默认模型
-const DEFAULT_MODELS: Record<string, string> = {
-  // deepseek-chat/deepseek-reasoner 旧模型名将于 2026-07-24 弃用
-  deepseek: 'deepseek-v4-flash',
-  claude:  'claude-opus-4-6',
-  openai:  'computer-use-preview',
-  minimax: 'MiniMax-Text-01',
-};
+const provider = normalizeProviderId(process.env.LLM_PROVIDER || 'deepseek');
 
 /** 数据库路径：优先新路径，但若旧版 ~/.hireclaw 数据库存在且新路径未建，则继续沿用，保证数据不丢 */
 function resolveDbPath(): string {
@@ -80,6 +72,16 @@ export const config = {
     baseUrl: process.env.CUSTOM_BASE_URL || '',
     model:   process.env.LLM_MODEL || '',
   },
+  kimi: {
+    apiKey:  process.env.MOONSHOT_API_KEY || process.env.KIMI_API_KEY || '',
+    baseUrl: process.env.MOONSHOT_BASE_URL || process.env.KIMI_BASE_URL || 'https://api.moonshot.cn/v1',
+    model:   process.env.DRIVER_MODEL || process.env.LLM_MODEL || DEFAULT_MODELS.kimi,
+  },
+  glm: {
+    apiKey:  process.env.ZHIPU_API_KEY || process.env.BIGMODEL_API_KEY || process.env.GLM_API_KEY || '',
+    baseUrl: process.env.ZHIPU_BASE_URL || process.env.BIGMODEL_BASE_URL || process.env.GLM_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
+    model:   process.env.DRIVER_MODEL || process.env.LLM_MODEL || DEFAULT_MODELS.glm,
+  },
   db: {
     path: resolveDbPath(),
   },
@@ -119,6 +121,8 @@ export const config = {
   },
   browser: {
     control: process.env.HIRESEEK_BROWSER_CONTROL || 'chrome',
+    /** auto=按模型推荐；dom=强制文本 ref；vision=截图点选（仅 OpenAI 兼容视觉模型） */
+    mode: process.env.HIRESEEK_BROWSER_MODE || 'auto',
     headless: process.env.BROWSER_HEADLESS === 'true',
     slowMo:   parseInt(process.env.BROWSER_SLOW_MO || '100', 10),
     profileDir: resolveHome(process.env.HIRESEEK_BROWSER_PROFILE_DIR || '~/.hireseek/browser-profile'),

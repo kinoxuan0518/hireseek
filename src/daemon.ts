@@ -102,7 +102,11 @@ function buildPlist(): string {
   // 把当前进程的关键环境变量带进 launchd（API key 等），launchd 不读 shell profile
   const envKeys = [
     'DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL', 'LLM_PROVIDER', 'LLM_MODEL',
-    'ANTHROPIC_API_KEY', 'CUSTOM_API_KEY', 'CUSTOM_BASE_URL',
+    'DRIVER_PROVIDER', 'DRIVER_MODEL', 'VISION_PROVIDER', 'VISION_MODEL',
+    'HIRESEEK_BROWSER_MODE', 'HIRESEEK_REASONING_EFFORT',
+    'MOONSHOT_API_KEY', 'MOONSHOT_BASE_URL', 'KIMI_API_KEY', 'KIMI_BASE_URL',
+    'ZHIPU_API_KEY', 'ZHIPU_BASE_URL', 'BIGMODEL_API_KEY', 'GLM_API_KEY',
+    'ANTHROPIC_API_KEY', 'CUSTOM_API_KEY', 'CUSTOM_BASE_URL', 'OPENAI_API_KEY',
     'FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_WEBHOOK_URL',
     'FEISHU_BOT_ENABLED', 'FEISHU_BOT_ALLOW_USERS', 'FEISHU_BOT_NOTIFY_CHAT_ID',
     'FEISHU_BITABLE_APP_TOKEN', 'FEISHU_BITABLE_TABLE_ID',
@@ -173,8 +177,9 @@ function isLoaded(): boolean {
 
 // ── install / uninstall / status ───────────────────────────────────────
 export function installDaemon(): void {
-  if (!process.env.DEEPSEEK_API_KEY && !config.deepseek.apiKey) {
-    console.log(chalk.yellow('⚠️  当前 shell 没有 DEEPSEEK_API_KEY 环境变量。'));
+  const { hasAnyApiKey } = require('./llm/provider') as typeof import('./llm/provider');
+  if (!hasAnyApiKey()) {
+    console.log(chalk.yellow('⚠️  当前 shell 没有可用的 LLM API Key。'));
     console.log(chalk.gray('   launchd 不读 shell 配置，请先 export 好 key 再安装，否则守护进程拿不到 key。\n'));
   }
 

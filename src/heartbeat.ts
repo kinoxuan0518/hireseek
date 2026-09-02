@@ -15,8 +15,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import OpenAI from 'openai';
 import { config } from './config';
+import { mergeChatParams, openaiClient, resolveEndpoint } from './llm/provider';
 import { db } from './db';
 import { createRuntimeContext } from './agent-core/runtime-context';
 
@@ -171,23 +171,23 @@ newState 保持原有四段结构（当前在推进的事/下一步该做什么/
 `.trim();
 
 export async function decideHeartbeat(): Promise<HeartbeatDecision> {
-  const client = new OpenAI({
-    apiKey: config.deepseek.apiKey,
-    baseURL: config.deepseek.baseUrl,
-  });
+  const endpoint = resolveEndpoint('chat');
+  if (!endpoint.apiKey) throw new Error(endpoint.spec.label + ' 未配置 API Key，心跳无法决策');
+  const client = openaiClient(endpoint);
 
-  const res = await client.chat.completions.create({
-    model: config.deepseek.model,
-    messages: [
-      { role: 'system', content: HEARTBEAT_SYSTEM },
-      {
-        role: 'user',
-        content: `## 当前 STATE\n\n${readState()}\n\n## 数据信号\n\n${gatherSignals()}\n\n请决策并输出 JSON。`,
-      },
-    ],
-    max_tokens: 3000,
-    temperature: 0.2,
-  });
+  const res = await client.chat.completions.create(
+    mergeChatParams(endpoint, {
+      messages: [
+        { role: 'system', content: HEARTBEAT_SYSTEM },
+        {
+          role: 'user',
+          content: `## 当前 STATE\n\n${readState()}\n\n## 数据信号\n\n${gatherSignals()}\n\n请决策并输出 JSON。`,
+        },
+      ],
+      max_tokens: 3000,
+      temperature: 0.2,
+    }) as any,
+  );
 
   const text = res.choices[0]?.message?.content ?? '';
   const m = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) ?? text.match(/(\{[\s\S]*\})/);

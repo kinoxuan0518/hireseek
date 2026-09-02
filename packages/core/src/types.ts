@@ -454,7 +454,7 @@ export interface HireSeekSDKConfig {
 }
 
 export interface LLMConfig {
-  provider: 'deepseek' | 'claude' | 'openai' | 'custom';
+  provider: 'deepseek' | 'kimi' | 'glm' | 'claude' | 'openai' | 'custom';
   model: string;
   apiKey?: string;
   baseUrl?: string; // 自定义 endpoint

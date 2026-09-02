@@ -14,25 +14,30 @@
 
 ## 三大进化点（v2 "HireSeek"）
 
-### 1. DeepSeek 一等公民（默认大脑）
+### 1. 模型是插头，不是品牌
+
+对话、寻源、读图可以不是同一个模型。默认仍是 DeepSeek Flash（便宜文本）；CN 寻源更建议 GLM-5.3-Flash 或 Kimi K3（原生视觉）。
 
 ```bash
-export DEEPSEEK_API_KEY="sk-..."   # 唯一必需配置
+export LLM_PROVIDER=glm
+export ZHIPU_API_KEY="..."          # 或 MOONSHOT_API_KEY / DEEPSEEK_API_KEY
+# 可选：对话用便宜模型，开车用视觉模型
+# export LLM_PROVIDER=deepseek
+# export DRIVER_PROVIDER=glm
 ```
 
-- 默认 provider 为 `deepseek`，默认模型 `deepseek-v4-flash`，复杂推理可切 `deepseek-v4-pro`（旧名 deepseek-chat/reasoner 将于 2026-07-24 弃用）
-- 仍兼容 Claude / OpenAI / MiniMax / 任意 OpenAI 兼容 API（`LLM_PROVIDER` 切换）
+兼容 Claude computer-use、OpenAI computer-use、MiniMax、任意 OpenAI 兼容 API。
 
-### 2. 纯文本 DOM Runner（无视觉浏览器驱动）
+### 2. DOM 是默认的手，视觉是可选的眼
 
-DeepSeek 没有视觉能力，传统截图方案走不通。HireSeek 的解法：
+不管模型能不能看图，寻源默认仍是 DOM：`click(ref=42)`。准、省、能审计。Kimi / GLM 当脑时也走这条路。
 
 ```
-页面 → 可交互元素打 ref 标记 → 文本快照（元素清单+正文）→ DeepSeek
-DeepSeek → browser(click, ref=42) → Playwright 精确定位执行 → 新快照
+页面 → 可交互元素打 ref → 文本快照 → 模型
+模型 → browser(click, ref=42) → Playwright 执行 → 新快照
 ```
 
-相比视觉方案：**token 更省、定位零坐标偏差、任何文本模型都能开车**。
+只有 DOM 看不清，或你显式设置 `HIRESEEK_BROWSER_MODE=vision`，才改成截图点选。
 
 ### 3. Claude Skills 桥接层
 
@@ -247,9 +252,9 @@ hireseek/
 │
 ├── src/                   # agent 运行时（chat / orchestrator / scheduler）
 │   ├── runners/
-│   │   ├── dom-runner.ts  # ★ 纯文本 DOM 浏览器驱动（DeepSeek 默认）
+│   │   ├── dom-runner.ts  # ★ 默认浏览器手（click ref；Kimi/GLM 也走这里）
 │   │   ├── claude.ts      # Claude 原生 computer-use
-│   │   └── generic-vision.ts # 视觉模型通用驱动（MiniMax/Qwen-VL等）
+│   │   └── generic-vision.ts # 截图点选（HIRESEEK_BROWSER_MODE=vision）
 │   └── skills/
 │       └── claude-skills.ts  # ★ Claude Skills 桥接层
 └── workspace/             # 职位配置、渠道技能、记忆
@@ -259,11 +264,16 @@ hireseek/
 
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
-| `DEEPSEEK_API_KEY` | — | DeepSeek API Key（默认大脑，必填） |
-| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API 地址 |
-| `LLM_MODEL` | `deepseek-v4-flash` | 模型名 |
+| `DEEPSEEK_API_KEY` | — | DeepSeek API Key（默认便宜文本脑） |
+| `ZHIPU_API_KEY` | — | 智谱 GLM-5.3-Flash |
+| `MOONSHOT_API_KEY` | — | Kimi K3 |
+| `LLM_PROVIDER` | `deepseek` | deepseek / glm / kimi / claude / openai / minimax / custom |
+| `LLM_MODEL` | 随 provider | 对话模型 |
+| `DRIVER_PROVIDER` / `DRIVER_MODEL` | 同 LLM_* | 寻源开车专用；不填则跟对话 |
+| `VISION_PROVIDER` / `VISION_MODEL` | 自动 | 读图；DeepSeek 会升到 `deepseek-v4-flash-vision-exp` |
+| `HIRESEEK_BROWSER_MODE` | `auto` | auto / dom / vision。Kimi、GLM 的 auto = DOM |
+| `HIRESEEK_REASONING_EFFORT` | 寻源 `low` | Kimi/GLM：low / high / max |
 | `DEEPSEEK_REASONER_MODEL` | `deepseek-v4-pro` | 评估/策略等深推理场景 |
-| `LLM_PROVIDER` | `deepseek` | 可选 deepseek / claude / openai / minimax / custom |
 | `HIRESEEK_DB_PATH` | `~/.hireseek/hireseek.db` | 数据库路径（自动兼容旧 ~/.hireclaw） |
 | `AGENT_KNOWLEDGE_HOME` | — | 独立 canonical 知识/契约 sandbox 路径；不填则用内置兜底契约 |
 | `HIRESEEK_SKILL_HOME` | `~/.codex/skills:~/.claude/skills` | 运行时技能目录，优先读取真实 Codex/Claude skill |

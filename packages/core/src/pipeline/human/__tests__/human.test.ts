@@ -1,7 +1,7 @@
 // @hireseek/core/pipeline/human — Tests
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { HumanInLoop } from '../HumanInLoop.js';
+import { HumanInLoop } from '../humaninloop.js';
 import type { Candidate, EvaluationResult } from '../../../types.js';
 
 function createMockCandidate(overrides?: Partial<Candidate>): Candidate {

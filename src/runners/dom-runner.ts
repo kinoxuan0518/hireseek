@@ -1,17 +1,19 @@
 /**
- * DOM Runner：纯文本浏览器驱动，专为无视觉能力的 LLM（如 DeepSeek）设计。
+ * DOM Runner：浏览器的默认「手」。模型可以是纯文本或视觉，动作一律 click(ref)。
  *
- * 原理：不截图，而是提取页面的结构化文本快照——
+ * 原理：不靠截图像素坐标，而是提取页面的结构化文本快照——
  *   1. 给所有可交互元素打上 data-hs-ref 编号标记
  *   2. 把「元素清单 + 页面正文」作为文本回传给模型
  *   3. 模型通过 function calling 输出 click(ref)/type(ref,text) 等动作
  *   4. Playwright 按 ref 精确定位执行，再回传新快照
  *
- * 相比视觉方案的优势：token 更省、定位更准（无坐标偏差）、支持任何文本模型。
+ * 相比截图点选：token 更省、定位更准、合规轨迹可审计。Kimi / GLM 等视觉模型
+ * 默认也走这条执行器；HIRESEEK_BROWSER_MODE=vision 才切到 GenericVisionRunner。
  */
 
 import OpenAI from 'openai';
 import { Page } from 'playwright';
+import { cloneAssistantMessage, type CompatChatOptions } from '../llm/provider';
 import { emitLog, popIntervention } from '../events';
 import { parseSkillSummary, parseContactedCandidates } from './interface';
 import type { LLMRunner, RunSkillOptions } from './interface';
@@ -644,10 +646,16 @@ function pruneSnapshots(
 export class DomRunner implements LLMRunner {
   private client: OpenAI;
   private model: string;
+  private extras: Record<string, unknown>;
+  private preserveAssistantMessage: boolean;
+  private omitSampling: boolean;
 
-  constructor(baseURL: string, apiKey: string, model: string) {
+  constructor(baseURL: string, apiKey: string, model: string, options: CompatChatOptions = {}) {
     this.client = new OpenAI({ apiKey, baseURL });
     this.model = model;
+    this.extras = options.extras ?? {};
+    this.preserveAssistantMessage = options.preserveAssistantMessage ?? false;
+    this.omitSampling = options.omitSampling ?? false;
   }
 
   async runSkill(
@@ -805,15 +813,25 @@ export class DomRunner implements LLMRunner {
       // 悬空 tool_call_id，下一次请求被 OpenAI 兼容端 400 拒。每次发请求前先补齐，
       // 保证 assistant 的每个 tool_call 都有对应 tool 消息，避免下轮请求因悬空 tool_call 失败。
       repairToolMessageHistoryInPlace(messages);
-      const response = await this.client.chat.completions.create({
+      const payload: Record<string, unknown> = {
         model: this.model,
         messages: pruneSnapshots(messages, 2, { runId: options.runId, sessionId: options.sessionId }),
         tools: domRunnerToolsForMode(executionMode),
         tool_choice: 'auto',
         max_tokens: 2048,
-      });
+        ...this.extras,
+      };
+      if (this.omitSampling) {
+        delete payload.temperature;
+        delete payload.top_p;
+      }
+      const response = await this.client.chat.completions.create(
+        payload as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming,
+      );
 
-      const msg = response.choices[0].message;
+      const msg = this.preserveAssistantMessage
+        ? cloneAssistantMessage(response.choices[0].message)
+        : response.choices[0].message;
 
       if (msg.content) {
         const thought = `💭 ${msg.content}`;
