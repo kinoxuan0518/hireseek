@@ -97,6 +97,7 @@ function collectInteractionModelProblems(): string[] {
     const askUser = readSourceForDoctor('ask-user.ts');
     const select = readSourceForDoctor('select.ts');
     const slash = readSourceForDoctor(path.join('chat', 'slash-suggestions.ts'));
+    const prompt = readSourceForDoctor(path.join('plugins', 'prompt-hireseek.ts'));
     const problems: string[] = [];
 
     if (!slash.includes('SlashSuggestionController')) {
@@ -117,7 +118,7 @@ function collectInteractionModelProblems(): string[] {
     if (!chat.includes('const { askEditableChoice }') || /case 'ask_user_choice':[\s\S]{0,700}selectOption/.test(chat)) {
       problems.push('ask_user_choice does not use editable choice input');
     }
-    if (!chat.includes('需要用户做决定时用 ask_user_choice 给可编辑候选')) {
+    if (!prompt.includes('需要用户做决定时用 ask_user_choice 给可编辑候选')) {
       problems.push('system prompt does not describe editable user-choice behavior');
     }
     if (!select.includes('Tab 把候选填入输入框') || !select.includes('Enter 提交当前输入')) {

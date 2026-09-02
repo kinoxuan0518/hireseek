@@ -68,12 +68,13 @@ describe('ask_user_question contract', () => {
   it('uses editable choice input instead of hard-confirm selectors', () => {
     const askUserSource = fs.readFileSync(path.join(process.cwd(), 'src', 'ask-user.ts'), 'utf8');
     const chatSource = fs.readFileSync(path.join(process.cwd(), 'src', 'chat.ts'), 'utf8');
+    const promptSource = fs.readFileSync(path.join(process.cwd(), 'src', 'plugins', 'prompt-hireseek.ts'), 'utf8');
 
     expect(askUserSource).toContain('askEditableChoice');
     expect(askUserSource).not.toContain('selectOption');
     expect(askUserSource).not.toContain('selectMultipleOptions');
     expect(chatSource).toContain('Tab 把候选填入输入框，Enter 发送当前输入');
-    expect(chatSource).toContain('用户仍可补充或改写输入');
+    expect(promptSource).toContain('用户仍可补充或改写输入');
   });
 
   it('parses editable multi-select answers without requiring an "other" option', async () => {
