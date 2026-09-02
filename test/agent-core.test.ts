@@ -568,15 +568,20 @@ describe('agent core lower layer', () => {
     expect(alreadyOffloaded.content).toBe(largeToolResult.content);
   });
 
-  it('routes chat tool results through generic output offload', () => {
-    const files = [
+  it('routes tool results through the DSH post-execute offload plugin', () => {
+    const plugin = fs.readFileSync(path.resolve(process.cwd(), 'src/plugins/offload.ts'), 'utf8');
+    const loop = fs.readFileSync(path.resolve(process.cwd(), 'src/dsh/loop.ts'), 'utf8');
+    const hosts = [
       'src/chat.ts',
       'src/agent-session.ts',
       'src/sub-agent.ts',
     ];
-    for (const file of files) {
+    expect(plugin).toContain('offloadToolResultForContext');
+    expect(plugin).toContain("tools/post-execute");
+    expect(loop).toContain('tools.execute');
+    for (const file of hosts) {
       const source = fs.readFileSync(path.resolve(process.cwd(), file), 'utf8');
-      expect(source).toContain('offloadToolResultForContext');
+      expect(source).toContain('loop.runTurn');
     }
   });
 

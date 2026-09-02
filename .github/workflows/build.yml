@@ -2,29 +2,28 @@ name: Build
 
 on:
   push:
-    branches: [main, claw-code-phase2]
+    branches: [main]
   pull_request:
-    branches: [main, claw-code-phase2]
+    branches: [main]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
         with:
-          ref: claw-code-phase2
+          node-version: 22
+          cache: pnpm
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install
+        run: pnpm install --frozen-lockfile
 
-      - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
 
-      - name: Build
-        run: cargo build --manifest-path rust/Cargo.toml --release
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: claw-code-binary
-          path: rust/target/release/claw-code
+      - name: Test
+        run: pnpm test
