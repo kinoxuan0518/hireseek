@@ -1,12 +1,12 @@
 # Claude Code 功能实现文档
 
-HireSeek 现已实现 Claude Code 的所有核心功能，并增加了招聘领域的专业能力。
+Seeya 现已实现 Claude Code 的所有核心功能，并增加了招聘领域的专业能力。
 
 ---
 
 ## 功能对比总览
 
-| 功能分类 | Claude Code | HireSeek | 状态 |
+| 功能分类 | Claude Code | Seeya | 状态 |
 |---------|-------------|----------|------|
 | **基础能力** |||
 | 对话模式 | ✅ | ✅ | 完全实现 |
@@ -45,7 +45,7 @@ HireSeek 现已实现 Claude Code 的所有核心功能，并增加了招聘领�
 | Hook System | ✅ | ⏳ | 计划中 |
 | Remote Sessions | ✅ | ⏳ | 计划中 |
 | Context Compression | ✅ | ⏳ | 计划中 |
-| **HireSeek 独有** |||
+| **Seeya 独有** |||
 | 浏览器自动化 | ❌ | ✅ | Playwright |
 | 多账号并行 | ❌ | ✅ | 效率翻倍 |
 | 招聘知识库 | ❌ | ✅ | 专业领域 |
@@ -293,7 +293,7 @@ AI: [调用 git_create_pr]
 
 **使用方式**：
 ```bash
-hireseek run --plan
+seeya run --plan
 ```
 
 **执行流程**：
@@ -499,17 +499,17 @@ servers:
 
 ### 对话模式
 ```bash
-hireseek
+seeya
 ```
 
 ### 计划模式
 ```bash
-hireseek run --plan
+seeya run --plan
 ```
 
 ### 任务看板
 ```bash
-hireseek tasks
+seeya tasks
 ```
 
 ### 技能调用
@@ -534,7 +534,7 @@ hireseek tasks
 
 ## 与 Claude Code 的优势
 
-| 维度 | HireSeek 优势 |
+| 维度 | Seeya 优势 |
 |------|--------------|
 | **领域专业性** | 内置招聘知识库、候选人评估框架 |
 | **自动化能力** | 浏览器自动化 sourcing |
@@ -545,4 +545,4 @@ hireseek tasks
 
 ---
 
-**HireSeek = Claude Code + 招聘专业能力** 🦞
+**Seeya = Claude Code + 招聘专业能力** 🦞

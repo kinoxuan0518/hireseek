@@ -1,9 +1,10 @@
 {
   "name": "@hireseek/cli",
   "version": "0.1.0",
-  "description": "🦞 HireSeek CLI — 命令行入口（向后兼容现有 hireseek 命令）",
+  "description": "Seeya CLI — 命令行入口（hireseek 命令仍然可用）",
   "type": "module",
   "bin": {
+    "seeya": "./dist/index.js",
     "hireseek": "./dist/index.js"
   },
   "scripts": {

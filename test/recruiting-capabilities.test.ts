@@ -15,7 +15,7 @@ describe('recruiting capability middle layer', () => {
     expect(ids).toContain('candidate-evaluation.v1');
     expect(ids).toContain('outreach-voice.v1');
     expect(ids).toContain('talent-sourcing-strategy.v1');
-    expect(formatRecruitingCapabilities()).toContain('HireSeek 中层招聘能力');
+    expect(formatRecruitingCapabilities()).toContain('Seeya 中层招聘能力');
   });
 
   it('exposes a mechanical capability manifest with contracts', () => {
@@ -27,7 +27,7 @@ describe('recruiting capability middle layer', () => {
     expect(outreach?.contract.produces).toContain('outreach-output.v1');
     expect(outreach?.contract.writes).toContain('record_contacted');
     expect(outreach?.sourceFiles.every(file => file.exists && file.bytes > 0)).toBe(true);
-    expect(formatRecruitingCapabilityManifest()).toContain('HireSeek Recruiting Capability Manifest');
+    expect(formatRecruitingCapabilityManifest()).toContain('Seeya Recruiting Capability Manifest');
     expect(formatRecruitingCapabilityManifest()).toContain('writes: record_contacted');
   });
 

@@ -1,5 +1,5 @@
 /**
- * HireSeek 交互式初始化向导
+ * Seeya 交互式初始化向导
  * 像小龙虾一样一步步引导你配置好一切
  */
 
@@ -72,7 +72,7 @@ function writeJobYaml(fields: {
   dailyContact: string;
   urgency: string;
 }): void {
-  const yaml = `# 当前激活的招聘职位（由 hireseek setup 生成）
+  const yaml = `# 当前激活的招聘职位（由 seeya setup 生成）
 title: ${fields.title}
 department: 技术
 
@@ -131,7 +131,7 @@ function section(title: string): void {
 
 // ── 主向导 ───────────────────────────────────────────────
 export async function runSetup(): Promise<void> {
-  console.log(chalk.cyan('\n🔱 HireSeek 初始化向导\n'));
+  console.log(chalk.cyan('\n🔱 Seeya 初始化向导\n'));
   console.log(chalk.gray('我会一步步引导你配置好所有东西，大概 3 分钟。'));
   console.log(chalk.gray('随时按 Ctrl+C 退出，已填的不会丢失。\n'));
 
@@ -205,7 +205,7 @@ export async function runSetup(): Promise<void> {
           env.LLM_PROVIDER = 'glm';
           env.LLM_MODEL = 'glm-5.3-flash';
           env.ZHIPU_API_KEY = key;
-          env.HIRESEEK_BROWSER_MODE = 'auto';
+          env.SEEYA_BROWSER_MODE = 'auto';
           configured = true;
         }
       } else if (choice === '3') {
@@ -215,7 +215,7 @@ export async function runSetup(): Promise<void> {
           env.LLM_PROVIDER = 'kimi';
           env.LLM_MODEL = 'kimi-k3';
           env.MOONSHOT_API_KEY = key;
-          env.HIRESEEK_BROWSER_MODE = 'auto';
+          env.SEEYA_BROWSER_MODE = 'auto';
           configured = true;
         }
       } else if (choice === '4') {
@@ -287,7 +287,7 @@ export async function runSetup(): Promise<void> {
         writeEnv(env);
         console.log(chalk.green('\n✓ API Key 已保存到 .env 文件'));
       } else {
-        console.log(chalk.yellow('\n⚠️  未配置 API Key，稍后可运行 hireseek setup 重新配置'));
+        console.log(chalk.yellow('\n⚠️  未配置 API Key，稍后可运行 seeya setup 重新配置'));
       }
     }
 

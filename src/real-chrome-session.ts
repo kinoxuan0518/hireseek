@@ -8,8 +8,9 @@ import {
 } from './runners/dom-runner';
 import { upsertExecutionEnvironment } from './agent-core/environment-store';
 import type { ToolExecutionMode } from './agent-core/tool-registry';
+import { productEnv } from './product';
 
-const CDP_URL = process.env.HIRESEEK_CDP_URL || 'http://127.0.0.1:9222';
+const CDP_URL = productEnv('CDP_URL') || 'http://127.0.0.1:9222';
 
 let cdpBrowser: Browser | null = null;
 

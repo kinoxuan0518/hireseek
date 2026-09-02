@@ -8,7 +8,7 @@ import type { Channel } from '../types';
 
 export interface RuntimeContext {
   app: {
-    name: 'HireSeek';
+    name: 'Seeya';
     cwd: string;
   };
   llm: {
@@ -44,7 +44,7 @@ export function createRuntimeContext(): RuntimeContext {
   const activeJob = loadActiveJob();
   return {
     app: {
-      name: 'HireSeek',
+      name: 'Seeya',
       cwd: process.cwd(),
     },
     llm: {

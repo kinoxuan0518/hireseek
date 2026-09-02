@@ -136,7 +136,7 @@ export function formatPlatformProtocols(): string {
   if (protocols.length === 0) return '当前没有注册任何中层平台协议。';
 
   return [
-    'HireSeek 中层平台协议',
+    'Seeya 中层平台协议',
     '',
     ...protocols.map(p => [
       `- ${p.channel}: ${p.name}`,
@@ -157,7 +157,7 @@ export function formatPlatformProtocolManifest(): string {
   const manifest = buildPlatformProtocolManifest();
   if (manifest.length === 0) return '当前没有平台协议 manifest。';
   return [
-    'HireSeek Platform Protocol Manifest',
+    'Seeya Platform Protocol Manifest',
     '',
     ...manifest.map(entry => [
       `- ${entry.channel}: ${entry.name}`,

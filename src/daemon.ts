@@ -1,34 +1,43 @@
 /**
- * HireSeek 常驻守护进程
+ * Seeya 常驻守护进程
  *
- * 一个进程整合三件事，让 HireSeek 真正"住下来"而不是开终端才活着：
+ * 一个进程整合三件事，让 Seeya 真正"住下来"而不是开终端才活着：
  *   1. 定时调度器（startScheduler）—— BOSS / 脉脉 / 跟进 / 心跳 / 每周进化的 cron
  *   2. 飞书双向 Bot（startFeishuBot）—— 手机上发一句话就能指挥它
  *   3. 主动通知出口 —— 心跳/调度/后台任务结果经飞书 Bot 推送
  *
- * 用 launchd 托管：开机自启、崩溃自拉起、日志落 ~/.hireseek/daemon.log。
+ * 用 launchd 托管：开机自启、崩溃自拉起、日志落 ~/.seeya/daemon.log。
  *
- *   hireseek daemon run        前台运行（launchd 调用的就是这个）
- *   hireseek daemon install    安装 launchd 开机自启服务
- *   hireseek daemon uninstall  卸载服务
- *   hireseek daemon status     查看服务运行状态
+ *   seeya daemon run        前台运行（launchd 调用的就是这个）
+ *   seeya daemon install    安装 launchd 开机自启服务
+ *   seeya daemon uninstall  卸载服务
+ *   seeya daemon status     查看服务运行状态
  */
 
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
 import chalk from 'chalk';
 import { config } from './config';
+import {
+  LAUNCHD_LABEL,
+  LEGACY_LAUNCHD_LABELS,
+  PRODUCT_CLI,
+  PRODUCT_NAME,
+  launchdPlistPath,
+  productEnv,
+  resolveDaemonLogPath,
+  resolveProductHome,
+} from './product';
 
-const LABEL = 'com.hireseek.daemon';
-const PLIST_PATH = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
-const LOG_DIR = path.join(os.homedir(), '.hireseek');
-const LOG_PATH = path.join(LOG_DIR, 'daemon.log');
+const LABEL = LAUNCHD_LABEL;
+const PLIST_PATH = launchdPlistPath(LABEL);
+const LOG_DIR = resolveProductHome();
+const LOG_PATH = resolveDaemonLogPath();
 
 // ── 前台运行：拉起调度器 + 飞书 Bot，常驻不退 ─────────────────────────
 export async function runDaemon(): Promise<void> {
-  console.log(chalk.green('🔱 HireSeek 守护进程启动'));
+  console.log(chalk.green(`🔱 ${PRODUCT_NAME} 守护进程启动`));
   console.log(chalk.gray(`   时间：${new Date().toLocaleString('zh-CN')}`));
 
   // 1. 定时调度（含心跳、每周进化）
@@ -41,7 +50,7 @@ export async function runDaemon(): Promise<void> {
   try {
     const { startWebConsole } = await import('./web-console');
     // 守护进程常驻后台，不抢用户焦点，默认不自动弹浏览器（首次安装时由 install 引导）
-    startWebConsole({ openBrowser: process.env.HIRESEEK_CONSOLE_OPEN === 'true' });
+    startWebConsole({ openBrowser: productEnv('CONSOLE_OPEN') === 'true' });
   } catch (err) {
     console.error(chalk.red('   指挥台启动失败：'), err instanceof Error ? err.message : err);
   }
@@ -70,7 +79,7 @@ export async function runDaemon(): Promise<void> {
 
   // 优雅退出：先告诉你"我下线了"，再抹掉存活标记
   const shutdown = (sig: string) => {
-    console.log(chalk.gray(`\n[HireSeek] 守护进程退出（${sig}）`));
+    console.log(chalk.gray(`\n[${PRODUCT_NAME}] 守护进程退出（${sig}）`));
     reportVitals('下线了').catch(() => {}).finally(() => {
       markOffline();
       process.exit(0);
@@ -103,7 +112,7 @@ function buildPlist(): string {
   const envKeys = [
     'DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL', 'LLM_PROVIDER', 'LLM_MODEL',
     'DRIVER_PROVIDER', 'DRIVER_MODEL', 'VISION_PROVIDER', 'VISION_MODEL',
-    'HIRESEEK_BROWSER_MODE', 'HIRESEEK_REASONING_EFFORT',
+    'SEEYA_BROWSER_MODE', 'HIRESEEK_BROWSER_MODE', 'SEEYA_REASONING_EFFORT', 'HIRESEEK_REASONING_EFFORT',
     'MOONSHOT_API_KEY', 'MOONSHOT_BASE_URL', 'KIMI_API_KEY', 'KIMI_BASE_URL',
     'ZHIPU_API_KEY', 'ZHIPU_BASE_URL', 'BIGMODEL_API_KEY', 'GLM_API_KEY',
     'ANTHROPIC_API_KEY', 'CUSTOM_API_KEY', 'CUSTOM_BASE_URL', 'OPENAI_API_KEY',
@@ -117,7 +126,7 @@ function buildPlist(): string {
     'VERIFIER_MODEL', 'VERIFIER_BASE_URL', 'VERIFIER_API_KEY',
     'RECALIBRATOR_MODEL', 'RECALIBRATOR_BASE_URL', 'RECALIBRATOR_API_KEY',
     'SCHEDULE_CHECKIN', 'SCHEDULE_WRAPUP', 'SCHEDULE_HIRESYNC',
-    'HIRESEEK_CONSOLE_PORT', 'HIRESEEK_CONSOLE_OPEN',
+    'SEEYA_CONSOLE_PORT', 'HIRESEEK_CONSOLE_PORT', 'SEEYA_CONSOLE_OPEN', 'HIRESEEK_CONSOLE_OPEN',
   ];
   const envEntries = envKeys
     .filter(k => process.env[k])
@@ -166,6 +175,19 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function unloadPlist(plistPath: string): void {
+  if (!fs.existsSync(plistPath)) return;
+  try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'ignore' }); } catch { /* 可能未加载 */ }
+}
+
+function unloadLegacyDaemons(): void {
+  for (const label of LEGACY_LAUNCHD_LABELS) {
+    const legacyPath = launchdPlistPath(label);
+    unloadPlist(legacyPath);
+    if (fs.existsSync(legacyPath)) fs.unlinkSync(legacyPath);
+  }
+}
+
 function isLoaded(): boolean {
   try {
     const out = execSync(`launchctl list ${LABEL}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
@@ -186,19 +208,18 @@ export function installDaemon(): void {
   fs.mkdirSync(LOG_DIR, { recursive: true });
   fs.mkdirSync(path.dirname(PLIST_PATH), { recursive: true });
 
-  if (isLoaded()) {
-    try { execSync(`launchctl unload "${PLIST_PATH}"`, { stdio: 'ignore' }); } catch { /* 可能未加载 */ }
-  }
+  unloadLegacyDaemons();
+  if (isLoaded()) unloadPlist(PLIST_PATH);
 
   fs.writeFileSync(PLIST_PATH, buildPlist(), 'utf-8');
   execSync(`launchctl load "${PLIST_PATH}"`);
 
-  console.log(chalk.green('\n✓ HireSeek 守护进程已安装为开机自启服务'));
+  console.log(chalk.green(`\n✓ ${PRODUCT_NAME} 守护进程已安装为开机自启服务`));
   console.log(chalk.gray(`   plist：${PLIST_PATH}`));
   console.log(chalk.gray(`   日志：${LOG_PATH}`));
   console.log(chalk.gray('   现在它会随登录自启、崩溃自拉起。'));
   console.log(chalk.cyan('\n   👉 打开指挥台就能看见它、指挥它：http://localhost:7799'));
-  console.log(chalk.gray('   查看状态：hireseek daemon status'));
+  console.log(chalk.gray(`   查看状态：${PRODUCT_CLI} daemon status`));
   console.log(chalk.gray(`   看日志：tail -f ${LOG_PATH}\n`));
 
   // 安装完顺手打开指挥台，让用户立刻"看见它活着"
@@ -206,17 +227,22 @@ export function installDaemon(): void {
 }
 
 export function uninstallDaemon(): void {
-  if (fs.existsSync(PLIST_PATH)) {
-    try { execSync(`launchctl unload "${PLIST_PATH}"`, { stdio: 'ignore' }); } catch { /* 可能未加载 */ }
-    fs.unlinkSync(PLIST_PATH);
-    console.log(chalk.green('\n✓ 已卸载 HireSeek 守护进程服务\n'));
+  const hadLegacy = LEGACY_LAUNCHD_LABELS.some(label => fs.existsSync(launchdPlistPath(label)));
+  const hadCurrent = fs.existsSync(PLIST_PATH);
+  unloadLegacyDaemons();
+  if (hadCurrent) {
+    unloadPlist(PLIST_PATH);
+    if (fs.existsSync(PLIST_PATH)) fs.unlinkSync(PLIST_PATH);
+  }
+  if (hadCurrent || hadLegacy) {
+    console.log(chalk.green(`\n✓ 已卸载 ${PRODUCT_NAME} 守护进程服务\n`));
   } else {
     console.log(chalk.yellow('\n守护进程服务未安装\n'));
   }
 }
 
 export function daemonStatus(): void {
-  console.log(chalk.cyan('\n🔱 HireSeek 守护进程状态\n'));
+  console.log(chalk.cyan(`\n🔱 ${PRODUCT_NAME} 守护进程状态\n`));
   const installed = fs.existsSync(PLIST_PATH);
   console.log(`  服务已安装：${installed ? chalk.green('是') : chalk.gray('否')}`);
   if (installed) {

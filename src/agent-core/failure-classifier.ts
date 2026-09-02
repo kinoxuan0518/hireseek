@@ -475,7 +475,7 @@ export function collectHarnessFailureReview(limit = 20): HarnessFailureReview {
 export function formatHarnessFailureReview(review: HarnessFailureReview): string {
   if (review.total === 0) {
     return [
-      'HireSeek Harness Failure Review',
+      'Seeya Harness Failure Review',
       '',
       '最近没有可复盘的 harness 失败信号。',
     ].join('\n');
@@ -500,7 +500,7 @@ export function formatHarnessFailureReview(review: HarnessFailureReview): string
   });
 
   return [
-    'HireSeek Harness Failure Review',
+    'Seeya Harness Failure Review',
     '',
     `Total signals: ${review.total}`,
     `Top priority: ${top}`,

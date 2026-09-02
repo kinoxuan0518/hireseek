@@ -1,7 +1,7 @@
 {
   "name": "@hireseek/maimai-adapter",
   "version": "0.1.0",
-  "description": "🦞 HireSeek 脉脉适配器 — 浏览器自动化招聘",
+  "description": "🦞 Seeya 脉脉适配器 — 浏览器自动化招聘",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

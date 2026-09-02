@@ -150,7 +150,7 @@ export function describeSchedule(): string {
   const running = daemonAlive();
   lines.push(running
     ? '🟢 定时守护进程运行中'
-    : '⚪ 定时守护进程未运行（执行 hireseek start 启动，计划才会生效）');
+    : '⚪ 定时守护进程未运行（执行 seeya start 启动，计划才会生效）');
   lines.push('');
 
   const fmt = (d: Date | null): string => {
@@ -167,8 +167,8 @@ export function describeSchedule(): string {
   }
 
   lines.push('');
-  lines.push('修改：hireseek sched set <boss|maimai|followup|evolve> "<cron>"');
-  lines.push('开关：hireseek sched off <任务> / hireseek sched on <任务>');
+  lines.push('修改：seeya sched set <boss|maimai|followup|evolve> "<cron>"');
+  lines.push('开关：seeya sched off <任务> / seeya sched on <任务>');
   return lines.join('\n');
 }
 
@@ -209,7 +209,7 @@ export function setSchedule(name: string, cronExpr: string): string {
   upsertEnv(task.envKey, expr);
 
   const human = humanizeCron(expr);
-  const daemonNote = daemonAlive() ? '（守护进程需重启生效：先停掉再 hireseek start）' : '（hireseek start 启动后生效）';
+  const daemonNote = daemonAlive() ? '（守护进程需重启生效：先停掉再 seeya start）' : '（seeya start 启动后生效）';
   return expr === 'off'
     ? `✓ ${task.label} 已关闭 ${daemonNote}`
     : `✓ ${task.label} → ${human}（${expr}）${daemonNote}`;

@@ -20,7 +20,7 @@ export async function evolve(opts: EvolveOptions = {}): Promise<string> {
   const result = applyProposals(retro, { dryRun: opts.dryRun });
 
   const lines = [
-    `🧬 HireSeek 进化复盘${opts.dryRun ? '（dry-run，未落盘）' : ''}`,
+    `🧬 Seeya 进化复盘${opts.dryRun ? '（dry-run，未落盘）' : ''}`,
     '',
     '## 数据诊断',
     ...retro.diagnosis.map(d => `- ${d}`),
@@ -32,7 +32,7 @@ export async function evolve(opts: EvolveOptions = {}): Promise<string> {
     for (const a of result.applied) {
       lines.push(`- ${a.file} @${a.commitSha.slice(0, 7) || '(未提交)'}：${a.reason.slice(0, 120)}`);
     }
-    lines.push('', '回滚命令：hireseek evolve --rollback');
+    lines.push('', '回滚命令：seeya evolve --rollback');
   } else {
     lines.push('## 结论：本轮不改写');
   }
@@ -63,7 +63,7 @@ export async function learn(opts: EvolveOptions = {}): Promise<string> {
   const result = applyProposals(retro, { dryRun: opts.dryRun });
 
   const lines = [
-    `🧠 HireSeek "合适"定义重校${opts.dryRun ? '（dry-run，未落盘）' : ''}`,
+    `🧠 Seeya "合适"定义重校${opts.dryRun ? '（dry-run，未落盘）' : ''}`,
     '',
     '## 校准诊断',
     ...retro.diagnosis.map(d => `- ${d}`),
@@ -75,7 +75,7 @@ export async function learn(opts: EvolveOptions = {}): Promise<string> {
     for (const a of result.applied) {
       lines.push(`- ${a.file} @${a.commitSha.slice(0, 7) || '(未提交)'}：${a.reason.slice(0, 140)}`);
     }
-    lines.push('', '回滚命令：hireseek evolve back');
+    lines.push('', '回滚命令：seeya evolve back');
   } else if (retro.proposals.length > 0 && opts.dryRun) {
     lines.push('## 有改写提案（dry-run 未落盘）', `- ${retro.proposals[0].reason}`);
   } else {

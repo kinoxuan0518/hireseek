@@ -71,7 +71,7 @@ export function channelSkillAssetContext(channel: Channel): ChannelSkillAssetCon
     mode: 'fallback-only',
     content: [
       '# Legacy skill fallback',
-      `渠道 ${channel} 已由 HireSeek 产品协议 ${protocol.name} 接管。`,
+      `渠道 ${channel} 已由 Seeya 产品协议 ${protocol.name} 接管。`,
       '完整 legacy skill 不预加载进本轮 prompt，避免历史规则覆盖产品协议。',
       'skill 文件仍保留在外部 skill homes，供 CC/Codex 原生使用，也可通过显式回退配置重新启用。',
     ].join('\n'),
@@ -183,7 +183,7 @@ export function formatHarnessRunAssembly(channel: Channel, mode: HarnessRunMode)
     `- ${tool.name}: ${tool.declaredToModel ? 'declared' : 'withheld'} | ${tool.category} | sideEffect=${tool.sideEffect}`
   ));
   return [
-    'HireSeek Harness Run Assembly',
+    'Seeya Harness Run Assembly',
     '',
     `channel: ${assembly.channel}`,
     `mode: ${assembly.mode}`,
@@ -221,7 +221,7 @@ export function buildChatHarnessContext(): string {
   ));
 
   return [
-    '# HireSeek Chat Harness Assembly',
+    '# Seeya Chat Harness Assembly',
     '',
     '对话模式也必须遵守同一套产品装配边界；不要因为是在聊天里，就让外部 skill 或临时提示覆盖产品协议。',
     '',

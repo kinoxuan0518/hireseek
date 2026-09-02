@@ -39,7 +39,7 @@ describe('completion audit', () => {
           detail: 'no 脉脉 dry-run evidence',
         },
       ],
-      nextSteps: ['运行 `hireseek validate --open-missing --wait`。'],
+      nextSteps: ['运行 `seeya validate --open-missing --wait`。'],
     };
 
     const audit = collectCompletionAudit(report);
@@ -99,10 +99,10 @@ describe('completion audit', () => {
         status: 'warn',
         detail: '脉脉:not_ready',
       }],
-      nextSteps: ['运行 `hireseek validate --open-missing --wait`。'],
+      nextSteps: ['运行 `seeya validate --open-missing --wait`。'],
     });
 
-    expect(output).toContain('HireSeek Completion Audit');
+    expect(output).toContain('Seeya Completion Audit');
     expect(output).toContain('Complete: NO');
     expect(output).toContain('Doctor status: WARN');
     expect(output).toContain('Internal implementation blockers: none');

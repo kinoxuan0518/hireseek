@@ -142,9 +142,9 @@ export function maimaiProtocolStages(): MaimaiProtocolStage[] {
 
 export function buildMaimaiSystemContext(): string {
   return [
-    '# HireSeek 产品中层协议：脉脉平台',
+    '# Seeya 产品中层协议：脉脉平台',
     '',
-    '这份协议是 HireSeek 产品内置的脉脉渠道能力协议，优先级高于外部 maimai-recruiter skill。',
+    '这份协议是 Seeya 产品内置的脉脉渠道能力协议，优先级高于外部 maimai-recruiter skill。',
     '外部 skill 仍可作为页面经验、异常案例、搜索/触达 playbook 和迁移素材参考；如果它与本协议冲突，以本协议为准。',
     '',
     '核心边界：',

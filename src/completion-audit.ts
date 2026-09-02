@@ -95,7 +95,7 @@ export function formatCompletionAudit(audit: CompletionAudit): string {
   const internalBlockerCount = audit.internalBlockerCount
     ?? classifiedBlockers.length - externalValidationBlockerCount;
   const lines = [
-    'HireSeek Completion Audit',
+    'Seeya Completion Audit',
     '',
     `Complete: ${audit.complete ? 'YES' : 'NO'}`,
     `Doctor status: ${statusLabel(audit.status)}`,

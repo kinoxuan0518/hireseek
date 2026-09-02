@@ -1,13 +1,13 @@
 ---
 name: bosszhibin-fallback
-description: HireSeek 内置 BOSS 兜底技能。正常运行时应优先读取 HIRESEEK_SKILL_HOME 下的 bosszhibin-auto-recruiter/SKILL.md，本文件只在外部技能不可用时使用。
+description: Seeya 内置 BOSS 兜底技能。正常运行时应优先读取 HIRESEEK_SKILL_HOME 下的 bosszhibin-auto-recruiter/SKILL.md，本文件只在外部技能不可用时使用。
 ---
 
 # BOSS 直聘兜底执行协议
 
 > 这不是 canonical BOSS skill。真实运行协议应来自本机技能库：
 > `HIRESEEK_SKILL_HOME/bosszhibin-auto-recruiter/SKILL.md`。
-> 本文件只保留最低限度兜底，避免外部技能缺失时 HireSeek 完全不能跑。
+> 本文件只保留最低限度兜底，避免外部技能缺失时 Seeya 完全不能跑。
 
 ## 不变量
 
@@ -20,7 +20,7 @@ description: HireSeek 内置 BOSS 兜底技能。正常运行时应优先读取 
 
 ## 就地接管模式
 
-当用户使用 `hireseek run boss --here` 时，含义只是：复用用户当前真实 Chrome 页面，不新开浏览器、不创建新登录态、不切换 profile。
+当用户使用 `seeya run boss --here` 时，含义只是：复用用户当前真实 Chrome 页面，不新开浏览器、不创建新登录态、不切换 profile。
 
 - 禁止 `goto` 直接跳深链，禁止新开页面或新登录态。
 - 允许通过当前页面内可见入口完成站内流转，例如职位下拉、职位列表、职位管理、推荐牛人入口。

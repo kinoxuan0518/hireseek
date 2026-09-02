@@ -19,6 +19,8 @@ const ENV_KEYS = [
   'VISION_MODEL',
   'HIRESEEK_BROWSER_MODE',
   'HIRESEEK_REASONING_EFFORT',
+  'SEEYA_BROWSER_MODE',
+  'SEEYA_REASONING_EFFORT',
   'DEEPSEEK_API_KEY',
   'MOONSHOT_API_KEY',
   'KIMI_API_KEY',
@@ -81,6 +83,19 @@ describe('provider catalog', () => {
     expect(glm.model).toBe('glm-5.3-flash');
     expect(glm.actuator).toBe('dom');
     expect(glm.extras.thinking).toEqual({ type: 'enabled', clear_thinking: false });
+  });
+
+  it('lets SEEYA_ env override leftover HIRESEEK_ flags', () => {
+    const endpoint = resolveEndpoint('driver', {
+      LLM_PROVIDER: 'kimi',
+      MOONSHOT_API_KEY: 'sk-kimi',
+      HIRESEEK_BROWSER_MODE: 'dom',
+      SEEYA_BROWSER_MODE: 'vision',
+      HIRESEEK_REASONING_EFFORT: 'low',
+      SEEYA_REASONING_EFFORT: 'high',
+    });
+    expect(endpoint.actuator).toBe('vision');
+    expect(endpoint.extras.reasoning_effort).toBe('high');
   });
 
   it('lets DRIVER_PROVIDER diverge from chat', () => {

@@ -1,6 +1,6 @@
 # Cache Schema Reference
 
-HireSeek 使用本地 JSON 文件缓存职位配置与触达历史，避免每次运行重复解析，支持增量更新。
+Seeya 使用本地 JSON 文件缓存职位配置与触达历史，避免每次运行重复解析，支持增量更新。
 
 ---
 

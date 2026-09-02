@@ -183,7 +183,7 @@ export function formatCoreStatus(status: CoreStatus): string {
     : '无';
 
   return [
-    'HireSeek Agent Core',
+    'Seeya Agent Core',
     '',
     `Runtime: ${ctx.llm.provider}/${ctx.llm.model}`,
     `DB: ${ctx.paths.dbPath}`,

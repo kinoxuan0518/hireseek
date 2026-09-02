@@ -58,7 +58,7 @@ async function demoPlanMode() {
   }
 
   console.log('🎉 演示完成！\n');
-  console.log('💡 实际使用：hireseek run --plan\n');
+  console.log('💡 实际使用：seeya run --plan\n');
 }
 
 demoPlanMode().catch(console.error);

@@ -1,14 +1,14 @@
 /**
- * 薄 adapter —— HireSeek 作为 canonical 知识/契约层的【第一个消费方】
+ * 薄 adapter —— Seeya 作为 canonical 知识/契约层的【第一个消费方】
  *
- * 契约不属于 HireSeek，它住在独立 sandbox（如 $HOME/agent-knowledge-lab），
- * 由环境变量 AGENT_KNOWLEDGE_HOME 指向。HireSeek 只通过这个薄读取器按需读，不持有副本。
+ * 契约不属于 Seeya，它住在独立 sandbox（如 $HOME/agent-knowledge-lab），
+ * 由环境变量 AGENT_KNOWLEDGE_HOME 指向。Seeya 只通过这个薄读取器按需读，不持有副本。
  *
  *   AGENT_KNOWLEDGE_HOME 已配 + 文件在  →  读 sandbox 的 contracts/<name>.yaml（source=sandbox）
  *   未配 / 文件缺失                     →  回退到本文件内置默认契约（source=fallback）
  *
  * 关键：sandbox 是试验田，不是单点依赖。env 没配也照常跑——契约的"家"在外面，
- * 但 HireSeek 永远有一份能兜底的内置版本，绝不因为 sandbox 不在就断运行时。
+ * 但 Seeya 永远有一份能兜底的内置版本，绝不因为 sandbox 不在就断运行时。
  */
 
 import fs from 'fs';
@@ -160,5 +160,5 @@ export function contractSourceLabel(name: string): string {
   const c = loadContract(name);
   return c._source === 'sandbox'
     ? `读自外部 canonical sandbox（${config.knowledge.home}）`
-    : '用 HireSeek 内置兜底契约（未配 AGENT_KNOWLEDGE_HOME）';
+    : '用 Seeya 内置兜底契约（未配 AGENT_KNOWLEDGE_HOME）';
 }

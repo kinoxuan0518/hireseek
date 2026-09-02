@@ -26,56 +26,58 @@ const CHANNELS: Channel[] = ['boss', 'maimai', 'linkedin', 'followup'];
 
 const USAGE = `
 用法:
-  hireseek                     对话模式（默认）
-  hireseek setup               初始化向导：一步步配置好一切
-  hireseek goal                结果目标计分板：面试通过数 + "判断准不准"的校准对照
-  hireseek feedback <名> pass|fail [备注]  手动回流面试结果（校准"合适"的判断）
-  hireseek hire-sync [--apply]  从飞书招聘/多维表格自动拉面试结果回流（默认 dry-run 预览）
-  hireseek verify              双轴独立质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)（--push 推送）
-  hireseek core                Agent Core 状态：工具注册 / trace / session / memory
-  hireseek failures            Harness 失败复盘：环境 / 工具 / 协议 / 登录态优先级
-  hireseek readiness [渠道]    只读检查当前 Chrome 是否适合跑真实渠道验收（--open-missing 打开缺失入口；--strict 可作脚本门禁）
-  hireseek validate [渠道]     真实渠道验收：先 readiness，再依次 dry-run / prepare / screen（--open-missing --wait 可等登录）
-  hireseek completion [--json] 判断当前证据是否足以标记整轮迭代完成
-  hireseek runs [all|ID]       查看最近暂停/失败 run；all 显示最近全部；ID 显示详情
-  hireseek runs cleanup [--apply]  收口超时 running run（默认预览，不删除 trace）
-  hireseek doctor              产品结构体检：下层基座 / 中层协议 / skill 边界 / 真实验收缺口
-  hireseek protocols           中层平台协议：已产品化渠道 / 契约 / 动作策略 / 合规规则
-  hireseek capabilities        中层招聘能力：触达话术 / 候选人判断 / 搜索策略
-  hireseek alive               查岗：一句话报告它在不在、做了什么、下一步（--push 推送一条）
-  hireseek console             网页指挥台：打开浏览器就能看见它、打字指挥它
-  hireseek dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
-  hireseek run                 自主模式：自动决定今天跑哪些渠道
-  hireseek run --plan          计划模式：先分析生成计划，用户确认后执行
-  hireseek run <渠道>          指定渠道立即执行
-  hireseek run <渠道> --dry-run  预检模式：接管真实页面但禁止打招呼/输入/点击副作用
-  hireseek run <渠道> --here --prepare  安全验收：自动切到目标职位并设置筛选，但绝不触达候选人
-  hireseek run <渠道> --here --screen   候选人筛选验收：可查看候选人，但禁止打招呼/发消息
-  hireseek run boss --here     就地接管当前 BOSS 页面，由产品协议自行定位目标职位并执行
-  hireseek scan                扫描收件箱，更新已回复候选人
-  hireseek update <姓名> <状态>  手动更新候选人状态
-  hireseek funnel              查看招聘漏斗
-  hireseek tasks               查看任务看板
-  hireseek tasks <ID>          查看任务详情
-  hireseek evo                 进化：基于真实数据复盘并改写话术/筛选规则
-  hireseek evo dry             只出复盘报告，不落盘
-  hireseek evo back            回滚最近一次进化
-  hireseek evo log             进化历史与效果对比
-  hireseek learn               学习闭环：用真实过面结果自动重校"合适"的定义（dry 仅预览）
-  hireseek beat                手动跑一次心跳决策（主动性循环）
-  hireseek beat dry            只看决策不执行
-  hireseek beat log            心跳历史
-  hireseek sched               查看定时计划（人话时间 + 下次/上次执行）
-  hireseek sched set <任务> "<cron>"  修改计划，如 sched set boss "0 8 * * 1-5"
-  hireseek sched off|on <任务>  关闭/恢复某项计划
-  hireseek start               启动定时守护进程（前台）
-  hireseek daemon run          常驻守护进程：调度 + 网页指挥台 + 飞书 Bot（前台运行）
-  hireseek daemon install      安装为开机自启服务（launchd，崩溃自拉起）
-  hireseek daemon uninstall    卸载开机自启服务
-  hireseek daemon status       查看守护进程运行状态
+  seeya                     对话模式（默认）
+  seeya setup               初始化向导：一步步配置好一切
+  seeya goal                结果目标计分板：面试通过数 + "判断准不准"的校准对照
+  seeya feedback <名> pass|fail [备注]  手动回流面试结果（校准"合适"的判断）
+  seeya hire-sync [--apply]  从飞书招聘/多维表格自动拉面试结果回流（默认 dry-run 预览）
+  seeya verify              双轴独立质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)（--push 推送）
+  seeya core                Agent Core 状态：工具注册 / trace / session / memory
+  seeya dsh                 DSH 运行时：当前 profile、插件树、prompt sections
+  seeya failures            Harness 失败复盘：环境 / 工具 / 协议 / 登录态优先级
+  seeya readiness [渠道]    只读检查当前 Chrome 是否适合跑真实渠道验收（--open-missing 打开缺失入口；--strict 可作脚本门禁）
+  seeya validate [渠道]     真实渠道验收：先 readiness，再依次 dry-run / prepare / screen（--open-missing --wait 可等登录）
+  seeya completion [--json] 判断当前证据是否足以标记整轮迭代完成
+  seeya runs [all|ID]       查看最近暂停/失败 run；all 显示最近全部；ID 显示详情
+  seeya runs cleanup [--apply]  收口超时 running run（默认预览，不删除 trace）
+  seeya doctor              产品结构体检：下层基座 / 中层协议 / skill 边界 / 真实验收缺口
+  seeya protocols           中层平台协议：已产品化渠道 / 契约 / 动作策略 / 合规规则
+  seeya capabilities        中层招聘能力：触达话术 / 候选人判断 / 搜索策略
+  seeya alive               查岗：一句话报告它在不在、做了什么、下一步（--push 推送一条）
+  seeya console             网页指挥台：打开浏览器就能看见它、打字指挥它
+  seeya dashboard           启动本地控制台（实时截图 + 日志 + 任务控制）
+  seeya run                 自主模式：自动决定今天跑哪些渠道
+  seeya run --plan          计划模式：先分析生成计划，用户确认后执行
+  seeya run <渠道>          指定渠道立即执行
+  seeya run <渠道> --dry-run  预检模式：接管真实页面但禁止打招呼/输入/点击副作用
+  seeya run <渠道> --here --prepare  安全验收：自动切到目标职位并设置筛选，但绝不触达候选人
+  seeya run <渠道> --here --screen   候选人筛选验收：可查看候选人，但禁止打招呼/发消息
+  seeya run boss --here     就地接管当前 BOSS 页面，由产品协议自行定位目标职位并执行
+  seeya scan                扫描收件箱，更新已回复候选人
+  seeya update <姓名> <状态>  手动更新候选人状态
+  seeya funnel              查看招聘漏斗
+  seeya tasks               查看任务看板
+  seeya tasks <ID>          查看任务详情
+  seeya evo                 进化：基于真实数据复盘并改写话术/筛选规则
+  seeya evo dry             只出复盘报告，不落盘
+  seeya evo back            回滚最近一次进化
+  seeya evo log             进化历史与效果对比
+  seeya learn               学习闭环：用真实过面结果自动重校"合适"的定义（dry 仅预览）
+  seeya beat                手动跑一次心跳决策（主动性循环）
+  seeya beat dry            只看决策不执行
+  seeya beat log            心跳历史
+  seeya sched               查看定时计划（人话时间 + 下次/上次执行）
+  seeya sched set <任务> "<cron>"  修改计划，如 sched set boss "0 8 * * 1-5"
+  seeya sched off|on <任务>  关闭/恢复某项计划
+  seeya start               启动定时守护进程（前台）
+  seeya daemon run          常驻守护进程：调度 + 网页指挥台 + 飞书 Bot（前台运行）
+  seeya daemon install      安装为开机自启服务（launchd，崩溃自拉起）
+  seeya daemon uninstall    卸载开机自启服务
+  seeya daemon status       查看守护进程运行状态
 
 渠道: boss | maimai | linkedin | followup
 状态: replied | interviewed | offered | joined | rejected | dropped
+兼容: hireseek 命令仍指向同一入口
 `.trim();
 
 async function checkSetup(): Promise<boolean> {
@@ -97,11 +99,11 @@ async function checkSetup(): Promise<boolean> {
   // 如果有配置缺失，显示欢迎信息并引导 setup
   if (issues.length > 0) {
     console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-    console.log(chalk.cyan('👋 欢迎使用 HireSeek！'));
+    console.log(chalk.cyan('👋 欢迎使用 Seeya！'));
     console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
-    console.log(chalk.white('看起来这是你第一次使用 HireSeek 🔱\n'));
-    console.log(chalk.gray('HireSeek 是一个智能招聘助手，可以帮你：'));
+    console.log(chalk.white('看起来这是你第一次使用 Seeya 🔱\n'));
+    console.log(chalk.gray('Seeya 是一个智能招聘助手，可以帮你：'));
     console.log(chalk.gray('  • 自动在 BOSS直聘、脉脉等平台寻找候选人'));
     console.log(chalk.gray('  • 智能筛选和评估候选人'));
     console.log(chalk.gray('  • 追踪招聘进展和数据分析'));
@@ -117,7 +119,7 @@ async function checkSetup(): Promise<boolean> {
     // 自动运行 setup
     await runSetup();
 
-    console.log(chalk.green('\n✨ 配置完成！HireSeek 已准备就绪\n'));
+    console.log(chalk.green('\n✨ 配置完成！Seeya 已准备就绪\n'));
     console.log(chalk.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
     return true; // 表示运行了 setup
@@ -138,7 +140,7 @@ async function main(): Promise<void> {
 
   // chat 模式有自己的极简启动界面，这里只为其他命令打 banner
   if (command && command !== 'chat') {
-    console.log(chalk.cyan('\n🔱 HireSeek - DeepSeek 驱动的智能招聘 Agent\n'));
+    console.log(chalk.cyan('\n🔱 Seeya — 智能招聘 Agent\n'));
     console.log(`数据库: ${chalk.gray(db.name)}\n`);
   }
   const channel = args[1] as Channel | undefined;
@@ -174,12 +176,12 @@ async function main(): Promise<void> {
     process.on('SIGINT', () => { db.close(); process.exit(0); });
 
   } else if (command === 'feedback' || command === 'fb') {
-    // 回流面试结果：hireseek feedback <姓名> pass|fail [备注]
+    // 回流面试结果：seeya feedback <姓名> pass|fail [备注]
     const name = args[1];
     const verdict = (args[2] || '').toLowerCase();
     if (!name || !['pass', 'passed', 'fail', 'failed', '过', '挂'].includes(verdict)) {
-      console.log(chalk.yellow('用法：hireseek feedback <候选人姓名> pass|fail [备注]'));
-      console.log(chalk.gray('  例：hireseek feedback 张三 pass 一面表现很好'));
+      console.log(chalk.yellow('用法：seeya feedback <候选人姓名> pass|fail [备注]'));
+      console.log(chalk.gray('  例：seeya feedback 张三 pass 一面表现很好'));
       db.close(); process.exit(1);
     }
     const result = ['pass', 'passed', '过'].includes(verdict) ? 'passed' : 'failed';
@@ -222,7 +224,7 @@ async function main(): Promise<void> {
     if (args.includes('--push') && (v.verdict !== 'skip' || c.verdict !== 'skip')) {
       const { notify } = await import('./notifier');
       const body = [v.verdict !== 'skip' ? formatVerification(v) : '', c.verdict !== 'skip' ? formatCompliance(c) : ''].filter(Boolean).join('\n\n');
-      await notify('HireSeek 双轴质检', body);
+      await notify('Seeya 双轴质检', body);
       console.log(chalk.gray('（已推送一条到你的飞书/系统通知）\n'));
     }
     db.close();
@@ -232,6 +234,14 @@ async function main(): Promise<void> {
     const { CHAT_TOOL_REGISTRY } = await import('./chat');
     const { collectCoreStatus, formatCoreStatus } = await import('./agent-core/core-status');
     console.log(formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY)) + '\n');
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'dsh' || command === 'harness') {
+    const { ensureChatRuntimeBound } = await import('./chat');
+    const { getHarness } = await import('./runtime');
+    ensureChatRuntimeBound();
+    console.log(getHarness().inspect() + '\n');
     db.close();
     process.exit(0);
 
@@ -258,14 +268,14 @@ async function main(): Promise<void> {
       return runtime.enabledChannels.map(entry => entry.channel);
     };
     if (target && !CHANNELS.includes(target)) {
-      console.log(chalk.yellow('用法：hireseek readiness [boss|maimai|linkedin|followup] [--open-missing]'));
+      console.log(chalk.yellow('用法：seeya readiness [boss|maimai|linkedin|followup] [--open-missing]'));
       db.close();
       process.exit(1);
     }
     if (openMissing) {
       const channels = target ? [target] : channelsFromRuntime();
       if (channels.length === 0) {
-        console.log(chalk.yellow('当前 active job 没有启用渠道。也可以指定：hireseek readiness <boss|maimai|linkedin|followup> --open-missing'));
+        console.log(chalk.yellow('当前 active job 没有启用渠道。也可以指定：seeya readiness <boss|maimai|linkedin|followup> --open-missing'));
         db.close();
         process.exit(1);
       }
@@ -280,7 +290,7 @@ async function main(): Promise<void> {
     }
     const channels = channelsFromRuntime();
     if (channels.length === 0) {
-      console.log(chalk.yellow('当前 active job 没有启用渠道。也可以指定：hireseek readiness <boss|maimai|linkedin|followup>'));
+      console.log(chalk.yellow('当前 active job 没有启用渠道。也可以指定：seeya readiness <boss|maimai|linkedin|followup>'));
       db.close();
       process.exit(1);
     }
@@ -293,7 +303,7 @@ async function main(): Promise<void> {
     const target = args.slice(1).find(arg => !arg.startsWith('-')) as Channel | undefined;
     const openMissing = args.includes('--open-missing') || args.includes('--open');
     if (target && !CHANNELS.includes(target)) {
-      console.log(chalk.yellow('用法：hireseek validate [boss|maimai|linkedin|followup] [--dry-run-only|--prepare-only|--screen-only] [--open-missing]'));
+      console.log(chalk.yellow('用法：seeya validate [boss|maimai|linkedin|followup] [--dry-run-only|--prepare-only|--screen-only] [--open-missing]'));
       db.close();
       process.exit(1);
     }
@@ -331,7 +341,7 @@ async function main(): Promise<void> {
     const runtime = createRuntimeContext();
     const channels = runtime.enabledChannels.map(entry => entry.channel);
     if (channels.length === 0) {
-      console.log(chalk.yellow('当前 active job 没有启用渠道。也可以指定：hireseek validate <boss|maimai|linkedin|followup>'));
+      console.log(chalk.yellow('当前 active job 没有启用渠道。也可以指定：seeya validate <boss|maimai|linkedin|followup>'));
       db.close();
       process.exit(1);
     }
@@ -394,7 +404,7 @@ async function main(): Promise<void> {
     const states = showAll ? listAgentRunStates(12) : listPendingAgentRunStates(12);
     console.log(formatRunStateList(
       states,
-      showAll ? 'HireSeek 最近 Run States' : 'HireSeek 待处理 Run States',
+      showAll ? 'Seeya 最近 Run States' : 'Seeya 待处理 Run States',
       showAll ? '没有 run state。' : '没有待处理 run。',
     ) + '\n');
     db.close();
@@ -476,14 +486,14 @@ async function main(): Promise<void> {
     } else if (CHANNELS.includes(channelArg as Channel)) {
       // 指定渠道模式
       if (usePlan) {
-        console.log(chalk.yellow('⚠️  计划模式仅支持 "hireseek run --plan"（全渠道），指定渠道时不支持'));
+        console.log(chalk.yellow('⚠️  计划模式仅支持 "seeya run --plan"（全渠道），指定渠道时不支持'));
         process.exit(1);
       }
       let runId: number;
       try {
         runId = await runChannel(channelArg as Channel, undefined, { fromCurrent, dryRun, prepare, screen });
       } catch (err) {
-        console.error(chalk.red(`\n[HireSeek] sourcing 未启动: ${err instanceof Error ? err.message : err}`));
+        console.error(chalk.red(`\n[Seeya] sourcing 未启动: ${err instanceof Error ? err.message : err}`));
         db.close();
         process.exit(1);
       }
@@ -524,7 +534,7 @@ async function main(): Promise<void> {
     const name   = args[1];
     const status = args[2];
     if (!name || !status || !VALID_STATUSES.includes(status)) {
-      console.error(chalk.red(`用法: hireseek update <姓名> <状态>`));
+      console.error(chalk.red(`用法: seeya update <姓名> <状态>`));
       console.log(`状态可选: ${VALID_STATUSES.join(' | ')}`);
       process.exit(1);
     }
@@ -635,7 +645,7 @@ async function main(): Promise<void> {
     } else if (sub === 'on' && args[2]) {
       console.log('\n' + setSchedule(args[2], 'default') + '\n');
     } else if (sub && !findTask(sub)) {
-      console.log(chalk.yellow(`\n用法: hireseek sched [set <任务> "<cron>" | off <任务> | on <任务>]\n`));
+      console.log(chalk.yellow(`\n用法: seeya sched [set <任务> "<cron>" | off <任务> | on <任务>]\n`));
     } else {
       console.log('\n⏰ 定时计划\n');
       console.log(describeSchedule());
@@ -650,7 +660,7 @@ async function main(): Promise<void> {
     console.log(chalk.gray('\n按 Ctrl+C 退出\n'));
 
     process.on('SIGINT', () => {
-      console.log('\n[HireSeek] 退出');
+      console.log('\n[Seeya] 退出');
       db.close();
       process.exit(0);
     });
@@ -673,7 +683,7 @@ async function main(): Promise<void> {
       db.close();
       process.exit(0);
     } else {
-      console.log(chalk.yellow('\n用法: hireseek daemon [run | install | uninstall | status]\n'));
+      console.log(chalk.yellow('\n用法: seeya daemon [run | install | uninstall | status]\n'));
       db.close();
       process.exit(0);
     }
@@ -684,6 +694,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(chalk.red('[HireSeek] 启动失败:'), err.message);
+  console.error(chalk.red('[Seeya] 启动失败:'), err.message);
   process.exit(1);
 });

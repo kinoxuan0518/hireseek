@@ -1,8 +1,8 @@
-# HireSeek 功能实现总结
+# Seeya 功能实现总结
 
 ## 概览
 
-HireSeek 现已实现所有核心功能，达到 Claude Code 级别的能力，同时保留招聘领域的专业知识。
+Seeya 现已实现所有核心功能，达到 Claude Code 级别的能力，同时保留招聘领域的专业知识。
 
 ## 已实现功能清单
 
@@ -20,7 +20,7 @@ HireSeek 现已实现所有核心功能，达到 Claude Code 级别的能力，�
 
 **使用**:
 ```bash
-hireseek run --plan
+seeya run --plan
 ```
 
 ---
@@ -84,8 +84,8 @@ AI: [调用 grep 工具搜索]
 
 **使用**:
 ```bash
-hireseek tasks              # 查看任务看板
-hireseek tasks 123          # 查看特定任务详情
+seeya tasks              # 查看任务看板
+seeya tasks 123          # 查看特定任务详情
 ```
 
 **对话工具**:
@@ -244,7 +244,7 @@ URL: https://github.com/user/hireseek/pull/123
 
 ## 对比 Claude Code
 
-| 功能 | HireSeek | Claude Code | 备注 |
+| 功能 | Seeya | Claude Code | 备注 |
 |------|----------|-------------|------|
 | 计划模式 | ✅ | ✅ | AI 分析历史数据生成计划 |
 | 文件搜索 (Glob) | ✅ | ✅ | 支持模式匹配 |
@@ -253,9 +253,9 @@ URL: https://github.com/user/hireseek/pull/123
 | 任务管理 | ✅ | ✅ | 层级任务 + 状态跟踪 |
 | MCP 协议 | ✅ | ✅ | 连接外部服务 |
 | Git 自动化 | ✅ | ✅ | 提交、分支、PR |
-| **招聘领域知识** | ✅ | ❌ | HireSeek 独有 |
+| **招聘领域知识** | ✅ | ❌ | Seeya 独有 |
 | **浏览器自动化** | ✅ | ❌ | Playwright sourcing |
-| **多账号并行** | ✅ | ❌ | HireSeek 独有 |
+| **多账号并行** | ✅ | ❌ | Seeya 独有 |
 | **主动提醒** | ✅ | ❌ | macOS 系统通知 |
 
 ---

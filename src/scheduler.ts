@@ -36,7 +36,7 @@ async function proactiveCheck(): Promise<void> {
 
   if (stale.length > 0) {
     const names = stale.map(c => `${c.name}（${c.company || '未知'}）`).join('、');
-    await notify('🦞 HireSeek 提醒', `以下候选人联系超过 7 天未回复，考虑跟进或放弃：\n${names}`);
+    await notify('🦞 Seeya 提醒', `以下候选人联系超过 7 天未回复，考虑跟进或放弃：\n${names}`);
   }
 
   // 2. 今天还没跑 sourcing（早上 10 点后检查）
@@ -48,7 +48,7 @@ async function proactiveCheck(): Promise<void> {
       LIMIT 1
     `).get();
     if (!todayRun) {
-      await notify('🦞 HireSeek 提醒', '今天还没有跑 sourcing，要现在开始吗？\n运行 hireseek run');
+      await notify('🦞 Seeya 提醒', '今天还没有跑 sourcing，要现在开始吗？\n运行 seeya run');
     }
   }
 
@@ -60,13 +60,13 @@ async function proactiveCheck(): Promise<void> {
   `).get(jobId) as { count: number };
 
   if (contacted.count === 0 && hour >= 9) {
-    await notify('🦞 HireSeek 提醒', '最近 3 天没有新触达候选人，漏斗顶部快空了。');
+    await notify('🦞 Seeya 提醒', '最近 3 天没有新触达候选人，漏斗顶部快空了。');
   }
 }
 
 // ── 启动调度器 ────────────────────────────────────────────
 export function startScheduler(): void {
-  // 记录 pid，供 hireseek sched 检测 daemon 存活
+  // 记录 pid，供 seeya sched 检测 daemon 存活
   const { writeDaemonPid, humanizeCron } = require('./schedule-manager') as typeof import('./schedule-manager');
   writeDaemonPid();
 
@@ -169,7 +169,7 @@ export function startScheduler(): void {
         const autoApply = process.env.FEISHU_HIRE_AUTO_APPLY === 'true';
         const { syncInterviewOutcomes } = await import('./channels/feishu-hire');
         const r = await syncInterviewOutcomes({ dryRun: !autoApply });
-        if (r.resolved.length > 0 || r.error) await notify('🔱 HireSeek 面试结果同步', r.text);
+        if (r.resolved.length > 0 || r.error) await notify('🔱 Seeya 面试结果同步', r.text);
       } catch (e) { console.error('[HireSync] 出错:', e instanceof Error ? e.message : e); }
     });
     console.log(`  ${'面试结果同步'.padEnd(20)} → ${humanizeCron(hireSync)}（${hireSync}，${process.env.FEISHU_HIRE_AUTO_APPLY === 'true' ? '自动落库' : 'dry-run+通知'}）`);

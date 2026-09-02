@@ -1,6 +1,6 @@
 /**
- * HireSeek Chat 模式
- * 让用户和 HireSeek 自然对话，同时能触发执行动作。
+ * Seeya Chat 模式
+ * 让用户和 Seeya 自然对话，同时能触发执行动作。
  */
 
 import readline from 'readline';
@@ -12,14 +12,11 @@ import chalk from 'chalk';
 import yaml from 'js-yaml';
 import { config } from './config';
 import {
-  cloneAssistantMessage,
   hasAnyApiKey,
   mergeChatParams,
   openaiClient,
   resolveEndpoint,
 } from './llm/provider';
-import { loadWorkspaceFile, jobToPrompt } from './skills/loader';
-import { buildChatMemoryContext, buildConversationMemory } from './memory';
 import { candidateOps, conversationOps, db } from './db';
 import { runChannel, runJob, scanInbox } from './orchestrator';
 import { webSearch } from './search';
@@ -29,20 +26,17 @@ import type { Channel } from './types';
 import {
   CORE_TOOL_POLICIES,
   createToolRegistry,
-  unknownToolResult,
+  type ToolExecutionContext,
   type ToolExecutionMode,
 } from './agent-core/tool-registry';
-import { recordRejectedToolCall, recordToolCall } from './agent-core/trace';
-import { offloadToolResultForContext } from './agent-core/tool-output-store';
-import { buildRecruitingCapabilityContext } from './capabilities';
 import { createRuntimeContext } from './agent-core/runtime-context';
-import { buildChatHarnessContext } from './harness/run-assembly';
 import {
   SlashSuggestionController,
   clearSlashSuggestionAnsi,
   formatSlashSuggestionLines,
   renderSlashSuggestionAnsi,
 } from './chat/slash-suggestions';
+import { bindHireSeekChatRuntime, getHarness } from './runtime';
 
 /**
  * 如果配置了 MCP 服务器，则初始化它们
@@ -105,7 +99,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
       description:
         '读取或调用一项外部招聘技能资产（来自 ~/.claude/skills 及插件，如 rbt、maimai-recruiter、talent-sourcing、' +
         'candidate-intelligence、blacklake-targeted-talent-hunting 等）。' +
-        '这些技能在 HireSeek 内部是知识/执行素材，不高于产品中层协议和代码护栏。' +
+        '这些技能在 Seeya 内部是知识/执行素材，不高于产品中层协议和代码护栏。' +
         '当用户明确要用某个技能，或当前产品能力尚未覆盖该场景时调用。' +
         '可先传 list=true 查看全部可用技能及描述。',
       parameters: {
@@ -728,7 +722,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'record_interview_outcome',
       description: '记录某候选人的面试结果（过面/挂面）。当用户提到面试结论时主动调用，' +
-        '比如"张三面试过了""李四终面挂了""王五通过了二面"。这是 HireSeek 最重要的反馈信号——' +
+        '比如"张三面试过了""李四终面挂了""王五通过了二面"。这是 Seeya 最重要的反馈信号——' +
         '面试通过才是结果目标，这条结果会回流去校准它对「合适」的判断。',
       parameters: {
         type: 'object',
@@ -1073,7 +1067,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'core_status',
       description:
-        '只读查看 HireSeek 下层 Agent Core 状态：运行上下文、工具注册、side-effect 标记、tool trace、session/message、memory 三类存储。',
+        '只读查看 Seeya 下层 Agent Core 状态：运行上下文、工具注册、side-effect 标记、tool trace、session/message、memory 三类存储。',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -1096,7 +1090,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'product_doctor',
       description:
-        '只读体检 HireSeek 产品结构：下层 Agent Core、工具注册、数据库/trace/session/memory、BOSS 中层协议、招聘能力模块、外部 skill 边界与真实验收缺口。',
+        '只读体检 Seeya 产品结构：下层 Agent Core、工具注册、数据库/trace/session/memory、BOSS 中层协议、招聘能力模块、外部 skill 边界与真实验收缺口。',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -1105,7 +1099,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'completion_audit',
       description:
-        '只读判断当前证据是否足以标记整轮 HireSeek 迭代完成；输出阻塞项和下一步，不会运行真实招聘任务。',
+        '只读判断当前证据是否足以标记整轮 Seeya 迭代完成；输出阻塞项和下一步，不会运行真实招聘任务。',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -1114,7 +1108,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'platform_protocols',
       description:
-        '只读查看 HireSeek 中层平台协议注册表：哪些渠道已经产品化、绑定了什么契约、是否接入 system context/action policy/compliance。',
+        '只读查看 Seeya 中层平台协议注册表：哪些渠道已经产品化、绑定了什么契约、是否接入 system context/action policy/compliance。',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -1123,7 +1117,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'recruiting_capabilities',
       description:
-        '只读查看 HireSeek 中层招聘能力注册表：触达话术、候选人判断、搜索策略等共享能力从哪里来、适用哪些渠道。',
+        '只读查看 Seeya 中层招聘能力注册表：触达话术、候选人判断、搜索策略等共享能力从哪里来、适用哪些渠道。',
       parameters: {
         type: 'object',
         properties: {
@@ -1189,6 +1183,15 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
 
 export const CHAT_TOOL_REGISTRY = createToolRegistry(CHAT_TOOLS, CORE_TOOL_POLICIES);
 
+export function ensureChatRuntimeBound(): void {
+  bindHireSeekChatRuntime({
+    registry: CHAT_TOOL_REGISTRY,
+    execute: executeToolImpl,
+    schemas: CHAT_TOOLS,
+    describe: describeToolCall,
+  });
+}
+
 // ── 工具调用的人话显示 ───────────────────────────────────
 /** 把工具名+参数翻译成 HR 看得懂的动作含义（终端、网页、飞书共用）。 */
 export function describeToolCall(name: string, args: Record<string, unknown>): string {
@@ -1248,12 +1251,7 @@ export function describeToolCall(name: string, args: Record<string, unknown>): s
   }
 }
 
-export interface ToolExecutionContext {
-  runId?: number;
-  sessionId?: string;
-  toolCallId?: string;
-  mode?: ToolExecutionMode;
-}
+export type { ToolExecutionContext, ToolExecutionMode } from './agent-core/tool-registry';
 
 // ── 工具执行 ─────────────────────────────────────────────
 export async function executeTool(
@@ -1261,70 +1259,8 @@ export async function executeTool(
   args: any,
   context: ToolExecutionContext = {},
 ): Promise<string> {
-  const registered = CHAT_TOOL_REGISTRY.get(name);
-  if (!registered) {
-    const output = unknownToolResult(name);
-    recordToolCall({
-      runId: context.runId,
-      sessionId: context.sessionId,
-      toolCallId: context.toolCallId,
-      toolName: name,
-      input: args,
-      output,
-      ok: false,
-      error: `unknown tool: ${name}`,
-    });
-    return output;
-  }
-
-  const mode = context.mode ?? (registered.policy.sideEffect ? 'execute' : 'read');
-
-  // 单一闸门 chokepoint（含 mode 维度）：registry 的 requiresApproval 驱动审批；
-  // 显式 dry-run + 工具支持 dry-run 则免审批（预览无副作用）。无头自主回路默认拒绝。
-  const { checkPermission } = await import('./permissions');
-  const approved = await checkPermission({
-    toolName: name,
-    args,
-    description: registered.schema.function.description,
-    requiresApproval: registered.policy.requiresApproval,
-    explicitMode: context.mode,
-    supportsDryRun: registered.policy.supportsDryRun,
-  });
-  if (!approved) {
-    const denied = `工具调用被拒绝：${name}（需审批；无头/自主回路默认拒绝，本地终端可确认，或预先在 workspace/.permissions.json 加 allow 规则）`;
-    recordToolCall({
-      runId: context.runId, sessionId: context.sessionId, toolCallId: context.toolCallId,
-      toolName: name, input: args, output: denied, ok: false, error: 'approval denied',
-      sideEffect: registered.policy.sideEffect, mode,
-    });
-    return denied;
-  }
-
-  let ok = true;
-  let error: string | null = null;
-  let output = '';
-  try {
-    output = await executeToolImpl(name, args);
-    return output;
-  } catch (err) {
-    ok = false;
-    error = err instanceof Error ? err.message : String(err);
-    output = `工具执行失败：${error}`;
-    return output;
-  } finally {
-    recordToolCall({
-      runId: context.runId,
-      sessionId: context.sessionId,
-      toolCallId: context.toolCallId,
-      toolName: name,
-      input: args,
-      output,
-      ok,
-      error,
-      sideEffect: registered.policy.sideEffect,
-      mode,
-    });
-  }
+  ensureChatRuntimeBound();
+  return getHarness().tools.execute(name, args, context);
 }
 
 async function executeToolImpl(name: string, args: any): Promise<string> {
@@ -1686,7 +1622,7 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
           completed: tasks.filter(t => t.status === 'completed').length,
         };
 
-        return `任务总览：\n- 待处理：${summary.pending} 个\n- 进行中：${summary.in_progress} 个\n- 已完成：${summary.completed} 个\n\n详细看板请运行：hireseek tasks`;
+        return `任务总览：\n- 待处理：${summary.pending} 个\n- 进行中：${summary.in_progress} 个\n- 已完成：${summary.completed} 个\n\n详细看板请运行：seeya tasks`;
       }
     }
 
@@ -2240,91 +2176,8 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
 
 // ── 构建系统提示 ─────────────────────────────────────────
 export function buildSystemPrompt(): string {
-  const soul     = loadWorkspaceFile('SOUL.md');
-  const runtime  = createRuntimeContext();
-  const job      = runtime.activeJob;
-  const jobCtx   = job ? jobToPrompt(job) : '';
-  const capabilities = buildRecruitingCapabilityContext({
-    includeKinds: ['principles', 'evaluation', 'outreach', 'search'],
-  });
-  const harnessCtx = buildChatHarnessContext();
-  const memory = job ? buildChatMemoryContext({
-    jobId: runtime.activeJobId,
-    channels: runtime.enabledChannels.map(channel => channel.channel),
-  }) : '';
-  const convMem  = job ? buildConversationMemory(runtime.activeJobId) : '';
-
-  // Auto Memory - 跨会话记忆
-  let autoMemory = '';
-  try {
-    const { getMemoryContext } = require('./auto-memory');
-    autoMemory = getMemoryContext();
-  } catch {
-    // 如果 auto-memory 模块未加载，跳过
-  }
-
-  const chatGuide = `
-## 对话模式与主动性原则
-
-你现在处于对话模式，是用户真正的招聘伙伴，不是被动的工具。
-
-### 主动性要求
-
-**评估自己的输出质量**：每次完成一个动作或给出信息后，先问自己：这个结果够好吗？有没有明显的局限？
-
-**主动说出不足**：如果结果有限制，不要等用户发现，主动说明：
-- 为什么这个结果可能不够准确或完整
-- 有哪些更好的方向或方案
-- 如果有更好的方案但需要额外权限（API key、账号、数据），先说清楚能带来什么改善，再问用户是否愿意提供
-
-**主动提建议**：不只是回答用户问的，还要主动发现用户没问但应该知道的事：
-- 数据异常（回复率突然下降、某类候选人一直不回）
-- 策略盲点（只在一个渠道找人、话术很久没换）
-- 时机提醒（某个候选人联系超过 7 天没跟进）
-
-**索取权限的顺序**：
-1. 先尝试用现有能力解决
-2. 如果现有能力明显不够，说明不足在哪、更好的方案是什么
-3. 用户认可方向后，再具体请求所需的 key 或权限
-4. 不要一上来就问"你有 xxx key 吗"——先证明值得要
-
-### HR 体验铁律（用户是 HR，不是工程师）
-
-1. **永远不要让用户做技术操作**——关弹窗、按 Esc、跑命令、改文件都不行。遇到卡点自己换至少 3 种方法重试（换选择器、按 Escape 键、刷新页面重来），全部失败才汇报，并只说业务影响。
-2. **浏览器操作一律用 browser_connect / browser_snapshot / browser_act 工具**，一次调用一个动作。严禁用 run_shell 写 AppleScript 或 JS 文件去操控浏览器——那条路又慢又容易错。
-3. **汇报说招聘语言**：说"已打招呼 5 人（常迈/熊文韬…），今日权益剩 196 次"，不说 SPA / DOM / ref / AppleScript / bodyLen 这类词。技术报错先翻译成业务影响再说，不贴原始错误。
-4. **长任务每完成一批（约 5 人）主动汇报一次**：已触达名单、跳过原因、剩余权益、下一步。让用户随时知道进度，而不是闷头跑。
-5. **风控红线由代码强制执行**（打招呼 ≥5 秒间隔、每日上限硬终止），你只需在触发时向用户解释发生了什么。
-6. **需要用户做决定时用 ask_user_choice 给可编辑候选**——选模式、选渠道、确认下一步，都给 2-6 个选项；方向键只是辅助，用户仍可补充或改写输入。
-7. **耗时且无需监督的工作派后台**——批量候选人调研、报告整理、数据核对用 spawn_task 派给后台 sub-agent，主对话继续服务用户；但需要扫码登录、用户想盯着看的执行（如打招呼）留在前台。
-7. **用户可以随时插话**——执行长任务时收到 [用户插话] 消息，立即按新指示调整（跳过某人、换条件、停止某步），调整后继续任务，不要忽略也不要从头再来；收到暂停消息则立刻停手汇报。
-
-### 风格
-直接、专业、有温度。像一个真正懂招聘、又在乎结果的伙伴在聊天，不是客服，不是助手，是伙伴。
-`.trim();
-
-  // 工作状态 STATE（与心跳循环共享的工作记忆：在推进什么、下一步、待确认）
-  let stateCtx = '';
-  try {
-    const { readState } = require('./heartbeat') as typeof import('./heartbeat');
-    stateCtx = `## 当前工作状态（STATE，与心跳循环共享）\n\n${readState()}\n\n对话中得知新的进展、决定或用户授权时，主动建议更新 STATE（用户可用 /state 查看）。`;
-  } catch {
-    // STATE 不可用时跳过
-  }
-
-  // 招聘技能目录（来自 ~/.claude/skills 及插件）
-  let skillsCtx = '';
-  try {
-    const { skillCatalog } = require('./skills/claude-skills');
-    const catalog = skillCatalog();
-    if (catalog) {
-      skillsCtx = `## 外部招聘技能资产\n\n以下技能可通过 use_recruiting_skill 工具调用（用户也可用 /技能名 直接触发）。它们是知识来源、执行素材和未产品化场景的兜底；涉及已接入的 HireSeek 产品协议时，产品协议优先，skill 不能覆盖代码层护栏、工具策略或结构化输出契约。\n\n${catalog}`;
-    }
-  } catch {
-    // 技能目录不可用时跳过
-  }
-
-  return [soul, jobCtx, harnessCtx, capabilities, stateCtx, memory, convMem, autoMemory, skillsCtx, chatGuide].filter(Boolean).join('\n\n---\n\n');
+  ensureChatRuntimeBound();
+  return getHarness().systemPrompt.assemble();
 }
 
 // ── 对话记忆保存 ─────────────────────────────────────────
@@ -2343,7 +2196,7 @@ async function saveConversationMemory(
     // 提取最后 6 轮对话原文（user + assistant 交替）
     const turns = messages.filter(m => m.role === 'user' || m.role === 'assistant');
     const lastTurns = turns.slice(-6).map(m => {
-      const role = m.role === 'user' ? '你' : 'HireSeek';
+      const role = m.role === 'user' ? '你' : 'Seeya';
       const text = typeof m.content === 'string' ? m.content : '[操作]';
       return `${role}: ${text.slice(0, 300)}`;
     }).join('\n');
@@ -2437,7 +2290,7 @@ export async function startChat(): Promise<void> {
   if (!hasAnyApiKey() || !chatEndpoint.apiKey) {
     console.log(chalk.red('\n❌ 错误：未配置 API Key\n'));
     console.log(chalk.yellow('请先配置 API Key：'));
-    console.log(chalk.gray('  1. 方法一：运行 hireseek setup 进行配置'));
+    console.log(chalk.gray('  1. 方法一：运行 seeya setup 进行配置'));
     console.log(chalk.gray('  2. 方法二：设置环境变量，例如'));
     console.log(chalk.gray('     export ZHIPU_API_KEY="your-key"   # GLM-5.3-Flash'));
     console.log(chalk.gray('     export MOONSHOT_API_KEY="your-key"  # Kimi K3'));
@@ -2463,7 +2316,7 @@ export async function startChat(): Promise<void> {
     const recent = conversationMessages(items).slice(-6);
     if (recent.length === 0) return chalk.gray('   没有可显示的用户/AI对话内容。');
     return recent.map(m => {
-      const label = m.role === 'user' ? '用户' : m.role === 'assistant' ? 'HireSeek' : '工具';
+      const label = m.role === 'user' ? '用户' : m.role === 'assistant' ? 'Seeya' : '工具';
       return chalk.gray(`   ${label}: ${messageText(m)}`);
     }).join('\n');
   };
@@ -2487,6 +2340,7 @@ export async function startChat(): Promise<void> {
     { cmd: '/status', desc: '模型 / 职位 / 浏览器状态' },
     { cmd: '/skills', desc: '技能列表' },
     { cmd: '/core', desc: 'Agent Core 状态（工具 / trace / memory / session）' },
+    { cmd: '/dsh', desc: 'DSH 运行时：profile / 插件树 / prompt sections' },
     { cmd: '/failures', desc: 'Harness 失败复盘（环境 / 工具 / 协议）' },
     { cmd: '/doctor', desc: '产品结构体检（下层 / 中层 / skill 边界）' },
     { cmd: '/completion', desc: '完成判定（是否可标记整轮迭代完成）' },
@@ -2610,7 +2464,7 @@ export async function startChat(): Promise<void> {
   const job = createRuntimeContext().activeJob;
   console.log('');
   console.log(
-    `${chalk.cyan.bold('🔱 HireSeek')} ${chalk.gray(`${model} · ${job?.title ?? '未配置职位'}`)}`,
+    `${chalk.cyan.bold('🔱 Seeya')} ${chalk.gray(`${model} · ${job?.title ?? '未配置职位'}`)}`,
   );
   console.log(chalk.gray(`   /help 命令 · /skills 技能 · 工具执行中可插话 · Esc 打断`));
 
@@ -2799,6 +2653,7 @@ export async function startChat(): Promise<void> {
       chalk.gray('  /clear              清空对话上下文，重新开始'),
       chalk.gray('  /status             模型 / 职位 / 数据库状态'),
       chalk.gray('  /core               Agent Core 状态（工具 / trace / memory / session）'),
+      chalk.gray('  /dsh                DSH 运行时（profile / 插件树 / prompt sections）'),
       chalk.gray('  /failures           Harness 失败复盘（环境 / 工具 / 协议）'),
       chalk.gray('  /doctor             产品结构体检（下层 / 中层 / skill 边界）'),
       chalk.gray('  /completion         完成判定（是否可标记整轮迭代完成）'),
@@ -2854,58 +2709,8 @@ export async function startChat(): Promise<void> {
 
   /** 工具调用的人话显示：HR 看到的是动作含义，不是函数名 */
   const toolLabel = describeToolCall;
-
-  /** 一轮流式请求：边生成边输出，返回完整 message（含工具调用） */
-  const streamRound = async (): Promise<OpenAI.Chat.Completions.ChatCompletionMessage> => {
-    const repairStats = repairToolMessageHistoryInPlace(messages);
-    if (repairStats.changed) {
-      console.log(chalk.gray(
-        `\n[历史修复] 补齐 ${repairStats.insertedToolResults} 条工具结果，移除 ${repairStats.droppedToolMessages} 条孤立工具消息\n`,
-      ));
-    }
-
-    generating = new AbortController();
-    let firstChunk = true;
-    process.stdout.write(chalk.gray('✻ 思考中'));
-    const spinner = setInterval(() => {
-      if (firstChunk) process.stdout.write(chalk.gray('·'));
-    }, 400);
-
-    try {
-      const stream = client.beta.chat.completions.stream(
-        mergeChatParams(chatEndpoint, {
-          model,
-          messages,
-          tools: CHAT_TOOLS,
-          tool_choice: 'auto',
-          max_tokens: 4096,
-        }) as any,
-        { signal: generating.signal },
-      );
-
-      stream.on('content', (delta) => {
-        if (firstChunk) {
-          process.stdout.write(`\r\x1b[K${chalk.cyan('HireSeek')}: `);
-          firstChunk = false;
-        }
-        process.stdout.write(delta);
-      });
-
-      const completion = await stream.finalChatCompletion();
-      if (firstChunk) {
-        process.stdout.write('\r\x1b[K'); // 纯工具调用轮，清掉思考提示
-      } else {
-        process.stdout.write('\n');
-      }
-      const message = completion.choices[0].message;
-      return chatEndpoint.compat.preserveAssistantMessage
-        ? cloneAssistantMessage(message)
-        : message;
-    } finally {
-      clearInterval(spinner);
-      generating = null;
-    }
-  };
+  ensureChatRuntimeBound();
+  const harness = getHarness('chat');
 
   const ask = (): void => {
     if (exiting) return;
@@ -2980,6 +2785,12 @@ export async function startChat(): Promise<void> {
       if (text === '/core') {
         const { collectCoreStatus, formatCoreStatus } = await import('./agent-core/core-status');
         console.log('\n' + formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY)) + '\n');
+        ask();
+        return;
+      }
+
+      if (text === '/dsh' || text === '/harness') {
+        console.log('\n' + getHarness().inspect() + '\n');
         ask();
         return;
       }
@@ -3252,90 +3063,86 @@ export async function startChat(): Promise<void> {
         if (interventionInputActive) rl.prompt(true);
       };
 
-      /** 一个完整回合：流式生成 + 工具循环（含暂停/插话处理） */
+      /** 一个完整回合：DSH Agent Loop 驱动流式生成 + 工具管线（含暂停/插话） */
       const runTurn = async (): Promise<void> => {
-        let msg = await streamRound();
-        messages.push(msg);
-
-        while (msg.tool_calls && msg.tool_calls.length > 0) {
-          const toolResults: OpenAI.ChatCompletionToolMessageParam[] = [];
-
-          for (const call of msg.tool_calls) {
-            const interactiveTool = call.function.name === 'ask_user_question';
-            let args: any = {};
-            let result: string | null = null;
-            try {
-              args = JSON.parse(call.function.arguments || '{}');
-            } catch (err) {
-              const error = err instanceof Error ? err.message : String(err);
-              result = `工具参数解析失败：${error}`;
-              recordRejectedToolCall({
-                registry: CHAT_TOOL_REGISTRY,
-                sessionId: activeSessionId,
-                toolCallId: call.id,
-                toolName: call.function.name,
-                input: call.function.arguments,
-                output: result,
-                error,
-              });
-            }
-
-            if (interactiveTool) {
-              stopInterventionInput();
-              toolOwnsStdin = true;
-            } else {
-              startInterventionInput();
-            }
-            try {
-              console.log(chalk.gray(`  ${toolLabel(call.function.name, args)}`));
-              if (result == null) {
-                result = await executeTool(call.function.name, args, {
-                  sessionId: activeSessionId,
-                  toolCallId: call.id,
-                });
-              }
-            } catch (err) {
-              result = `工具执行失败：${err instanceof Error ? err.message : String(err)}`;
-            } finally {
-              if (interactiveTool) toolOwnsStdin = false;
-              if (result == null) result = '工具执行失败：没有返回结果。';
-              result = offloadToolResultForContext({
-                content: result,
-                toolName: call.function.name,
-                sessionId: activeSessionId,
-                toolCallId: call.id,
-                kind: 'chat-tool-result',
-              }).content;
-              toolResults.push({ role: 'tool', tool_call_id: call.id, content: result });
-            }
-          }
-
-          messages.push(...toolResults);
-
-          // Ctrl+C 暂停：停下任务，简短汇报后把控制权还给用户
-          if (interruptRequested) {
-            interruptRequested = false;
-            stopInterventionInput();
-            messages.push({
-              role: 'user',
-              content: '[系统] 用户暂停了任务。立即停止当前流程（不要再调用工具），用 2-3 句话汇报目前进度（已完成什么/进行到哪），然后等待用户指示。',
-            });
-            msg = await streamRound();
-            messages.push(msg);
-            break;
-          }
-
-          // 用户插话：注入对话，模型下一轮立即响应
-          if (pendingInterventions.length > 0) {
-            const note = pendingInterventions.splice(0)
-              .map(s => `[用户插话] ${s}`).join('\n');
-            messages.push({ role: 'user', content: note });
-          }
-
-          stopInterventionInput();
-          msg = await streamRound();
-          messages.push(msg);
+        const repairStats = repairToolMessageHistoryInPlace(messages);
+        if (repairStats.changed) {
+          console.log(chalk.gray(
+            `\n[历史修复] 补齐 ${repairStats.insertedToolResults} 条工具结果，移除 ${repairStats.droppedToolMessages} 条孤立工具消息\n`,
+          ));
         }
+
+        const session = harness.sessions.create({
+          id: activeSessionId,
+          title: activeSessionTitle,
+          source: 'chat',
+        });
+        session.hydrate(messages);
+
+        let firstChunk = true;
+        let spinner: NodeJS.Timeout | null = null;
+        const clearSpinner = (): void => {
+          if (!spinner) return;
+          clearInterval(spinner);
+          spinner = null;
+        };
+
+        generating = new AbortController();
+        try {
+          const result = await harness.loop.runTurn({
+            session,
+            model,
+            stream: true,
+            signal: generating.signal,
+            kind: 'chat-tool-result',
+            source: 'chat',
+            preserveSystem: true,
+            onStepStart: () => {
+              firstChunk = true;
+              process.stdout.write(chalk.gray('✻ 思考中'));
+              spinner = setInterval(() => {
+                if (firstChunk) process.stdout.write(chalk.gray('·'));
+              }, 400);
+            },
+            onAssistantDelta: (delta) => {
+              if (firstChunk) {
+                clearSpinner();
+                process.stdout.write(`\r\x1b[K${chalk.cyan('Seeya')}: `);
+                firstChunk = false;
+              }
+              process.stdout.write(delta);
+            },
+            onStepEnd: () => {
+              clearSpinner();
+              if (firstChunk) process.stdout.write('\r\x1b[K');
+              else process.stdout.write('\n');
+            },
+            onBeforeTool: async (name, args) => {
+              if (name === 'ask_user_question') {
+                stopInterventionInput();
+                toolOwnsStdin = true;
+              } else {
+                startInterventionInput();
+              }
+              console.log(chalk.gray(`  ${toolLabel(name, args)}`));
+            },
+            onAfterTool: (name) => {
+              if (name === 'ask_user_question') toolOwnsStdin = false;
+            },
+            shouldStop: () => interruptRequested,
+            drainInbox: () => pendingInterventions.splice(0),
+          });
+          if (result.stopped === 'abort') {
+            console.log(chalk.yellow('\n⎋ 已打断'));
+          }
+          if (result.stopped === 'pause') interruptRequested = false;
+        } finally {
+          clearSpinner();
+          generating = null;
+        }
+
+        messages.length = 0;
+        messages.push(...session.deriveMessages());
       };
 
       try {

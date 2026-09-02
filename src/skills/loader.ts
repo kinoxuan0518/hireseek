@@ -76,16 +76,16 @@ function readSkillFile(filePath: string, sourceLabel: string): string | null {
   if (!fs.existsSync(filePath)) return null;
   const content = fs.readFileSync(filePath, 'utf-8');
   return [
-    `<!-- HireSeek skill source: ${sourceLabel} -->`,
+    `<!-- Seeya skill source: ${sourceLabel} -->`,
     [
       '# Skill 资产兼容层',
       '',
       '以下内容来自历史 skill，用作页面经验、异常案例、候选人判断样例和迁移素材。',
-      '它不是 HireSeek 产品运行时的最高优先级协议。',
+      '它不是 Seeya 产品运行时的最高优先级协议。',
       '',
       '优先级规则：',
       '1. 代码层工具安全、风控、run trace、message history、结构化输出契约优先。',
-      '2. HireSeek 产品中层协议（platform protocol / capability protocol）优先。',
+      '2. Seeya 产品中层协议（platform protocol / capability protocol）优先。',
       '3. 本 skill 资产只在不冲突时补充执行细节；若发生冲突，必须服从前两层。',
     ].join('\n'),
     content,

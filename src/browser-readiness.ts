@@ -132,7 +132,7 @@ export function assessBrowserReadiness(input: BrowserReadinessInput): BrowserRea
   }
 
   if (issues.length === 0) {
-    nextSteps.push(`可以继续运行：hireseek run ${input.channel} --here --dry-run`);
+    nextSteps.push(`可以继续运行：seeya run ${input.channel} --here --dry-run`);
   }
 
   return {
@@ -172,7 +172,7 @@ export function probeBrowserReadinessSync(channel: Channel): BrowserReadinessRep
       channel,
       status: 'unavailable',
       issues: [`无法读取 Chrome 标签页：${message.slice(0, 160)}`],
-      nextSteps: ['确认 Chrome 正在运行，并允许 HireSeek 通过 AppleScript 读取标签页后重试。'],
+      nextSteps: ['确认 Chrome 正在运行，并允许 Seeya 通过 AppleScript 读取标签页后重试。'],
     };
   }
   const tab = selectTabForChannel(tabs, channel);
@@ -323,6 +323,6 @@ export function formatOpenMissingBrowserChannels(result: BrowserOpenMissingResul
   }
   lines.push('', 'Next steps:');
   lines.push('- 在新打开的页面完成登录。');
-  lines.push('- 然后运行 `hireseek readiness`，全部 READY 后再运行 `hireseek validate`。');
+  lines.push('- 然后运行 `seeya readiness`，全部 READY 后再运行 `seeya validate`。');
   return lines.join('\n');
 }

@@ -10,10 +10,7 @@
  * - 可取消：/tasks stop <id> 通过 AbortController 立即生效
  */
 
-import OpenAI from 'openai';
 import { config } from './config';
-import { recordRejectedToolCall } from './agent-core/trace';
-import { offloadToolResultForContext } from './agent-core/tool-output-store';
 
 export interface SubTask {
   id: number;
@@ -59,7 +56,7 @@ const ALLOWED_TOOLS = new Set([
 const MAX_ROUNDS = 40;
 
 const SUB_AGENT_SYSTEM = `
-你是 HireSeek 的后台执行 agent，独立完成主对话派来的一项任务。
+你是 Seeya 的后台执行 agent，独立完成主对话派来的一项任务。
 
 规则：
 1. 你在后台运行，**没有任何向用户提问的渠道**——遇到歧义自己做合理假设并在结果中说明
@@ -87,111 +84,40 @@ export function spawnSubAgent(opts: { task: string; label: string; model?: strin
 
 async function runLoop(t: SubTask, modelOverride?: string): Promise<void> {
   try {
-    // 运行时引入，避免与 chat.ts 的静态循环依赖
-    const { CHAT_TOOLS, CHAT_TOOL_REGISTRY, executeTool } = await import('./chat');
-
-    const client = new OpenAI({
-      apiKey: config.deepseek.apiKey,
-      baseURL: config.deepseek.baseUrl,
+    const { ensureChatRuntimeBound } = await import('./chat');
+    const { getHarness } = await import('./runtime');
+    ensureChatRuntimeBound();
+    const harness = getHarness('subagent');
+    const session = harness.sessions.create({
+      id: `sub-agent-${t.id}`,
+      title: t.label,
+      source: 'sub-agent',
     });
-    const model = modelOverride || config.deepseek.model;
+    session.ensureSystem(SUB_AGENT_SYSTEM);
 
-    const tools = CHAT_TOOLS.filter(
-      d => d.type === 'function' && ALLOWED_TOOLS.has(d.function.name),
-    );
-
-    const messages: OpenAI.ChatCompletionMessageParam[] = [
-      { role: 'system', content: SUB_AGENT_SYSTEM },
-      { role: 'user', content: t.task },
-    ];
-
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      if (t.controller.signal.aborted) {
-        t.status = 'cancelled';
-        break;
-      }
-
-      const res = await client.chat.completions.create(
-        { model, messages, tools, tool_choice: 'auto', max_tokens: 4096 },
-        { signal: t.controller.signal },
-      );
-
-      const msg = res.choices[0].message;
-      messages.push(msg);
-
-      if (!msg.tool_calls || msg.tool_calls.length === 0) {
-        t.result = msg.content ?? '（无总结）';
-        t.status = 'done';
-        break;
-      }
-
-      for (const call of msg.tool_calls) {
-        const name = call.function.name;
+    const result = await harness.loop.runTurn({
+      session,
+      input: t.task,
+      model: modelOverride || config.deepseek.model,
+      maxSteps: MAX_ROUNDS,
+      signal: t.controller.signal,
+      preserveSystem: true,
+      kind: 'sub-agent-tool-result',
+      source: 'sub-agent',
+      toolFilter: name => ALLOWED_TOOLS.has(name),
+      onBeforeTool: (name, _args, call) => {
         recordAction(t, name, call.function.arguments);
+      },
+    });
 
-        let output: string;
-        if (!ALLOWED_TOOLS.has(name)) {
-          const error = 'tool not allowed in sub-agent';
-          output = '后台任务不能使用该工具，请换其他方式或在总结中说明此限制。';
-          recordRejectedToolCall({
-            registry: CHAT_TOOL_REGISTRY,
-            sessionId: `sub-agent-${t.id}`,
-            toolCallId: call.id,
-            toolName: name,
-            input: call.function.arguments,
-            output,
-            error,
-          });
-        } else {
-          let parsedArgs: Record<string, unknown>;
-          try {
-            parsedArgs = JSON.parse(call.function.arguments || '{}');
-          } catch (err) {
-            const error = err instanceof Error ? err.message : String(err);
-            output = `工具参数解析失败：${error}`;
-            recordRejectedToolCall({
-              registry: CHAT_TOOL_REGISTRY,
-              sessionId: `sub-agent-${t.id}`,
-              toolCallId: call.id,
-              toolName: name,
-              input: call.function.arguments,
-              output,
-              error,
-            });
-            output = offloadToolResultForContext({
-              content: output,
-              toolName: name,
-              sessionId: `sub-agent-${t.id}`,
-              toolCallId: call.id,
-              kind: 'sub-agent-tool-result',
-            }).content;
-            messages.push({ role: 'tool', tool_call_id: call.id, content: output });
-            continue;
-          }
-
-          try {
-            output = await executeTool(name, parsedArgs, {
-              sessionId: `sub-agent-${t.id}`,
-              toolCallId: call.id,
-            });
-          } catch (err) {
-            output = `工具执行失败：${err instanceof Error ? err.message : err}`;
-          }
-        }
-        output = offloadToolResultForContext({
-          content: output,
-          toolName: name,
-          sessionId: `sub-agent-${t.id}`,
-          toolCallId: call.id,
-          kind: 'sub-agent-tool-result',
-        }).content;
-        messages.push({ role: 'tool', tool_call_id: call.id, content: output });
-      }
-    }
-
-    if (t.status === 'running') {
+    if (t.controller.signal.aborted || result.stopped === 'abort') {
+      t.status = 'cancelled';
+    } else if (result.stopped === 'max-steps') {
       t.status = 'failed';
       t.error = `超过最大执行轮数（${MAX_ROUNDS}），已停止`;
+    } else {
+      t.result = result.text;
+      t.status = 'done';
     }
   } catch (err) {
     if (t.controller.signal.aborted) {

@@ -1,7 +1,7 @@
 /**
  * 飞书招聘自动闭环 —— 把"面试结果"从人工回流升级成自动拉取
  *
- * 上一层（feedback.ts）靠人一句"张三过面了"回流 ground truth。这一层让 HireSeek
+ * 上一层（feedback.ts）靠人一句"张三过面了"回流 ground truth。这一层让 Seeya
  * 直接从外部系统把结果拉回来，真正闭环，还顺带补上"面试官维度"。两个来源：
  *
  *   ① 飞书招聘 ATS：client.hire.interview.list 拉面试 + 每位面试官的结论，
@@ -204,7 +204,7 @@ function finalize(base: SyncReport): SyncReport {
       lines.push('', `跳过 ${base.skipped.length} 条：`);
       base.skipped.slice(0, 8).forEach(s => lines.push(`· ${s}`));
     }
-    if (base.dryRun && base.resolved.length) lines.push('', '确认映射无误后，用 `hireseek hire-sync` 真正落库（会回流去校准"合适"的判断）。');
+    if (base.dryRun && base.resolved.length) lines.push('', '确认映射无误后，用 `seeya hire-sync` 真正落库（会回流去校准"合适"的判断）。');
   }
   base.text = lines.join('\n');
   return base;

@@ -312,9 +312,9 @@ ${formatBossPrefilterPlan(opts.activeJob)}
 
 export function buildBossSystemContext(): string {
   return `
-# HireSeek 产品中层协议：BOSS 平台
+# Seeya 产品中层协议：BOSS 平台
 
-这份协议是 HireSeek 产品内置的平台能力协议，优先级高于外部 skill 资产。
+这份协议是 Seeya 产品内置的平台能力协议，优先级高于外部 skill 资产。
 外部 BOSS skill 仍可作为历史经验、页面细节、异常案例和迁移素材参考；如果它与本协议冲突，以本协议为准。
 
 ${formatBossProtocolStages()}
