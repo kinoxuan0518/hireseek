@@ -1,6 +1,6 @@
 /**
  * 通用视觉 Runner：适配任何支持 vision + function calling 的 OpenAI 兼容 API。
- * 适用：MiniMax、Qwen-VL、GLM-4V、Doubao、Moonshot 等
+ * 适用：MiniMax、Qwen-VL、Kimi、GLM-5.3-Flash 等。Kimi/GLM 默认请走 DOM Runner。
  *
  * 原理：用 function calling 定义 "computer" 工具，替代 Claude/OpenAI 的原生 computer-use。
  * 模型通过函数调用输出动作，Runner 用 Playwright 执行，再截图回传。
@@ -8,6 +8,7 @@
 
 import fs from 'fs';
 import OpenAI from 'openai';
+import { cloneAssistantMessage, type CompatChatOptions } from '../llm/provider';
 import { emitLog, popIntervention } from '../events';
 import { Page } from 'playwright';
 import { takeScreenshot, executeAction } from '../browser-runner';
@@ -203,10 +204,16 @@ function parseContentToolCall(content: string): OpenAI.ChatCompletionMessageTool
 export class GenericVisionRunner implements LLMRunner {
   private client: OpenAI;
   private model: string;
+  private extras: Record<string, unknown>;
+  private preserveAssistantMessage: boolean;
+  private omitSampling: boolean;
 
-  constructor(baseURL: string, apiKey: string, model: string) {
+  constructor(baseURL: string | undefined, apiKey: string, model: string, options: CompatChatOptions = {}) {
     this.client = new OpenAI({ apiKey, baseURL });
     this.model  = model;
+    this.extras = options.extras ?? {};
+    this.preserveAssistantMessage = options.preserveAssistantMessage ?? false;
+    this.omitSampling = options.omitSampling ?? false;
   }
 
   async runSkill(
@@ -267,15 +274,25 @@ export class GenericVisionRunner implements LLMRunner {
       }
 
       repairToolMessageHistoryInPlace(messages);
-      const response = await this.client.chat.completions.create({
-        model:    this.model,
+      const payload: Record<string, unknown> = {
+        model: this.model,
         messages: pruneImages(messages, 2),
-        tools:    GENERIC_VISION_TOOLS,
+        tools: GENERIC_VISION_TOOLS,
         tool_choice: 'auto',
-        max_tokens:  2048,
-      });
+        max_tokens: 2048,
+        ...this.extras,
+      };
+      if (this.omitSampling) {
+        delete payload.temperature;
+        delete payload.top_p;
+      }
+      const response = await this.client.chat.completions.create(
+        payload as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming,
+      );
 
-      const msg = response.choices[0].message;
+      const msg = this.preserveAssistantMessage
+        ? cloneAssistantMessage(response.choices[0].message)
+        : response.choices[0].message;
 
       // 兼容 Qwen 等模型：将 content 中的非标准工具调用转为标准格式
       if ((!msg.tool_calls || msg.tool_calls.length === 0) && msg.content) {

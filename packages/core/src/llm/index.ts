@@ -52,14 +52,17 @@ export async function callLLM(
 ): Promise<LLMResponse> {
   const provider = resolveProvider(config);
   const messages = buildMessages(options);
+  const omitSampling = config.provider === 'kimi' || config.provider === 'glm';
 
-  const body = {
+  const body: Record<string, unknown> = {
     model: config.model,
     messages,
     max_tokens: options.maxTokens ?? 2048,
-    temperature: options.temperature ?? 0.3,
     ...(options.jsonMode ? { response_format: { type: 'json_object' } } : {}),
   };
+  if (!omitSampling) {
+    body.temperature = options.temperature ?? 0.3;
+  }
 
   const { url, headers } = provider;
 
@@ -99,6 +102,20 @@ function resolveProvider(config: LLMConfig): ProviderConfig {
           : 'https://api.deepseek.com/chat/completions',
         headers: (cfg) => ({
           Authorization: `Bearer ${cfg.apiKey ?? process.env.DEEPSEEK_API_KEY ?? ''}`,
+        }),
+      };
+    case 'kimi':
+      return {
+        url: `${(config.baseUrl ?? 'https://api.moonshot.cn/v1').replace(/\/$/, '')}/chat/completions`,
+        headers: (cfg) => ({
+          Authorization: `Bearer ${cfg.apiKey ?? process.env.MOONSHOT_API_KEY ?? process.env.KIMI_API_KEY ?? ''}`,
+        }),
+      };
+    case 'glm':
+      return {
+        url: `${(config.baseUrl ?? 'https://open.bigmodel.cn/api/paas/v4').replace(/\/$/, '')}/chat/completions`,
+        headers: (cfg) => ({
+          Authorization: `Bearer ${cfg.apiKey ?? process.env.ZHIPU_API_KEY ?? process.env.BIGMODEL_API_KEY ?? process.env.GLM_API_KEY ?? ''}`,
         }),
       };
     case 'claude':

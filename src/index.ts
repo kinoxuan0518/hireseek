@@ -9,6 +9,7 @@ import { db, candidateOps } from './db';
 import { createRuntimeContext } from './agent-core/runtime-context';
 import { createTask, updateTask, deleteTask, displayTaskBoard, displayTask, listAllTasks } from './tasks';
 import type { Channel } from './types';
+import { hasAnyApiKey } from './llm/provider';
 
 const VALID_STATUSES = ['contacted', 'replied', 'interviewed', 'offered', 'joined', 'rejected', 'dropped'];
 const STATUS_LABEL: Record<string, string> = {
@@ -81,9 +82,7 @@ async function checkSetup(): Promise<boolean> {
   const issues: string[] = [];
   const hints:  string[] = [];
 
-  // 检查 API key（DeepSeek 优先）
-  const hasKey = process.env.DEEPSEEK_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.CUSTOM_API_KEY;
-  if (!hasKey) {
+  if (!hasAnyApiKey()) {
     issues.push('未配置 API Key');
   }
 

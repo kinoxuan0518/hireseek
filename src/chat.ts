@@ -11,6 +11,13 @@ import OpenAI from 'openai';
 import chalk from 'chalk';
 import yaml from 'js-yaml';
 import { config } from './config';
+import {
+  cloneAssistantMessage,
+  hasAnyApiKey,
+  mergeChatParams,
+  openaiClient,
+  resolveEndpoint,
+} from './llm/provider';
 import { loadWorkspaceFile, jobToPrompt } from './skills/loader';
 import { buildChatMemoryContext, buildConversationMemory } from './memory';
 import { candidateOps, conversationOps, db } from './db';
@@ -357,7 +364,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'analyze_image',
-      description: '分析图片内容（简历截图、个人主页截图等）。需要模型支持 vision（Claude Sonnet/GPT-4V 支持）。',
+      description: '分析图片内容（简历截图、个人主页截图等）。会走当前配置的视觉模型（Kimi K3 / GLM-5.3-Flash / DeepSeek Vision-Exp 等）。',
       parameters: {
         type: 'object',
         required: ['image_path'],
@@ -1356,31 +1363,30 @@ async function executeToolImpl(name: string, args: any): Promise<string> {
 
       // 调用 vision API
       try {
-        const client = new OpenAI({
-          apiKey: config.deepseek.apiKey || config.custom.apiKey || config.anthropic.apiKey,
-          baseURL: config.deepseek.apiKey
-            ? config.deepseek.baseUrl
-            : config.custom.baseUrl || config.anthropic.baseUrl || undefined,
-        });
-
-        const response = await client.chat.completions.create({
-          model: config.llm.model,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: question },
-                { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
-              ],
-            },
-          ],
-          max_tokens: 1000,
-        });
+        const vision = resolveEndpoint('vision');
+        if (!vision.apiKey) {
+          return `当前没有可用的视觉模型 Key。可配置 GLM（ZHIPU_API_KEY）、Kimi（MOONSHOT_API_KEY），或 DeepSeek 的 ${vision.spec.visionModel ?? 'deepseek-v4-flash-vision-exp'}。`;
+        }
+        const client = openaiClient(vision);
+        const response = await client.chat.completions.create(
+          mergeChatParams(vision, {
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: question },
+                  { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+                ],
+              },
+            ],
+            max_tokens: 1000,
+          }) as any,
+        );
 
         return response.choices[0]?.message?.content || '无法分析图片';
       } catch (e: any) {
         if (e.message?.includes('vision') || e.message?.includes('image')) {
-          return '当前模型不支持图片分析（需要 Claude Sonnet 4 或 GPT-4V）';
+          return `当前模型不支持图片分析。请设置 VISION_PROVIDER=glm 或 kimi，或换 deepseek-v4-flash-vision-exp。原始错误：${e.message}`;
         }
         return `图片分析失败：${e.message}`;
       }
@@ -2342,22 +2348,24 @@ async function saveConversationMemory(
       return `${role}: ${text.slice(0, 300)}`;
     }).join('\n');
 
-    const res = await client.chat.completions.create({
-      model,
-      messages: [
-        ...messages,
-        {
-          role: 'user',
-          content: `请总结这次对话，下次对话时需要注入这份记忆。按以下格式输出：
+    const res = await client.chat.completions.create(
+      mergeChatParams(resolveEndpoint('chat'), {
+        model,
+        messages: [
+          ...messages,
+          {
+            role: 'user',
+            content: `请总结这次对话，下次对话时需要注入这份记忆。按以下格式输出：
 
 总结：[2-3句，说清楚聊了什么、做了什么决定]
 候选人：[提到的候选人姓名及关键结论，如"张三-决定下周面试，李四-已放弃"，没有则写"无"]
 待办：[未完成的事项，如"需要跟进王五"，没有则写"无"]
 策略变化：[对话中调整了哪些招聘策略，没有则写"无"]`,
-        },
-      ],
-      max_tokens: 400,
-    });
+          },
+        ],
+        max_tokens: 400,
+      }) as any,
+    );
 
     const text = res.choices[0]?.message?.content ?? '';
     const extract = (label: string) => {
@@ -2425,43 +2433,22 @@ export async function startChat(): Promise<void> {
     // 静默失败
   }
 
-  // 检查 API Key - 直接从环境变量读取，不依赖 config 缓存（DeepSeek 优先）
-  const apiKey = process.env.DEEPSEEK_API_KEY ||
-                 process.env.CUSTOM_API_KEY ||
-                 process.env.ANTHROPIC_API_KEY ||
-                 process.env.OPENAI_API_KEY ||
-                 config.deepseek.apiKey ||
-                 config.custom.apiKey ||
-                 config.anthropic.apiKey;
-
-  if (!apiKey) {
+  const chatEndpoint = resolveEndpoint('chat');
+  if (!hasAnyApiKey() || !chatEndpoint.apiKey) {
     console.log(chalk.red('\n❌ 错误：未配置 API Key\n'));
     console.log(chalk.yellow('请先配置 API Key：'));
     console.log(chalk.gray('  1. 方法一：运行 hireseek setup 进行配置'));
-    console.log(chalk.gray('  2. 方法二：设置环境变量'));
+    console.log(chalk.gray('  2. 方法二：设置环境变量，例如'));
+    console.log(chalk.gray('     export ZHIPU_API_KEY="your-key"   # GLM-5.3-Flash'));
+    console.log(chalk.gray('     export MOONSHOT_API_KEY="your-key"  # Kimi K3'));
     console.log(chalk.gray('     export DEEPSEEK_API_KEY="your-key"'));
     console.log(chalk.gray('  3. 方法三：编辑配置文件'));
     console.log(chalk.gray(`     ${path.join(config.workspace.dir, 'config.yaml')}\n`));
     process.exit(1);
   }
 
-  // Base URL 与 API Key 来源保持一致（DeepSeek 优先）
-  const usingDeepseek = Boolean(process.env.DEEPSEEK_API_KEY || config.deepseek.apiKey) &&
-                        !process.env.CUSTOM_API_KEY;
-  const baseURL = usingDeepseek
-    ? config.deepseek.baseUrl
-    : process.env.CUSTOM_BASE_URL ||
-      process.env.ANTHROPIC_BASE_URL ||
-      config.custom.baseUrl ||
-      config.anthropic.baseUrl ||
-      undefined;
-
-  let model = process.env.LLM_MODEL || config.llm.model;
-
-  const client = new OpenAI({
-    apiKey,
-    baseURL,
-  });
+  let model = chatEndpoint.model;
+  const client = openaiClient(chatEndpoint);
 
   const messages: OpenAI.ChatCompletionMessageParam[] = [
     { role: 'system', content: buildSystemPrompt() },
@@ -2886,7 +2873,13 @@ export async function startChat(): Promise<void> {
 
     try {
       const stream = client.beta.chat.completions.stream(
-        { model, messages, tools: CHAT_TOOLS, tool_choice: 'auto', max_tokens: 4096 },
+        mergeChatParams(chatEndpoint, {
+          model,
+          messages,
+          tools: CHAT_TOOLS,
+          tool_choice: 'auto',
+          max_tokens: 4096,
+        }) as any,
         { signal: generating.signal },
       );
 
@@ -2904,7 +2897,10 @@ export async function startChat(): Promise<void> {
       } else {
         process.stdout.write('\n');
       }
-      return completion.choices[0].message;
+      const message = completion.choices[0].message;
+      return chatEndpoint.compat.preserveAssistantMessage
+        ? cloneAssistantMessage(message)
+        : message;
     } finally {
       clearInterval(spinner);
       generating = null;
