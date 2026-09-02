@@ -231,8 +231,25 @@ hireseek alive --push     # 顺手推一条到你的飞书/系统通知
 
 ## 架构
 
+HireSeek 的 agent 运行时按 **DeepSeek Harness（DSH）** 路线装配：一切皆插件，没有特权内核。
+
+```
+profile（chat / headless / subagent）
+  └── Cordis 风格 Context
+        ├── ctx.sessions      追加写入的 Session Log（模型看见的都能从日志重建）
+        ├── ctx.systemPrompt  Prompt Section 装配
+        ├── ctx.tools         工具注册表 + pre/execute/post 管线
+        ├── ctx.llm           模型适配器缝合点（默认 DeepSeek OpenAI 兼容）
+        └── ctx.agentLoop     统一 turn/step 驱动
+```
+
+终端 chat、飞书 Bot、网页指挥台、后台 sub-agent **共用同一条 Agent Loop**。招聘能力以插件形式挂上这条缝，而不是写进一个巨型 Agent 类。详见 `docs/DSH-ARCHITECTURE.md`。
+
 ```
 hireseek/
+├── src/dsh/               # DSH 内核：Context / Session / Tools / Prompt / LLM / Loop
+├── src/plugins/           # HireSeek 插件：权限闸门、输出卸载、trace、持久化、DeepSeek 适配器、提示词
+├── src/runtime.ts         # profile 装配（chat / headless / subagent）
 ├── packages/
 │   ├── core/              # @hireseek/core — 招聘智能体引擎
 │   │   ├── evaluator/     # 候选人评估引擎
@@ -245,7 +262,7 @@ hireseek/
 │   ├── maimai-adapter/    # @hireseek/maimai-adapter — 脉脉适配器
 │   └── cli/               # @hireseek/cli — 命令行入口
 │
-├── src/                   # agent 运行时（chat / orchestrator / scheduler）
+├── src/                   # agent 宿主（chat TUI / orchestrator / scheduler）
 │   ├── runners/
 │   │   ├── dom-runner.ts  # ★ 纯文本 DOM 浏览器驱动（DeepSeek 默认）
 │   │   ├── claude.ts      # Claude 原生 computer-use

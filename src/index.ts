@@ -32,6 +32,7 @@ const USAGE = `
   hireseek hire-sync [--apply]  从飞书招聘/多维表格自动拉面试结果回流（默认 dry-run 预览）
   hireseek verify              双轴独立质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)（--push 推送）
   hireseek core                Agent Core 状态：工具注册 / trace / session / memory
+  hireseek dsh                 DSH 运行时：当前 profile、插件树、prompt sections
   hireseek failures            Harness 失败复盘：环境 / 工具 / 协议 / 登录态优先级
   hireseek readiness [渠道]    只读检查当前 Chrome 是否适合跑真实渠道验收（--open-missing 打开缺失入口；--strict 可作脚本门禁）
   hireseek validate [渠道]     真实渠道验收：先 readiness，再依次 dry-run / prepare / screen（--open-missing --wait 可等登录）
@@ -233,6 +234,14 @@ async function main(): Promise<void> {
     const { CHAT_TOOL_REGISTRY } = await import('./chat');
     const { collectCoreStatus, formatCoreStatus } = await import('./agent-core/core-status');
     console.log(formatCoreStatus(collectCoreStatus(CHAT_TOOL_REGISTRY)) + '\n');
+    db.close();
+    process.exit(0);
+
+  } else if (command === 'dsh' || command === 'harness') {
+    const { ensureChatRuntimeBound } = await import('./chat');
+    const { getHarness } = await import('./runtime');
+    ensureChatRuntimeBound();
+    console.log(getHarness().inspect() + '\n');
     db.close();
     process.exit(0);
 
