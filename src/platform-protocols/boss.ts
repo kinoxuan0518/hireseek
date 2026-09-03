@@ -64,6 +64,7 @@ const BOSS_DOM_RULES = [
 const BOSS_CANDIDATE_RULES = [
   '进入目标职位的推荐候选人页面后，优先处理主页面页签：推荐 -> 最新；精选只有用户明确要求时处理。',
   '候选人处理必须先看可见证据，再决定是否打招呼；不要在列表页无差别群发。',
+  '列表卡片只够用来淘汰明显不合适的人；要判断一个人值得推进，必须点进简历详情通读整份简历再决定。',
   '每次只点击一个打招呼/沟通按钮，打招呼类点击间隔遵守产品侧风控下限（≥5 秒），禁止批量循环点击。',
   '点击前提取候选人姓名、公司、职位、地点、学校、学历、技能标签和匹配证据；字段缺失写 null 并记录 parse_quality。',
   '点击后确认按钮状态变为继续沟通，并立即调用 record_contacted；不要把候选人攒到最终总结里才登记。',
@@ -110,9 +111,17 @@ const BOSS_PROTOCOL_STAGES: BossProtocolStage[] = [
   {
     id: 'candidate-screen',
     name: '候选人证据查看',
-    required: ['先看可见证据再决定是否触达', '无法页面筛选的事实进入脚本精筛'],
-    evidence: ['触达前存在候选人详情/卡片 snapshot', '候选人证据、风险标签、跳过原因进入结构化输出'],
-    onFailure: '不允许列表页无差别群发；信息不足时记录风险或跳过。',
+    required: [
+      '先看可见证据再决定是否触达',
+      '卡片只用于淘汰；判断值得推进前必须点进简历详情通读整份简历',
+      '无法页面筛选的事实进入脚本精筛',
+    ],
+    evidence: [
+      '建议触达的候选人存在详情页 snapshot 与整份简历摘要',
+      '候选人证据、风险标签、跳过原因进入结构化输出',
+      '结构化输出如实记录 reading_depth 与整份简历的合拍性判断',
+    ],
+    onFailure: '不允许列表页无差别群发；只看卡片就想建议触达会被代码层拒绝，信息不足时记录风险或跳过。',
   },
   {
     id: 'single-contact',
@@ -300,7 +309,8 @@ ${formatBossPrefilterPlan(opts.activeJob)}
 - 禁止用 browser.goto 直接跳深链或绕过站内流程；职位切换必须通过 BOSS 页面内可见入口完成。
 - 如果页面停在错误职位，例如产品经理职位，而目标岗位是工程岗位，应自行在站内切到目标岗位，再进入对应推荐候选人列表。
 - 不要把“当前职位不匹配”当成任务结束；只有找不到目标职位入口、登录/风控阻断、或用户账号权限不足时才停下来询问。
-- 触达前必须先看候选人详情或足够证据，不允许列表页无差别群发。
+- 触达前必须先点进候选人详情通读整份简历，不允许只凭列表卡片判断，更不允许列表页无差别群发。
+- 长简历用 browser(action="snapshot", full=true) 取完整正文，避免被截断后凭半份简历下判断。
 
 任务完成后，请严格按以下格式输出总结：
 触达人数: <数字>
@@ -409,7 +419,7 @@ function stageRecoveryLine(stageId: string): string {
     case 'dom-probe':
       return '先用 stage_id=dom-probe 做只读 snapshot/探测，以打招呼按钮为锚点确认候选人卡片结构和 parse_quality。';
     case 'candidate-screen':
-      return '先用 stage_id=candidate-screen 查看候选人卡片或详情，记录匹配证据、风险标签和跳过/建议触达判断。';
+      return '先用 stage_id=candidate-screen 查看候选人：卡片可以直接淘汰，建议触达前需点进详情并用 snapshot(full=true) 通读简历，再记录匹配证据、风险标签和判断。';
     case 'single-contact':
       return '进入 single-contact 前必须已有 prepare_contact 检查点，点击后立刻 record_contacted。';
     default:

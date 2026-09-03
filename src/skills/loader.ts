@@ -20,6 +20,8 @@ export interface JobConfig {
   daily_goal?: { contact: number; quality: number };
   urgency?: string;
   deadline?: string;
+  /** 深读分层：off / contact（默认）/ all，覆盖 SEEYA_DEEP_READ */
+  deep_read?: string;
 }
 
 export function loadActiveJob(): JobConfig | null {

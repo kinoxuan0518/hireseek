@@ -39,6 +39,21 @@ export ZHIPU_API_KEY="..."          # 或 MOONSHOT_API_KEY / DEEPSEEK_API_KEY
 
 只有 DOM 看不清，或你显式设置 `SEEYA_BROWSER_MODE=vision`，才改成截图点选。
 
+### 通读整份简历，而不是只看列表卡片
+
+列表卡片只够用来淘汰明显不合适的人，告诉不了你"这个人值得推进"。所以判断值得推进前必须点进详情通读整份简历——`snapshot(full=true)` 会放宽正文上限，长简历不再被截断。
+
+读完不止逐条对硬性要求，还要看**整份简历作为一个整体**说明了什么：每次跳槽是往更靠近岗位核心的方向走还是横向漂移、简历自述和实际经历对不对得上。这个判断（`coherence_verdict` / `coherence_note`）和简历事实摘要一起落库，之后会随真实面试结果回流去重校"合适"的定义。
+
+深读默认分层，可按职位单独开：
+
+```yaml
+# workspace/jobs/active.yaml
+deep_read: contact   # contact（默认）| all | off
+```
+
+`contact` 是默认：卡片可以直接淘汰，但要给出「建议触达」必须先通读简历——代码层强制，只看卡片就想推进会被拒绝。因为 execute 只能触达 screen 标了 contact 的人，这道门一关，**最终被真实触达的每一个人都必然是通读过简历的**。
+
 ### 3. Claude Skills 桥接层
 
 ```
@@ -289,6 +304,7 @@ hireseek/
 | `DRIVER_PROVIDER` / `DRIVER_MODEL` | 同 LLM_* | 寻源开车专用；不填则跟对话 |
 | `VISION_PROVIDER` / `VISION_MODEL` | 自动 | 读图；DeepSeek 会升到 `deepseek-v4-flash-vision-exp` |
 | `SEEYA_BROWSER_MODE` | `auto` | auto / dom / vision。Kimi、GLM 的 auto = DOM。也认 `HIRESEEK_BROWSER_MODE` |
+| `SEEYA_DEEP_READ` | `contact` | 深读分层：contact / all / off。职位配置里的 `deep_read` 优先 |
 | `SEEYA_REASONING_EFFORT` | 寻源 `low` | Kimi/GLM：low / high / max。也认 `HIRESEEK_REASONING_EFFORT` |
 | `DEEPSEEK_REASONER_MODEL` | `deepseek-v4-pro` | 评估/策略等深推理场景 |
 | `SEEYA_DB_PATH` | `~/.seeya/seeya.db` | 数据库路径（自动兼容 `~/.hireseek` / `~/.hireclaw`） |

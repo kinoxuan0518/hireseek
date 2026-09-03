@@ -154,13 +154,13 @@ async function ensurePage(): Promise<Page> {
 }
 
 /** 获取当前页面快照（含风控检测） */
-export async function snapshot(): Promise<string> {
+export async function snapshot(opts: { full?: boolean } = {}): Promise<string> {
   if (state.mode === 'applescript' && state.asTab) {
     const as = await import('./chrome-applescript');
     return applyRiskChecks(as.takeSnapshot(state.asTab));
   }
   const page = await ensurePage();
-  const snap = await takeDomSnapshot(page);
+  const snap = await takeDomSnapshot(page, opts);
   return applyRiskChecks(snap);
 }
 
@@ -248,7 +248,7 @@ export async function act(input: BrowserAction): Promise<string> {
     return `[动作执行失败] ${message}\n请根据下方快照调整策略（不要重复同一动作超过 2 次）。\n\n${applyRiskChecks(snap)}`;
   }
 
-  const snap = await takeDomSnapshot(page);
+  const snap = await takeDomSnapshot(page, { full: input.full });
   return applyRiskChecks(snap);
 }
 

@@ -1,6 +1,7 @@
 import type { BrowserAction, BrowserTarget } from '../browser-session';
 import type { SkillResult, TraceStep } from '../types';
 import type { ToolExecutionMode } from '../agent-core/tool-registry';
+import type { DeepReadMode } from '../deep-read';
 
 export interface BrowserActionPolicyDecision {
   allowed: boolean;
@@ -60,6 +61,8 @@ export interface RunSkillOptions {
   targetJobTitle?: string;
   /** 正式触达前的候选人白名单；为空数组表示禁止建立触达检查点。 */
   allowedContactNamesBeforeContact?: string[];
+  /** 深读分层：哪些筛选判断必须先通读整份简历。缺省 contact。 */
+  deepReadMode?: DeepReadMode;
 }
 
 /**

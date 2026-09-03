@@ -19,9 +19,15 @@ import { parseSkillSummary, parseContactedCandidates } from './interface';
 import type { LLMRunner, RunSkillOptions } from './interface';
 import type { CoherenceVerdict, ReadingDepth, SkillResult } from '../types';
 import { repairToolMessageHistoryInPlace } from '../message-integrity';
-import type { BrowserAction, BrowserLiveState, BrowserTarget, RiskGuard } from '../browser-session';
+import type { BrowserAction, BrowserLiveState, BrowserTarget, RiskGuard, SnapshotOptions } from '../browser-session';
 import { isDomBrowserSession } from '../browser-session';
 import { recordRejectedToolCall, recordToolCall } from '../agent-core/trace';
+import {
+  DEFAULT_DEEP_READ_MODE,
+  deepReadRequiredFor,
+  describeDeepReadMode,
+  type DeepReadMode,
+} from '../deep-read';
 import { offloadToolOutput } from '../agent-core/tool-output-store';
 import { upsertAgentRunState, type AgentRunStatus } from '../agent-core/run-state-store';
 import {
@@ -39,6 +45,13 @@ export type { BrowserAction, RiskGuard } from '../browser-session';
 
 const MAX_TURNS = 150;
 const MAX_BODY_TEXT = 6000;
+/**
+ * 深读一份简历时的正文上限。
+ *
+ * 常规快照按 6000 字截断是为了省 token——但那个数字正好卡在"读不完一份完整简历"上。
+ * 模型显式要 full=true 时才放宽，所以列表页仍然便宜。
+ */
+const DEEP_READ_BODY_TEXT = 24000;
 const MAX_ELEMENTS = 120;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 type SkillExecutionMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
@@ -99,6 +112,12 @@ const BROWSER_TOOL: OpenAI.ChatCompletionTool = {
         amount: {
           type: 'number',
           description: 'scroll 时的像素距离（默认 600），或 wait 时的毫秒数（默认 1500）',
+        },
+        full: {
+          type: 'boolean',
+          description:
+            '通读整份简历时置 true：正文按更高上限返回，长简历不会被截断。' +
+            '只在候选人详情页用；列表页用 full 会白白浪费上下文。',
         },
         stage_id: {
           type: 'string',
@@ -357,6 +376,27 @@ const SCREEN_GUIDE = `
 - 结束时输出：查看了哪些候选人、谁值得正式触达、谁应跳过、证据和风险点。
 `.trim();
 
+const DEEP_READ_GUIDE = `
+## 通读简历（代码硬约束）
+
+判断一个人合不合适，看列表卡片上那几行摘要是不够的——卡片只能告诉你"明显不合适"，
+告诉不了你"值得推进"。
+
+- 点进候选人详情后，用 browser(action="snapshot", full=true) 取完整正文，长简历不会被截断。
+- 读完先在 record_screened_candidate 里落下 resume_digest，再继续翻下一个人：
+  快照会随对话滚动被丢弃，只有结构化记录留得住。
+- 除了逐条对硬性要求，还要看**整份简历作为一个整体**说明了什么：
+  每次跳槽是在往更靠近岗位核心的方向走，还是横向漂移；简历里的自述和实际经历对不对得上；
+  这个人和这个岗位是不是同一种人。把结论写进 coherence_verdict / coherence_note。
+- 别把"读得深"当成"该推进"。通读之后判断 skip 同样有价值，而且比卡片上拍脑袋的 skip 可信得多。
+`.trim();
+
+function screenGuideFor(mode: DeepReadMode): string {
+  return [SCREEN_GUIDE, `- 本轮深读要求：${describeDeepReadMode(mode)}`, mode === 'off' ? '' : DEEP_READ_GUIDE]
+    .filter(Boolean)
+    .join('\n');
+}
+
 const DRY_RUN_ALLOWED_BROWSER_ACTIONS = new Set<BrowserAction['action']>(['snapshot', 'wait', 'scroll']);
 const SCREEN_BLOCKED_BROWSER_ACTIONS = new Set<BrowserAction['action']>(['type', 'press', 'goto']);
 
@@ -482,7 +522,7 @@ export function successfulStageIds(trace: SkillResult['trace'] = []): string[] {
  * 提取页面文本快照：标记可交互元素 + 收集正文。
  * 在浏览器上下文中执行，给元素写入 data-hs-ref 属性供后续定位。
  */
-export async function takeDomSnapshot(page: Page): Promise<string> {
+export async function takeDomSnapshot(page: Page, opts: SnapshotOptions = {}): Promise<string> {
   // tsx/esbuild 的 keepNames 会向 evaluate 回调注入 __name 辅助调用，浏览器端需兜底定义
   await page.evaluate('window.__name = window.__name || ((fn) => fn)');
   const data = await page.evaluate(
@@ -585,7 +625,7 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
         scrollMax: Math.round(Math.max(0, document.documentElement.scrollHeight - window.innerHeight)),
       };
     },
-    { maxElements: MAX_ELEMENTS, maxBodyText: MAX_BODY_TEXT },
+    { maxElements: MAX_ELEMENTS, maxBodyText: opts.full ? DEEP_READ_BODY_TEXT : MAX_BODY_TEXT },
   );
 
   return [
@@ -719,11 +759,12 @@ export class DomRunner implements LLMRunner {
     options: RunSkillOptions = {},
   ): Promise<SkillResult> {
     const executionMode = options.executionMode ?? 'execute';
+    const deepReadMode = options.deepReadMode ?? DEFAULT_DEEP_READ_MODE;
     const system = [
       DOM_GUIDE,
       executionMode === 'dry_run' ? DRY_RUN_GUIDE : '',
       executionMode === 'prepare' ? PREPARE_GUIDE : '',
-      executionMode === 'screen' ? SCREEN_GUIDE : '',
+      executionMode === 'screen' ? screenGuideFor(deepReadMode) : '',
       systemPrompt,
     ]
       .filter(Boolean)
@@ -1088,6 +1129,18 @@ export class DomRunner implements LLMRunner {
             error = 'record_screened_candidate 的 recommendation 只能是 contact / maybe / skip。';
           }
 
+          const reading = parseScreenReadingDepth(parsed);
+          if (
+            ok
+            && deepReadRequiredFor(deepReadMode, recommendation as 'contact' | 'maybe' | 'skip')
+            && reading.readingDepth !== 'detail'
+          ) {
+            ok = false;
+            error = String(parsed.reading_depth ?? '').trim().toLowerCase() === 'detail'
+              ? `${String(parsed.name ?? '该候选人')}：声明读了简历详情却没给 resume_digest。请补上整份简历的事实摘要后重新记录。`
+              : `${String(parsed.name ?? '该候选人')}：本轮要求先通读简历再给出 ${recommendation}。请点进候选人详情页、用 browser(action="snapshot", full=true) 读完整份简历，再带上 reading_depth="detail" 与 resume_digest 重新调用。卡片信息不足以下这个判断。`;
+          }
+
           if (ok) {
             const riskFlags = Array.isArray(parsed.risk_flags) ? parsed.risk_flags.map(String).filter(Boolean) : undefined;
             const fitTags = Array.isArray(parsed.fit_tags) ? parsed.fit_tags.map(String).filter(Boolean) : undefined;
@@ -1103,7 +1156,7 @@ export class DomRunner implements LLMRunner {
               score: Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : undefined,
               recommendation: recommendation as 'contact' | 'maybe' | 'skip',
               profileUrl: parsed.profile_url ? String(parsed.profile_url) : undefined,
-              ...parseScreenReadingDepth(parsed),
+              ...reading,
             });
           }
 
@@ -1621,7 +1674,7 @@ export class DomRunner implements LLMRunner {
             snapshot = await page.act(input, guard);
           } else {
             await executeDomAction(page, input, guard);
-            snapshot = await takeDomSnapshot(page);
+            snapshot = await takeDomSnapshot(page, { full: input.full });
           }
         } catch (err: unknown) {
           stepOk = false;
