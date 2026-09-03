@@ -17,8 +17,9 @@ const LIST_SNAPSHOT = `URL: https://www.zhipin.com/web/geek/recommend
 const DETAIL_SNAPSHOT = `URL: https://www.zhipin.com/web/geek/detail
 标题: 候选人详情
 
-## 可交互元素（共 1 个）
+## 可交互元素（共 2 个）
 [ref=9] <button> 打招呼
+[ref=10] <div> 下一位 class="next-arrow"
 
 ## 页面正文
 王小明，本科物流工程。三段经历都在做履约调度，最近一段主导了全量切换。`;
@@ -59,10 +60,12 @@ const SCRIPT: Array<{ content: string | null; tool_calls?: unknown[] }> = [
       evidence: '卡片显示 5 年供应链算法经验。',
     })],
   },
+  // 点进详情：先常规 snapshot（顶部足以淘汰明显不合适的），不一上来就拉完整简历
   {
     content: null,
     tool_calls: [toolCall('c2', 'browser', { action: 'click', ref: 1, stage_id: 'candidate-screen' })],
   },
+  // 值得继续看，才升级到完整正文
   {
     content: null,
     tool_calls: [toolCall('c3', 'browser', { action: 'snapshot', full: true, stage_id: 'candidate-screen' })],
@@ -137,7 +140,22 @@ describe('深读门禁：只看卡片不能建议触达', () => {
     expect(result.screenedList![0].coherenceVerdict).toBe('aligned');
     expect(result.screenedList![0].resumeDigest).toContain('履约调度');
 
-    // 模型确实要了完整正文
+    // 分两步读：进详情那次是常规快照，确认值得看之后才升级到完整正文
     expect(snapshotCalls.some(c => c.full === true)).toBe(true);
+    expect(snapshotCalls.filter(c => c.full === true).length).toBeLessThan(snapshotCalls.length);
   }, 30_000);
+});
+
+describe('深读流程提示词', () => {
+  it('告诉模型用右箭头连续翻，而不是每看一个人就退回列表', async () => {
+    const { DOM_RUNNER_TOOL_REGISTRY } = await import('../src/runners/dom-runner');
+    const guide = DOM_RUNNER_TOOL_REGISTRY.get('browser')?.schema.function.description ?? '';
+    expect(guide).toBeTruthy();
+
+    const source = await import('fs').then(fs =>
+      fs.readFileSync(new URL('../src/runners/dom-runner.ts', import.meta.url), 'utf8'));
+    expect(source).toContain('优先用详情页自带的下一位入口');
+    expect(source).toContain('退回列表会让所有 ref 失效');
+    expect(source).toContain('先常规 snapshot');
+  });
 });

@@ -365,7 +365,8 @@ const SCREEN_GUIDE = `
 - 禁止 type / press / goto，避免写入聊天框、发送消息或跳过站内流程。
 - 禁止点击打招呼/立即沟通/发送消息等沟通控件；代码层会拒绝。
 - 禁止调用 prepare_contact 建立真实触达检查点。
-- 从候选人详情回列表只能在 candidate-screen 阶段用 browser back，或使用页面内可见返回/列表入口；不要用 press Escape。
+- 候选人之间优先用详情页的下一位入口（右箭头/下一个）连续翻，不要每看一个人就退回列表。
+- 确实需要回列表时（翻到底、换页签、换职位），只能在 candidate-screen 阶段用 browser back 或页面内可见返回入口；不要用 press Escape。
 - 职位定位/筛选阶段禁止用 back，避免回到旧职位或旧筛选状态。
 - 返回列表或切换候选人列表页签前必须重新 snapshot，并确认目标 ref 的 scope/rect/context 是列表导航或页签，不是候选人卡片。
 - 每查看并判断一个候选人后必须调用 record_screened_candidate，记录 contact/maybe/skip、证据和风险。
@@ -377,18 +378,29 @@ const SCREEN_GUIDE = `
 `.trim();
 
 const DEEP_READ_GUIDE = `
-## 通读简历（代码硬约束）
+## 简历阅读（代码硬约束）
 
 判断一个人合不合适，看列表卡片上那几行摘要是不够的——卡片只能告诉你"明显不合适"，
-告诉不了你"值得推进"。
+告诉不了你"值得推进"。所以判断发生在详情页，不在列表页。
 
-- 点进候选人详情后，用 browser(action="snapshot", full=true) 取完整正文，长简历不会被截断。
-- 读完先在 record_screened_candidate 里落下 resume_digest，再继续翻下一个人：
-  快照会随对话滚动被丢弃，只有结构化记录留得住。
-- 除了逐条对硬性要求，还要看**整份简历作为一个整体**说明了什么：
-  每次跳槽是在往更靠近岗位核心的方向走，还是横向漂移；简历里的自述和实际经历对不对得上；
-  这个人和这个岗位是不是同一种人。把结论写进 coherence_verdict / coherence_note。
-- 别把"读得深"当成"该推进"。通读之后判断 skip 同样有价值，而且比卡片上拍脑袋的 skip 可信得多。
+**在候选人之间移动，优先用详情页自带的下一位入口（右箭头 / 下一个 / next），不要退回列表再点下一个人。**
+退回列表会让所有 ref 失效、还容易丢失位置和重复看同一个人；只有翻到底、需要换页签或换职位时才回列表。
+
+每个候选人分两步读，别一上来就拉完整简历：
+
+1. **先常规 snapshot**：详情页顶部已经包含基本信息、求职期望和最近一段经历，
+   足够淘汰明显不合适的人。到这里就能判 skip 的，记完直接翻下一位。
+2. **值得继续看的人再 browser(action="snapshot", full=true)**：取完整正文，长简历不会被截断。
+   这一步贵，只花在有希望的人身上。
+
+读完必须先调 record_screened_candidate 落下 resume_digest 再翻页：
+快照会随对话滚动被丢弃，只有结构化记录留得住。
+
+除了逐条对硬性要求，还要看**整份简历作为一个整体**说明了什么：
+每次跳槽是在往更靠近岗位核心的方向走，还是横向漂移；简历里的自述和实际经历对不对得上；
+这个人和这个岗位是不是同一种人。把结论写进 coherence_verdict / coherence_note。
+
+别把"读得深"当成"该推进"。通读之后判断 skip 同样有价值，而且比卡片上拍脑袋的 skip 可信得多。
 `.trim();
 
 function screenGuideFor(mode: DeepReadMode): string {
