@@ -17,7 +17,7 @@ import { cloneAssistantMessage, type CompatChatOptions } from '../llm/provider';
 import { emitLog, popIntervention } from '../events';
 import { parseSkillSummary, parseContactedCandidates } from './interface';
 import type { LLMRunner, RunSkillOptions } from './interface';
-import type { SkillResult } from '../types';
+import type { CoherenceVerdict, ReadingDepth, SkillResult } from '../types';
 import { repairToolMessageHistoryInPlace } from '../message-integrity';
 import type { BrowserAction, BrowserLiveState, BrowserTarget, RiskGuard } from '../browser-session';
 import { isDomBrowserSession } from '../browser-session';
@@ -182,10 +182,60 @@ const RECORD_SCREENED_CANDIDATE_TOOL: OpenAI.ChatCompletionTool = {
         fit_tags: { type: 'array', items: { type: 'string' } },
         fit_score: { type: 'number', description: '匹配分 0-100' },
         profile_url: { type: 'string' },
+        reading_depth: {
+          type: 'string',
+          enum: ['card', 'detail'],
+          description:
+            '这次判断读到了多深：card=只看了列表卡片摘要；detail=点进简历详情通读过。' +
+            '没真的点进去看就必须填 card，不要为了显得认真而填 detail。',
+        },
+        resume_digest: {
+          type: 'string',
+          description:
+            'reading_depth=detail 时填：整份简历的事实摘要——经历主线、每段真正做的事、时间线。' +
+            '只写简历里读到的，不要补充推测。',
+        },
+        coherence_verdict: {
+          type: 'string',
+          enum: ['aligned', 'mixed', 'misaligned'],
+          description:
+            '整份简历的合拍性（不是逐条打勾）：aligned=选择逻辑自洽且和岗位是同一种人；' +
+            'mixed=部分对得上但有说不通的地方；misaligned=整体不合拍。',
+        },
+        coherence_note: {
+          type: 'string',
+          description: '合拍或不合拍的理由，必须落到简历里的具体段落或某次选择，不要写空泛评价。',
+        },
       },
     },
   },
 };
+
+const COHERENCE_VERDICTS: CoherenceVerdict[] = ['aligned', 'mixed', 'misaligned'];
+
+/**
+ * 深读只认「真的带回了简历事实」的那种。
+ *
+ * 光声明 reading_depth=detail 但拿不出 resume_digest，一律降级按 card 记——
+ * 否则这个字段会在学习闭环里变成噪音：分不清哪条判断真的读过整份简历。
+ */
+export function parseScreenReadingDepth(parsed: Record<string, unknown>): {
+  readingDepth: ReadingDepth;
+  resumeDigest?: string;
+  coherenceVerdict?: CoherenceVerdict;
+  coherenceNote?: string;
+} {
+  const digest = String(parsed.resume_digest ?? '').trim();
+  const declared = String(parsed.reading_depth ?? '').trim().toLowerCase();
+  const verdictRaw = String(parsed.coherence_verdict ?? '').trim().toLowerCase();
+  const note = String(parsed.coherence_note ?? '').trim();
+  return {
+    readingDepth: declared === 'detail' && digest.length > 0 ? 'detail' : 'card',
+    resumeDigest: digest || undefined,
+    coherenceVerdict: COHERENCE_VERDICTS.find(v => v === verdictRaw),
+    coherenceNote: note || undefined,
+  };
+}
 
 const PREPARE_CONTACT_TOOL: OpenAI.ChatCompletionTool = {
   type: 'function',
@@ -300,6 +350,9 @@ const SCREEN_GUIDE = `
 - 职位定位/筛选阶段禁止用 back，避免回到旧职位或旧筛选状态。
 - 返回列表或切换候选人列表页签前必须重新 snapshot，并确认目标 ref 的 scope/rect/context 是列表导航或页签，不是候选人卡片。
 - 每查看并判断一个候选人后必须调用 record_screened_candidate，记录 contact/maybe/skip、证据和风险。
+- record_screened_candidate 必须如实填 reading_depth：只看了列表卡片填 card，点进简历详情通读过才填 detail。
+- 填 detail 时必须同时给出 resume_digest（整份简历的事实摘要），只声明读过但拿不出摘要会被降级按 card 记。
+- 读过整份简历时再给 coherence_verdict / coherence_note：判断这个人的选择逻辑自不自洽、和岗位是不是同一种人，理由要落到具体段落。
 - 不要用 record_contacted 做 screen 记录；record_contacted 只属于正式触达。
 - 结束时输出：查看了哪些候选人、谁值得正式触达、谁应跳过、证据和风险点。
 `.trim();
@@ -1050,6 +1103,7 @@ export class DomRunner implements LLMRunner {
               score: Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : undefined,
               recommendation: recommendation as 'contact' | 'maybe' | 'skip',
               profileUrl: parsed.profile_url ? String(parsed.profile_url) : undefined,
+              ...parseScreenReadingDepth(parsed),
             });
           }
 

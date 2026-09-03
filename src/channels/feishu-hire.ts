@@ -23,6 +23,8 @@ export interface SyncOutcome {
   name: string;
   result: 'passed' | 'failed';
   interviewer?: string;
+  /** 面试官写的评语原文——"为什么判他过/挂"，重校时比过/挂这个二元位有用得多 */
+  feedback?: string;
   raw: string;            // 原始结论值/列值，dry-run 时给你核对映射
   source: 'hire' | 'bitable';
   written?: OutcomeResult;
@@ -48,6 +50,57 @@ function parseHireConclusion(raw: unknown): 'passed' | 'failed' | null {
   if (passSet.includes(s)) return 'passed';
   if (failSet.includes(s)) return 'failed';
   return null; // 待定/未知 → 不写
+}
+
+/**
+ * 面试官评语可能藏在哪：飞书招聘不同租户/版本的面试记录结构差异很大，
+ * 评语有时直接挂在 record 上，有时埋在评分表单的逐题作答里。
+ */
+const FEEDBACK_KEYS = new Set([
+  'content', 'comment', 'commentary', 'evaluation', 'evaluation_detail', 'feedback',
+  'conclusion_detail', 'remark', 'remarks', 'note', 'notes', 'description',
+  'answer', 'answer_content', 'text', 'summary', 'advantage', 'disadvantage',
+]);
+
+const MAX_FEEDBACK_CHARS = 4000;
+
+/**
+ * 深挖一条面试记录里的评语文本。
+ *
+ * 刻意做成"按 key 名收集字符串"的通用遍历，而不是绑死某一版 schema——
+ * 本机无法预演真实租户的返回结构，宁可多收一点也别静默丢掉最值钱的信号。
+ */
+export function extractInterviewFeedback(record: unknown, maxChars = MAX_FEEDBACK_CHARS): string {
+  const found: string[] = [];
+  const seen = new Set<unknown>();
+
+  const walk = (node: unknown, depth: number): void => {
+    if (node == null || depth > 6) return;
+    if (typeof node === 'object') {
+      if (seen.has(node)) return;
+      seen.add(node);
+      if (Array.isArray(node)) {
+        for (const item of node) walk(item, depth + 1);
+        return;
+      }
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        if (FEEDBACK_KEYS.has(key.toLowerCase())) {
+          if (typeof value === 'string') {
+            const text = value.trim();
+            // 纯数字/枚举值是结论码，不是评语
+            if (text && !/^\d+$/.test(text) && !found.includes(text)) found.push(text);
+          } else {
+            walk(value, depth + 1);
+          }
+        } else {
+          walk(value, depth + 1);
+        }
+      }
+    }
+  };
+
+  walk(record, 0);
+  return found.join('\n').slice(0, maxChars).trim();
 }
 
 function parseBitableResult(raw: unknown): 'passed' | 'failed' | null {
@@ -119,6 +172,22 @@ export async function syncFromHire(opts: { dryRun?: boolean; sinceDays?: number 
     } catch { return ''; }
   };
 
+  // 面试列表里往往只带结论码，评语要按 record id 再取一次详情
+  const detailCache = new Map<string, unknown>();
+  const recordDetail = async (recordId?: string): Promise<unknown> => {
+    if (!recordId) return null;
+    if (detailCache.has(recordId)) return detailCache.get(recordId);
+    try {
+      const r: any = await client.hire.interviewRecord.get({ path: { interview_record_id: recordId } });
+      const detail = r?.data?.interview_record ?? r?.data ?? null;
+      detailCache.set(recordId, detail);
+      return detail;
+    } catch {
+      detailCache.set(recordId, null);
+      return null;
+    }
+  };
+
   for (const iv of interviews) {
     const beginMs = Number(iv?.begin_time ?? iv?.start_time ?? 0);
     if (beginMs && beginMs < sinceMs) continue;
@@ -134,7 +203,21 @@ export async function syncFromHire(opts: { dryRun?: boolean; sinceDays?: number 
       const result = parseHireConclusion(raw);
       const interviewer = rec?.interviewer?.name ?? rec?.interviewer_name ?? rec?.user_name ?? undefined;
       if (!result) { base.skipped.push(`${tName}：结论"${raw ?? '空'}"非通过/不通过（待定或未知）`); continue; }
-      base.resolved.push({ name: tName, result, interviewer, raw: String(raw), source: 'hire' });
+
+      let feedback = extractInterviewFeedback(rec);
+      if (!feedback) {
+        const detail = await recordDetail(rec?.id ?? rec?.interview_record_id);
+        if (detail) feedback = extractInterviewFeedback(detail);
+      }
+
+      base.resolved.push({
+        name: tName,
+        result,
+        interviewer,
+        feedback: feedback || undefined,
+        raw: String(raw),
+        source: 'hire',
+      });
     }
   }
 
@@ -186,8 +269,14 @@ export async function syncFromBitable(opts: { dryRun?: boolean } = {}): Promise<
 function finalize(base: SyncReport): SyncReport {
   if (!base.dryRun) {
     for (const o of base.resolved) {
-      const note = [o.source === 'hire' ? '飞书招聘' : '飞书表格', o.interviewer ? `面试官${o.interviewer}` : ''].filter(Boolean).join('·');
-      o.written = recordInterviewOutcome({ name: o.name, result: o.result, note });
+      const note = o.source === 'hire' ? '飞书招聘' : '飞书表格';
+      o.written = recordInterviewOutcome({
+        name: o.name,
+        result: o.result,
+        note,
+        interviewer: o.interviewer,
+        feedback: o.feedback,
+      });
     }
   }
 
@@ -195,11 +284,16 @@ function finalize(base: SyncReport): SyncReport {
   const lines = [head, ''];
   if (base.error) lines.push(`⚠️ ${base.text || base.error}`);
   else {
-    lines.push(`扫描带结论记录 ${base.scanned} 条，可映射 ${base.resolved.length} 条：`);
+    const withFeedback = base.resolved.filter(o => o.feedback).length;
+    lines.push(`扫描带结论记录 ${base.scanned} 条，可映射 ${base.resolved.length} 条（其中 ${withFeedback} 条带面试官评语）：`);
     for (const o of base.resolved.slice(0, 20)) {
       lines.push(`· ${o.name} → ${o.result === 'passed' ? '过面✅' : '挂面❌'}${o.interviewer ? `（面试官 ${o.interviewer}）` : ''}　[原始:${o.raw}]`);
+      if (o.feedback) lines.push(`    评语：${o.feedback.replace(/\s+/g, ' ').slice(0, 120)}${o.feedback.length > 120 ? '…' : ''}`);
     }
     if (base.resolved.length > 20) lines.push(`…还有 ${base.resolved.length - 20} 条`);
+    if (base.source === 'hire' && base.resolved.length > 0 && withFeedback === 0) {
+      lines.push('', '⚠️ 一条评语都没取到：可能是没开 hire:interview:readonly 的评价读权限，或本租户把评语放在别的字段。评语是重校最有用的信号，值得排查。');
+    }
     if (base.skipped.length) {
       lines.push('', `跳过 ${base.skipped.length} 条：`);
       base.skipped.slice(0, 8).forEach(s => lines.push(`· ${s}`));

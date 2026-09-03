@@ -86,6 +86,15 @@ export interface ContactedCandidate {
 
 export type ScreenRecommendation = 'contact' | 'maybe' | 'skip';
 
+/** 判断依据读到了多深：列表卡片摘要，还是点进去看了整份简历 */
+export type ReadingDepth = 'card' | 'detail';
+
+/**
+ * 整份简历的合拍性——不是逐条打勾，而是把简历当一个整体看：
+ * 这个人的选择逻辑自不自洽，和这个岗位是不是同一种人。
+ */
+export type CoherenceVerdict = 'aligned' | 'mixed' | 'misaligned';
+
 export interface ScreenedCandidate {
   name: string;
   company?: string;
@@ -98,6 +107,13 @@ export interface ScreenedCandidate {
   recommendation: ScreenRecommendation;
   profileUrl?: string;
   sourceChannel?: string;
+  /** 缺省按 card 记：没声明读到详情，就不能当作深读过 */
+  readingDepth?: ReadingDepth;
+  /** 深读后对整份简历的事实摘要：经历主线、每段真正做的事、时间线 */
+  resumeDigest?: string;
+  coherenceVerdict?: CoherenceVerdict;
+  /** 合拍/不合拍的理由，必须落到简历里的具体段落 */
+  coherenceNote?: string;
 }
 
 export interface SkillResult {

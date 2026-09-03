@@ -39,6 +39,8 @@ db.exec(`
     job_id      TEXT NOT NULL,
     result      TEXT NOT NULL,           -- passed | failed
     note        TEXT,
+    interviewer TEXT,
+    feedback    TEXT,                    -- 面试官写的评语原文（最值钱的信号）
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     PRIMARY KEY (fingerprint, job_id)
   );
@@ -75,6 +77,14 @@ migrateToCompositeKey('interview_outcomes', 'fingerprint, name, job_id, result, 
   );
   CREATE INDEX IF NOT EXISTS idx_outcomes_fp ON interview_outcomes(fingerprint);`);
 
+// ── 迁移：早期 interview_outcomes 只有 note 字符串，没有面试官/评语列 ──────
+// 「面试官为什么判他过/挂」是学习闭环里最值钱的信号，必须结构化存，不能塞进 note。
+try {
+  const cols = db.prepare(`PRAGMA table_info(interview_outcomes)`).all() as Array<{ name: string }>;
+  if (!cols.some(c => c.name === 'interviewer')) db.exec(`ALTER TABLE interview_outcomes ADD COLUMN interviewer TEXT`);
+  if (!cols.some(c => c.name === 'feedback')) db.exec(`ALTER TABLE interview_outcomes ADD COLUMN feedback TEXT`);
+} catch { /* 迁移失败不阻断启动 */ }
+
 const FIT_THRESHOLD = 60; // 与验证器一致：≥ 视为"判合适"
 
 // ── 验证器调用：登记一条预测（按 fingerprint 去重，留最新）──────────────
@@ -101,9 +111,17 @@ export interface OutcomeResult {
 
 /** 按姓名定位候选人并登记面试结果。找不到也照样记下（按名字），信号不丢。 */
 export function recordInterviewOutcome(opts: {
-  name: string; result: 'passed' | 'failed'; note?: string; jobId?: string;
+  name: string;
+  result: 'passed' | 'failed';
+  note?: string;
+  jobId?: string;
+  interviewer?: string;
+  /** 面试官写的评语原文；重校时它比"过/挂"这个二元位携带的信息多得多 */
+  feedback?: string;
 }): OutcomeResult {
   const { name, result, note } = opts;
+  const interviewer = opts.interviewer?.trim() || null;
+  const feedback = opts.feedback?.trim() || null;
 
   // 定位同名候选人；带 jobId 过滤优先，避免跨岗位张冠李戴
   const matches = (opts.jobId
@@ -122,16 +140,21 @@ export function recordInterviewOutcome(opts: {
   // 有 fingerprint 时 UPSERT 去重（更正结果覆盖最新）；name-only 则纯 INSERT
   if (fingerprint) {
     db.prepare(`
-      INSERT INTO interview_outcomes (fingerprint, name, job_id, result, note)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO interview_outcomes (fingerprint, name, job_id, result, note, interviewer, feedback)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(fingerprint, job_id) DO UPDATE SET
-        result = excluded.result, note = excluded.note, created_at = datetime('now','localtime')
-    `).run(fingerprint, name, jobId, result, note ?? null);
+        result = excluded.result, note = excluded.note,
+        interviewer = COALESCE(excluded.interviewer, interview_outcomes.interviewer),
+        feedback    = COALESCE(excluded.feedback, interview_outcomes.feedback),
+        created_at = datetime('now','localtime')
+    `).run(fingerprint, name, jobId, result, note ?? null, interviewer, feedback);
     const status = result === 'passed' ? 'interviewed' : 'rejected';
     db.prepare(`UPDATE candidates SET status = ? WHERE fingerprint = ?`).run(status, fingerprint);
   } else {
-    db.prepare(`INSERT INTO interview_outcomes (fingerprint, name, job_id, result, note) VALUES (?, ?, ?, ?, ?)`)
-      .run(null, name, jobId, result, note ?? null);
+    db.prepare(`
+      INSERT INTO interview_outcomes (fingerprint, name, job_id, result, note, interviewer, feedback)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(null, name, jobId, result, note ?? null, interviewer, feedback);
   }
 
   const tag = result === 'passed' ? '✅ 过面' : '❌ 挂面';
