@@ -146,16 +146,35 @@ describe('深读门禁：只看卡片不能建议触达', () => {
   }, 30_000);
 });
 
-describe('深读流程提示词', () => {
-  it('告诉模型用右箭头连续翻，而不是每看一个人就退回列表', async () => {
-    const { DOM_RUNNER_TOOL_REGISTRY } = await import('../src/runners/dom-runner');
-    const guide = DOM_RUNNER_TOOL_REGISTRY.get('browser')?.schema.function.description ?? '';
-    expect(guide).toBeTruthy();
+describe('screen 模式实际发给模型的指引', () => {
+  it('讲清详情是弹层、用两侧箭头翻、back 会退出列表', async () => {
+    const { screenGuideFor } = await import('../src/runners/dom-runner');
+    const guide = screenGuideFor('contact');
 
-    const source = await import('fs').then(fs =>
-      fs.readFileSync(new URL('../src/runners/dom-runner.ts', import.meta.url), 'utf8'));
-    expect(source).toContain('优先用详情页自带的下一位入口');
-    expect(source).toContain('退回列表会让所有 ref 失效');
-    expect(source).toContain('先常规 snapshot');
+    expect(guide).toContain('弹层');
+    expect(guide).toContain('箭头');
+    expect(guide).toContain('back 会退出整个列表页');
+  });
+
+  it('给出两段式读法，并点名经历概览这类第一段该看的位置', async () => {
+    const { screenGuideFor } = await import('../src/runners/dom-runner');
+    const guide = screenGuideFor('contact');
+
+    expect(guide).toContain('先常规 snapshot');
+    expect(guide).toContain('经历概览');
+    expect(guide).toContain('full=true');
+  });
+
+  it('提醒不要点会写到平台上的按钮', async () => {
+    const { screenGuideFor } = await import('../src/runners/dom-runner');
+    const guide = screenGuideFor('contact');
+
+    expect(guide).toContain('不合适');
+    expect(guide).toContain('帮我联系');
+  });
+
+  it('关闭深读时不注入这段指引', async () => {
+    const { screenGuideFor } = await import('../src/runners/dom-runner');
+    expect(screenGuideFor('off')).not.toContain('经历概览');
   });
 });
