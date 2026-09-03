@@ -1,6 +1,6 @@
 # 远程会话使用指南
 
-HireSeek 支持导出对话会话，可以在其他平台（如 claude.ai）继续对话。
+Seeya 支持导出对话会话，可以在其他平台（如 claude.ai）继续对话。
 
 ---
 
@@ -73,7 +73,7 @@ HireSeek 支持导出对话会话，可以在其他平台（如 claude.ai）继�
 
 ### 场景 1：跨设备继续对话
 
-**问题**：在电脑上和 HireSeek 聊了很久，想在手机上继续？
+**问题**：在电脑上和 Seeya 聊了很久，想在手机上继续？
 
 **解决**：
 
@@ -86,7 +86,7 @@ HireSeek 支持导出对话会话，可以在其他平台（如 claude.ai）继�
 
 ### 场景 2：分享对话给同事
 
-**问题**：想把和 HireSeek 的讨论分享给团队？
+**问题**：想把和 Seeya 的讨论分享给团队？
 
 **解决**：
 
@@ -168,7 +168,7 @@ HireSeek 支持导出对话会话，可以在其他平台（如 claude.ai）继�
 ### JSON 格式（.json）
 
 机器可读的格式，适合：
-- 重新导入到 HireSeek
+- 重新导入到 Seeya
 - 程序化处理
 - 数据分析
 - 备份恢复
@@ -269,7 +269,7 @@ ls *.md | wc -l  # 查看会话数量
 将会话纳入版本控制：
 
 ```bash
-# 在 hireseek 目录
+# 在 seeya 目录
 git add workspace/sessions/
 git commit -m "docs: archive recruitment discussions"
 git push
@@ -281,7 +281,7 @@ git push
 
 ```bash
 # 创建软链接到 Dropbox/iCloud
-ln -s ~/hireseek/workspace/sessions ~/Dropbox/HireSeek-Sessions
+ln -s ~/hireseek/workspace/sessions ~/Dropbox/Seeya-Sessions
 ```
 
 ---
@@ -380,7 +380,7 @@ ls -la
 
 **解决**：
 1. 只复制最近的几轮对话
-2. 或使用 HireSeek 的上下文压缩功能
+2. 或使用 Seeya 的上下文压缩功能
 3. 分段粘贴
 
 ---
@@ -448,7 +448,7 @@ tar -czf sessions-backup-2024-01.tar.gz workspace/sessions/
 
 ## 与 Claude Code 对比
 
-| 功能 | Claude Code | HireSeek |
+| 功能 | Claude Code | Seeya |
 |------|-------------|----------|
 | 导出会话 | ✅ | ✅ |
 | 推送到 claude.ai | ✅ 自动 | ⚠️ 手动 |
@@ -457,7 +457,7 @@ tar -czf sessions-backup-2024-01.tar.gz workspace/sessions/
 | JSON 格式 | ✅ | ✅ |
 | 跨设备同步 | ✅ 自动 | ⚠️ 手动 |
 
-**HireSeek 优势**：
+**Seeya 优势**：
 - 完全本地控制
 - 支持 Markdown 和 JSON 双格式
 - 可以纳入 Git 版本控制
@@ -471,7 +471,7 @@ tar -czf sessions-backup-2024-01.tar.gz workspace/sessions/
 
 ## 总结
 
-远程会话功能让 HireSeek 的对话可以跨平台、跨设备继续，同时保持完全的本地控制和隐私安全。
+远程会话功能让 Seeya 的对话可以跨平台、跨设备继续，同时保持完全的本地控制和隐私安全。
 
 **核心命令**：
 - `/export` - 导出会话
@@ -479,7 +479,7 @@ tar -czf sessions-backup-2024-01.tar.gz workspace/sessions/
 
 **典型用法**：
 ```
-HireSeek 对话 → /export → 复制 Markdown → 粘贴到 claude.ai → 继续对话
+Seeya 对话 → /export → 复制 Markdown → 粘贴到 claude.ai → 继续对话
 ```
 
 简单、高效、安全！🦞

@@ -97,6 +97,7 @@ function collectInteractionModelProblems(): string[] {
     const askUser = readSourceForDoctor('ask-user.ts');
     const select = readSourceForDoctor('select.ts');
     const slash = readSourceForDoctor(path.join('chat', 'slash-suggestions.ts'));
+    const prompt = readSourceForDoctor(path.join('plugins', 'prompt-hireseek.ts'));
     const problems: string[] = [];
 
     if (!slash.includes('SlashSuggestionController')) {
@@ -117,7 +118,7 @@ function collectInteractionModelProblems(): string[] {
     if (!chat.includes('const { askEditableChoice }') || /case 'ask_user_choice':[\s\S]{0,700}selectOption/.test(chat)) {
       problems.push('ask_user_choice does not use editable choice input');
     }
-    if (!chat.includes('需要用户做决定时用 ask_user_choice 给可编辑候选')) {
+    if (!prompt.includes('需要用户做决定时用 ask_user_choice 给可编辑候选')) {
       problems.push('system prompt does not describe editable user-choice behavior');
     }
     if (!select.includes('Tab 把候选填入输入框') || !select.includes('Enter 提交当前输入')) {
@@ -326,21 +327,21 @@ function liveDryRunDetail(channel: Channel, evidence: ChannelDryRunEvidence | nu
   const label = channelLabel(channel);
   return evidence
     ? `latest dry-run #${evidence.id}: status=${evidence.status}, contacted=${evidence.contactedCount}, candidates=${evidence.runCandidates}, interactions=${evidence.interactions}, actions=${evidence.runActions}, toolCalls=${evidence.toolCalls}, sideEffects=${evidence.sideEffects}`
-    : `no ${label} dry-run evidence; run hireseek run ${channel} --here --dry-run before real outreach`;
+    : `no ${label} dry-run evidence; run seeya run ${channel} --here --dry-run before real outreach`;
 }
 
 function livePrepareDetail(channel: Channel, evidence: ChannelPrepareEvidence | null): string {
   const label = channelLabel(channel);
   return evidence
     ? `latest prepare #${evidence.id}: status=${evidence.status}, contacted=${evidence.contactedCount}, candidates=${evidence.runCandidates}, interactions=${evidence.interactions}, actions=${evidence.runActions}, toolCalls=${evidence.toolCalls}, successfulSideEffects=${evidence.successfulSideEffects}, unsafeSuccessfulActions=${evidence.unsafeSuccessfulActions}`
-    : `no ${label} prepare evidence; run hireseek run ${channel} --here --prepare before real outreach`;
+    : `no ${label} prepare evidence; run seeya run ${channel} --here --prepare before real outreach`;
 }
 
 function liveScreenDetail(channel: Channel, evidence: ChannelScreenEvidence | null): string {
   const label = channelLabel(channel);
   return evidence
     ? `latest screen #${evidence.id}: status=${evidence.status}, contacted=${evidence.contactedCount}, candidates=${evidence.runCandidates}, interactions=${evidence.interactions}, actions=${evidence.runActions}, toolCalls=${evidence.toolCalls}, candidateScreenActions=${evidence.candidateScreenActions}, screenCandidates=${evidence.screenCandidates}, recommendedContacts=${evidence.recommendedContacts}, successfulSideEffects=${evidence.successfulSideEffects}, unsafeSuccessfulActions=${evidence.unsafeSuccessfulActions}`
-    : `no ${label} screen evidence; run hireseek run ${channel} --here --screen before real outreach`;
+    : `no ${label} screen evidence; run seeya run ${channel} --here --screen before real outreach`;
 }
 
 function browserReadinessDetail(summary: BrowserReadinessSummary): string {
@@ -455,7 +456,7 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
 
   const chatHarnessContext = buildChatHarnessContext();
   const chatHarnessProblems = [
-    chatHarnessContext.includes('HireSeek Chat Harness Assembly') ? '' : 'missing chat harness header',
+    chatHarnessContext.includes('Seeya Chat Harness Assembly') ? '' : 'missing chat harness header',
     ...protocols.map(protocol => chatHarnessContext.includes(protocol.name) ? '' : `missing ${protocol.channel} platform protocol`),
     chatHarnessContext.includes('platform-protocol-overrides-legacy-skill') ? '' : 'missing protocol/skill boundary',
     chatHarnessContext.includes('mode=productized-fallback-only') ? '' : 'missing productized fallback skill mode',
@@ -887,31 +888,31 @@ export function collectDoctorReport(registry?: ToolRegistry): DoctorReport {
   const nextSteps: string[] = [];
   if (status === 'fail') nextSteps.push('先修复 fail 项，再跑真实渠道任务。');
   if (checks.some(c => c.name === 'Browser readiness' && c.status === 'warn')) {
-    nextSteps.push('最短路径：运行 `hireseek validate --open-missing --wait`，缺入口会先打开；完成登录后自动继续验收。');
-    nextSteps.push('也可以运行 `hireseek validate --open-missing`，缺入口会先打开；完成登录后再手动运行 `hireseek validate`。');
-    nextSteps.push('可运行 `hireseek readiness --open-missing` 打开缺失渠道入口页；完成登录后再验收。');
-    nextSteps.push('可直接运行 `hireseek validate` 做 active job 全渠道验收；readiness 没过就不创建 run。');
-    nextSteps.push('浏览器 readiness 未全绿：先运行 `hireseek readiness` 查看哪个渠道缺登录页或权限。');
+    nextSteps.push('最短路径：运行 `seeya validate --open-missing --wait`，缺入口会先打开；完成登录后自动继续验收。');
+    nextSteps.push('也可以运行 `seeya validate --open-missing`，缺入口会先打开；完成登录后再手动运行 `seeya validate`。');
+    nextSteps.push('可运行 `seeya readiness --open-missing` 打开缺失渠道入口页；完成登录后再验收。');
+    nextSteps.push('可直接运行 `seeya validate` 做 active job 全渠道验收；readiness 没过就不创建 run。');
+    nextSteps.push('浏览器 readiness 未全绿：先运行 `seeya readiness` 查看哪个渠道缺登录页或权限。');
   }
   for (const channel of protocolChannels) {
     const label = channelLabel(channel);
     if (checks.some(c => c.name === `Live ${label} run` && c.status === 'warn')) {
-      nextSteps.push(`可直接运行 \`hireseek validate ${channel}\`；它会先做 readiness，没通过就不创建 run。`);
-      nextSteps.push(`先运行 \`hireseek readiness ${channel}\`，确认当前 Chrome 登录态和页面适合真实验收。`);
-      nextSteps.push(`真实页面验收从 \`hireseek run ${channel} --here --dry-run\` 开始，不要直接真实触达。`);
+      nextSteps.push(`可直接运行 \`seeya validate ${channel}\`；它会先做 readiness，没通过就不创建 run。`);
+      nextSteps.push(`先运行 \`seeya readiness ${channel}\`，确认当前 Chrome 登录态和页面适合真实验收。`);
+      nextSteps.push(`真实页面验收从 \`seeya run ${channel} --here --dry-run\` 开始，不要直接真实触达。`);
     }
     if (checks.some(c => c.name === `Live ${label} prepare` && c.status === 'warn')) {
-      nextSteps.push(`真实触达前运行 \`hireseek run ${channel} --here --prepare\`，确认页面准备和筛选提交安全通过。`);
+      nextSteps.push(`真实触达前运行 \`seeya run ${channel} --here --prepare\`，确认页面准备和筛选提交安全通过。`);
     }
     if (checks.some(c => c.name === `Live ${label} screen` && c.status === 'warn')) {
-      nextSteps.push(`真实触达前运行 \`hireseek run ${channel} --here --screen\`，确认候选人查看与筛选判断安全通过。`);
+      nextSteps.push(`真实触达前运行 \`seeya run ${channel} --here --screen\`，确认候选人查看与筛选判断安全通过。`);
     }
   }
   if (checks.some(c => c.name === 'Pending run states' && c.status === 'warn')) {
-    nextSteps.push('有暂停/失败的 run state：先用 `hireseek core` 查看停在哪，再从当前真实页面继续。');
+    nextSteps.push('有暂停/失败的 run state：先用 `seeya core` 查看停在哪，再从当前真实页面继续。');
   }
   if (checks.some(c => c.name === 'Task run lifecycle' && c.status === 'warn')) {
-    nextSteps.push('有超时 running run：先用 `hireseek runs cleanup` 预览，再用 `hireseek runs cleanup --apply` 收口。');
+    nextSteps.push('有超时 running run：先用 `seeya runs cleanup` 预览，再用 `seeya runs cleanup --apply` 收口。');
   }
   if (checks.some(c => c.layer === 'middle' && c.status !== 'pass')) {
     nextSteps.push('中层协议/能力不完整时，先补产品协议，不回退到复制 skill。');
@@ -944,7 +945,7 @@ export function formatDoctorReport(report: DoctorReport): string {
   }
 
   const lines = [
-    'HireSeek Doctor',
+    'Seeya Doctor',
     '',
     `Overall: ${statusLabel(report.status)}`,
   ];

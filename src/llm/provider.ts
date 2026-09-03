@@ -8,6 +8,7 @@
 
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
+import { productEnv, type EnvMap as ProductEnvMap } from '../product';
 
 dotenv.config();
 
@@ -42,7 +43,7 @@ export interface ProviderSpec {
   preserveReasoning: boolean;
   /** 思考关不掉；乱传 temperature 会 400 */
   alwaysThinking: boolean;
-  /** 寻源循环默认推理强度（可用 HIRESEEK_REASONING_EFFORT 覆盖） */
+  /** 寻源循环默认推理强度（可用 SEEYA_REASONING_EFFORT / HIRESEEK_REASONING_EFFORT 覆盖） */
   defaultDriverEffort?: ReasoningEffort;
   visionImages: 'none' | 'url-or-base64' | 'base64-only';
 }
@@ -180,7 +181,7 @@ export const DEFAULT_MODELS: Record<string, string> = Object.fromEntries(
 
 export const PROVIDER_IDS = Object.keys(PROVIDERS) as ProviderId[];
 
-type EnvMap = NodeJS.Dict<string | undefined>;
+type EnvMap = ProductEnvMap;
 
 function envValue(env: EnvMap, names: string[]): string {
   for (const name of names) {
@@ -240,7 +241,7 @@ function completionExtras(spec: ProviderSpec, effort?: ReasoningEffort): Record<
 }
 
 function resolveEffort(role: LlmRole, spec: ProviderSpec, env: EnvMap): ReasoningEffort | undefined {
-  const explicit = parseReasoningEffort(env.HIRESEEK_REASONING_EFFORT);
+  const explicit = parseReasoningEffort(productEnv('REASONING_EFFORT', env));
   if (explicit) return explicit;
   if (role === 'driver') return spec.defaultDriverEffort;
   if (role === 'chat' && spec.alwaysThinking) return 'high';
@@ -252,7 +253,7 @@ function modelLooksVisual(model: string): boolean {
 }
 
 function pickActuator(spec: ProviderSpec, env: EnvMap): BrowserActuator {
-  const mode = parseBrowserMode(env.HIRESEEK_BROWSER_MODE);
+  const mode = parseBrowserMode(productEnv('BROWSER_MODE', env) || 'auto');
   if (mode === 'dom' && spec.openaiCompat) return 'dom';
   if (mode === 'vision' && spec.openaiCompat) return 'vision';
   return spec.defaultActuator;

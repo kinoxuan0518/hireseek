@@ -433,7 +433,7 @@ describe('boss platform protocol middle layer', () => {
       completionPolicy: true,
       processRules: true,
     });
-    expect(formatPlatformProtocolManifest()).toContain('HireSeek Platform Protocol Manifest');
+    expect(formatPlatformProtocolManifest()).toContain('Seeya Platform Protocol Manifest');
     expect(formatPlatformProtocolManifest()).toContain('writes: contacted_candidates, run_trace, interaction_log');
     expect(runSkillOptionsForChannel('boss', 123, true, true).initialStageId).toBe('session-precheck');
     expect(runSkillOptionsForChannel('boss', 124, true, false, true, false, 'Agent工程师')).toMatchObject({
@@ -452,7 +452,7 @@ describe('boss platform protocol middle layer', () => {
     });
     expect(channelUsesScreenContactGate('boss', 'execute')).toBe(true);
     expect(channelUsesScreenContactGate('boss', 'screen')).toBe(false);
-    expect(formatScreenContactGate('boss', [])).toContain('hireseek run boss --here --screen');
+    expect(formatScreenContactGate('boss', [])).toContain('seeya run boss --here --screen');
   });
 
   it('registers MaimaI protocol without preloading the legacy skill as runtime core', () => {
@@ -543,7 +543,7 @@ describe('boss platform protocol middle layer', () => {
     });
     expect(channelUsesScreenContactGate('maimai', 'execute')).toBe(true);
     expect(channelUsesScreenContactGate('maimai', 'prepare')).toBe(false);
-    expect(formatScreenContactGate('maimai', [])).toContain('hireseek run maimai --here --screen');
+    expect(formatScreenContactGate('maimai', [])).toContain('seeya run maimai --here --screen');
     expect(screenAllowedContactNames([
       { runId: 1, name: '应触达', recommendation: 'contact' },
       { runId: 1, name: '应跳过', recommendation: 'skip' },
@@ -582,14 +582,14 @@ describe('boss platform protocol middle layer', () => {
     expect(systemContext).toContain('26年后毕业');
     expect(systemContext).toContain('parse_quality');
     expect(skill).toContain('Skill 资产兼容层');
-    expect(skill).toContain('HireSeek 产品中层协议');
+    expect(skill).toContain('Seeya 产品中层协议');
     expect(fallback).toContain('如果当前职位不是目标岗位，应优先站内切到目标岗位');
     expect(fallback).not.toContain('禁止 `goto`、禁止切职位');
 
     const productContext = channelSkillAssetContext('boss');
     expect(productContext.mode).toBe('fallback-only');
     expect(productContext.content).toContain('完整 legacy skill 不预加载');
-    expect(productContext.content).not.toContain('<!-- HireSeek skill source:');
+    expect(productContext.content).not.toContain('<!-- Seeya skill source:');
 
     const manifest = buildSkillAssetManifest();
     const bossAsset = manifest.find(entry => entry.channel === 'boss');
@@ -601,7 +601,7 @@ describe('boss platform protocol middle layer', () => {
     expect(bossAsset?.activeAsset).toBeTruthy();
     expect(bossAsset?.boundary.mustNotOverride).toContain('platform-protocol');
     expect(bossAsset?.boundary.mustNotOverride).toContain('structured-output-contracts');
-    expect(formatSkillAssetManifest()).toContain('HireSeek Skill Asset Manifest');
+    expect(formatSkillAssetManifest()).toContain('Seeya Skill Asset Manifest');
     expect(formatSkillAssetManifest()).toContain('mode: productized-fallback-only');
   });
 
@@ -631,14 +631,14 @@ describe('boss platform protocol middle layer', () => {
     expect(declaredTools).toEqual(['browser', 'record_screened_candidate']);
     expect(withheldTools).toContain('prepare_contact');
     expect(withheldTools).toContain('record_contacted');
-    expect(formatHarnessRunAssembly('boss', 'screen')).toContain('HireSeek Harness Run Assembly');
+    expect(formatHarnessRunAssembly('boss', 'screen')).toContain('Seeya Harness Run Assembly');
     expect(formatHarnessRunAssembly('boss', 'screen')).toContain('record_screened_candidate: declared');
   });
 
   it('keeps chat mode aligned with product protocols and skill asset boundaries', () => {
     const context = buildChatHarnessContext();
 
-    expect(context).toContain('HireSeek Chat Harness Assembly');
+    expect(context).toContain('Seeya Chat Harness Assembly');
     expect(context).toContain('boss-platform.v1');
     expect(context).toContain('boss-greeting.v1');
     expect(context).toContain('outreach-voice.v1');

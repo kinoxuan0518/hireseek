@@ -1,13 +1,13 @@
 /**
- * HireSeek 网页指挥台 —— 打开浏览器就能"看见它、指挥它"
+ * Seeya 网页指挥台 —— 打开浏览器就能"看见它、指挥它"
  *
  * 守护进程是隐形的后台进程，对不开终端的 HR 等于不存在。这个本地网页就是它
  * 探出来的"脸"：一个网址（默认 http://localhost:7799），左边状态卡告诉你它
  * 此刻活着、今天干了多少、漏斗长什么样、心跳最近在想什么；右边一个聊天框，
  * 你打字就能指挥它——和飞书 Bot 共用同一套 agent 大脑（agent-session）。
  *
- *   hireseek console        单独启动指挥台（不需要守护进程）
- *   hireseek daemon ...      守护进程启动时自动把它拉起来并打开浏览器
+ *   seeya console        单独启动指挥台（不需要守护进程）
+ *   seeya daemon ...      守护进程启动时自动把它拉起来并打开浏览器
  *
  * 设计原则：零配置、零终端。不需要飞书应用，不需要公网，不需要 API 以外的任何东西。
  */
@@ -20,8 +20,9 @@ import { setHeadless } from './permissions';
 import { createSession, runAgentTurn, type AgentSession } from './agent-session';
 import { collectVitals } from './vitals';
 import { createRuntimeContext } from './agent-core/runtime-context';
+import { productEnv } from './product';
 
-const PORT = parseInt(process.env.HIRESEEK_CONSOLE_PORT || '7799', 10);
+const PORT = parseInt(productEnv('CONSOLE_PORT') || '7799', 10);
 
 const STATUS_LABEL: Record<string, string> = {
   contacted: '已触达', replied: '已回复', interviewed: '已面试',
@@ -166,7 +167,7 @@ export function startWebConsole(opts: { openBrowser?: boolean } = {}): void {
   // 指挥台运行在无人值守环境，危险工具默认拒绝（与飞书 Bot 同策略）
   setHeadless(true);
 
-  // 指挥台本身也报平安：单独跑 `hireseek console` 时，生命体征能反映"我在（可达）"
+  // 指挥台本身也报平安：单独跑 `seeya console` 时，生命体征能反映"我在（可达）"
   void import('./vitals').then(({ markAlive }) => {
     markAlive();
     setInterval(() => markAlive(), 60 * 1000);
@@ -182,7 +183,7 @@ export function startWebConsole(opts: { openBrowser?: boolean } = {}): void {
   });
   server.listen(PORT, () => {
     const url = `http://localhost:${PORT}`;
-    console.log(`\n🖥  HireSeek 指挥台已启动：\x1b[36m${url}\x1b[0m`);
+    console.log(`\n🖥  Seeya 指挥台已启动：\x1b[36m${url}\x1b[0m`);
     console.log('   打开浏览器就能看见它、直接打字指挥它（手机同一 WiFi 下也能访问本机 IP）。\n');
     if (opts.openBrowser) exec(`open ${url}`);
   });
@@ -194,7 +195,7 @@ const HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>HireSeek 指挥台</title>
+<title>Seeya 指挥台</title>
 <style>
   :root { --bg:#0b0d10; --panel:#13161b; --line:#222831; --fg:#e6e8eb; --muted:#8b949e; --accent:#5e7cff; --ok:#3fb950; --warn:#d29922; }
   * { box-sizing:border-box; margin:0; padding:0; }
@@ -243,7 +244,7 @@ const HTML = `<!DOCTYPE html>
 </head>
 <body>
 <aside>
-  <div class="brand"><span class="dot" id="dot"></span><h1>HireSeek 指挥台</h1></div>
+  <div class="brand"><span class="dot" id="dot"></span><h1>Seeya 指挥台</h1></div>
   <div class="sub" id="liveline">加载中…</div>
   <div class="sub" id="jobline"></div>
 
@@ -274,7 +275,7 @@ const HTML = `<!DOCTYPE html>
   <div class="chat" id="chat"></div>
   <div class="hint">回车发送，Shift+回车换行 · 试试"今天进展怎么样""把做供应链的候选人列出来""派个后台任务调研张三" · 发「清空」重置</div>
   <div class="composer">
-    <textarea id="input" rows="1" placeholder="和 HireSeek 说人话…"></textarea>
+    <textarea id="input" rows="1" placeholder="和 Seeya 说人话…"></textarea>
     <button id="send" onclick="send()">发送</button>
   </div>
 </main>
@@ -293,7 +294,7 @@ function addUser(text){
 }
 function addBot(){
   const m = el('msg bot');
-  m.appendChild(el('who','HireSeek'));
+  m.appendChild(el('who','Seeya'));
   const steps = el('steps'); m.appendChild(steps);
   const bubble = el('bubble','<span class="sub">思考中…</span>'); m.appendChild(bubble);
   chat.appendChild(m); chat.scrollTop = chat.scrollHeight;

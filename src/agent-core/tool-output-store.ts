@@ -61,7 +61,7 @@ export function offloadToolOutput(input: ToolOutputOffloadInput): ToolOutputOffl
 
   if (!fs.existsSync(absolute)) {
     const header = [
-      '# HireSeek tool output offload',
+      '# Seeya tool output offload',
       `created_at: ${new Date().toISOString()}`,
       `tool_name: ${input.toolName}`,
       `run_id: ${input.runId ?? ''}`,

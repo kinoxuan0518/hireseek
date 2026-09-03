@@ -244,7 +244,7 @@ export function formatRunStateForContext(state: AgentRunState): string {
 
 export function formatRunStateList(
   states: AgentRunState[],
-  title = 'HireSeek Run States',
+  title = 'Seeya Run States',
   emptyText = '没有 run state。',
 ): string {
   if (states.length === 0) {
@@ -259,7 +259,7 @@ export function formatRunStateList(
     if (state.lastUrl) lines.push(`  url: ${state.lastUrl}`);
     if (state.reason) lines.push(`  reason: ${state.reason}`);
     if (state.updatedAt) lines.push(`  updated: ${state.updatedAt}`);
-    if (state.status === 'paused') lines.push('  next: 确认当前真实页面后，用 `hireseek run <渠道> --here` 继续。');
+    if (state.status === 'paused') lines.push('  next: 确认当前真实页面后，用 `seeya run <渠道> --here` 继续。');
     lines.push('');
   }
   return lines.join('\n').trimEnd();
@@ -318,7 +318,7 @@ export function formatRunStateDetail(state: AgentRunState | null): string {
   const actions = recentRunActionLines(state.runId);
   const failures = recentToolFailureLines(state.runId);
   const lines = [
-    `HireSeek Run State #${state.runId}`,
+    `Seeya Run State #${state.runId}`,
     '',
     `status: ${state.status}`,
     `phase: ${state.phase}`,
@@ -341,7 +341,7 @@ export function formatRunStateDetail(state: AgentRunState | null): string {
     failures.length ? failures.join('\n') : '  无',
   ].filter(Boolean);
   if (state.status === 'paused') {
-    lines.push('', `Next: 确认当前真实页面后，用 \`hireseek run ${state.channel ?? '<渠道>'} --here\` 继续。`);
+    lines.push('', `Next: 确认当前真实页面后，用 \`seeya run ${state.channel ?? '<渠道>'} --here\` 继续。`);
   }
   return lines.join('\n');
 }

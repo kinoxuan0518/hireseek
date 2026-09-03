@@ -16,6 +16,13 @@ export type ToolCategory =
 
 export type ToolExecutionMode = 'read' | 'dry_run' | 'prepare' | 'screen' | 'execute';
 
+export interface ToolExecutionContext {
+  runId?: number;
+  sessionId?: string;
+  toolCallId?: string;
+  mode?: ToolExecutionMode;
+}
+
 export interface ToolPolicy {
   category: ToolCategory;
   sideEffect: boolean;

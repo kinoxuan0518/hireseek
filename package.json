@@ -1,8 +1,9 @@
 {
   "name": "hireseek-monorepo",
   "private": true,
-  "description": "🔱 HireSeek — DeepSeek-powered autonomous recruiting agent",
+  "description": "🔱 Seeya — DeepSeek-powered autonomous recruiting agent",
   "bin": {
+    "seeya": "bin/hireseek",
     "hireseek": "bin/hireseek"
   },
   "scripts": {

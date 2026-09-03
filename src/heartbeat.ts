@@ -1,5 +1,5 @@
 /**
- * 心跳主动决策循环 —— daemon 哲学的 HireSeek 移植
+ * 心跳主动决策循环 —— daemon 哲学的 Seeya 移植
  * （参考 github.com/kinoxuan0518/daemon：主动性 + 自进化）
  *
  * 不等指令：心跳醒来 → 读 STATE.md + 实时数据信号 → 模型决策
@@ -131,7 +131,7 @@ interface HeartbeatDecision {
 }
 
 const HEARTBEAT_SYSTEM = `
-你是 HireSeek 的心跳决策循环——一个不等指令的招聘 agent 的"主动性大脑"。
+你是 Seeya 的心跳决策循环——一个不等指令的招聘 agent 的"主动性大脑"。
 
 你每次醒来，读当前 STATE 和数据信号，决定**当下最有价值的一件事**。
 空闲不是休息：选 idle 必须说清楚为什么现在没有值得做的事。
@@ -320,7 +320,7 @@ async function execute(d: HeartbeatDecision): Promise<string> {
         verifyNote += v.verdict === 'skip' ? '' : `；质检：${v.summary}`;
         if (v.verdict === 'fail' || v.verdict === 'warn') {
           const { notify } = await import('./notifier');
-          await notify('HireSeek 触达质检告警', formatVerification(v));
+          await notify('Seeya 触达质检告警', formatVerification(v));
         }
       } catch (err) {
         verifyNote += `；质检未完成（${err instanceof Error ? err.message : err}）`;
@@ -332,7 +332,7 @@ async function execute(d: HeartbeatDecision): Promise<string> {
         verifyNote += c.verdict === 'skip' ? '' : `；合规：${c.summary.split('\n')[0]}`;
         if (c.verdict === 'fail' || c.verdict === 'warn') {
           const { notify } = await import('./notifier');
-          await notify('HireSeek 流程合规告警', formatCompliance(c));
+          await notify('Seeya 流程合规告警', formatCompliance(c));
         }
       } catch (err) {
         verifyNote += `；合规审计未完成（${err instanceof Error ? err.message : err}）`;
@@ -364,7 +364,7 @@ async function execute(d: HeartbeatDecision): Promise<string> {
     }
     case 'notify_user': {
       const { sendMessage } = await import('./channels/feishu');
-      await sendMessage(`🔱 HireSeek 主动汇报\n\n${d.detail}\n\n（依据：${d.reason}）`);
+      await sendMessage(`🔱 Seeya 主动汇报\n\n${d.detail}\n\n（依据：${d.reason}）`);
       return '已推送用户通知';
     }
     case 'update_state':

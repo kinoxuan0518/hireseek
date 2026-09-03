@@ -324,7 +324,7 @@ describe('agent core lower layer', () => {
     expect(formatRunStateForContext(latest!)).toContain('phase: external_control');
     expect(formatRunStateForContext(latest!)).toContain('channel: boss');
     expect(formatRunStateList([latest!], 'Pending')).toContain('next:');
-    expect(formatRunStateDetail(loadAgentRunState(304))).toContain('HireSeek Run State #304');
+    expect(formatRunStateDetail(loadAgentRunState(304))).toContain('Seeya Run State #304');
     expect(formatRunStateDetail(loadAgentRunState(304))).toContain('channel: boss');
     expect(formatRunStateDetail(loadAgentRunState(304))).toContain('Next:');
     expect(formatRunStateDetail(loadAgentRunState(304))).toContain('Recent actions:');
@@ -458,7 +458,7 @@ describe('agent core lower layer', () => {
     expect(review.groups.some(group => group.code === 'policy_blocked' && group.subcode === 'direct_navigation_blocked')).toBe(true);
     expect(review.groups.some(group => group.code === 'policy_blocked' && group.subcode === 'missing_stage_evidence')).toBe(true);
     const reviewText = formatHarnessFailureReview(review);
-    expect(reviewText).toContain('HireSeek Harness Failure Review');
+    expect(reviewText).toContain('Seeya Harness Failure Review');
     expect(reviewText).toContain('下一步');
     expect(reviewText).toContain('tool_registry');
     expect(reviewText).toContain('policy_blocked/direct_navigation_blocked');
@@ -568,15 +568,20 @@ describe('agent core lower layer', () => {
     expect(alreadyOffloaded.content).toBe(largeToolResult.content);
   });
 
-  it('routes chat tool results through generic output offload', () => {
-    const files = [
+  it('routes tool results through the DSH post-execute offload plugin', () => {
+    const plugin = fs.readFileSync(path.resolve(process.cwd(), 'src/plugins/offload.ts'), 'utf8');
+    const loop = fs.readFileSync(path.resolve(process.cwd(), 'src/dsh/loop.ts'), 'utf8');
+    const hosts = [
       'src/chat.ts',
       'src/agent-session.ts',
       'src/sub-agent.ts',
     ];
-    for (const file of files) {
+    expect(plugin).toContain('offloadToolResultForContext');
+    expect(plugin).toContain("tools/post-execute");
+    expect(loop).toContain('tools.execute');
+    for (const file of hosts) {
       const source = fs.readFileSync(path.resolve(process.cwd(), file), 'utf8');
-      expect(source).toContain('offloadToolResultForContext');
+      expect(source).toContain('loop.runTurn');
     }
   });
 
@@ -1511,7 +1516,7 @@ describe('agent core lower layer', () => {
 
     expect(status.tools.total).toBe(2);
     expect(status.tools.sideEffect).toBe(1);
-    expect(text).toContain('HireSeek Agent Core');
+    expect(text).toContain('Seeya Agent Core');
     expect(text).toContain('Trace:');
     expect(text).toContain('Run states:');
     expect(text).toContain('Execution environments:');
@@ -1793,7 +1798,7 @@ describe('agent core lower layer', () => {
     const report = collectDoctorReport(registry);
     const text = formatDoctorReport(report);
 
-    expect(text).toContain('HireSeek Doctor');
+    expect(text).toContain('Seeya Doctor');
     expect(text).toContain('下层 Agent Core');
     expect(text).toContain('BOSS protocol wiring');
     expect(text).toContain('脉脉 protocol wiring');

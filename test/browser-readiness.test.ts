@@ -33,7 +33,7 @@ describe('browser readiness preflight', () => {
 
     expect(report.status).toBe('ready');
     expect(report.issues).toEqual([]);
-    expect(report.nextSteps).toContain('可以继续运行：hireseek run maimai --here --dry-run');
+    expect(report.nextSteps).toContain('可以继续运行：seeya run maimai --here --dry-run');
   });
 
   it('reports not ready when the channel tab is missing', () => {
@@ -102,7 +102,7 @@ describe('browser readiness preflight', () => {
           status: 'ready',
           url: 'https://www.zhipin.com/web/chat/index',
           issues: [],
-          nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+          nextSteps: ['可以继续运行：seeya run boss --here --dry-run'],
         },
         {
           channel: 'maimai',
@@ -131,7 +131,7 @@ describe('browser readiness preflight', () => {
           status: 'ready',
           url: 'https://www.zhipin.com/web/chat/index',
           issues: [],
-          nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+          nextSteps: ['可以继续运行：seeya run boss --here --dry-run'],
         },
         {
           channel: 'maimai',
@@ -162,7 +162,7 @@ describe('browser readiness preflight', () => {
             status: 'ready',
             url: 'https://www.zhipin.com/web/chat/index',
             issues: [],
-            nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+            nextSteps: ['可以继续运行：seeya run boss --here --dry-run'],
           },
           {
             channel: 'maimai',
@@ -183,6 +183,6 @@ describe('browser readiness preflight', () => {
     expect(output).toContain('Opened 1 missing channel page(s):');
     expect(output).toContain('https://maimai.cn/ent/v41/recruit/talents?tab=1');
     expect(output).toContain('完成登录');
-    expect(output).toContain('hireseek validate');
+    expect(output).toContain('seeya validate');
   });
 });

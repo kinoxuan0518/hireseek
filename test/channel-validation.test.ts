@@ -93,7 +93,7 @@ describe('channel validation command planning', () => {
         channel: 'boss',
         status: 'ready',
         issues: [],
-        nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+        nextSteps: ['可以继续运行：seeya run boss --here --dry-run'],
       },
       attemptedSteps: ['dry-run', 'prepare', 'screen'],
       runIds: [
@@ -117,7 +117,7 @@ describe('channel validation command planning', () => {
         channel: 'maimai',
         status: 'ready',
         issues: [],
-        nextSteps: ['可以继续运行：hireseek run maimai --here --dry-run'],
+        nextSteps: ['可以继续运行：seeya run maimai --here --dry-run'],
       },
       attemptedSteps: ['prepare'],
       runIds: [{
@@ -150,7 +150,7 @@ describe('channel validation command planning', () => {
             channel: 'boss',
             status: 'ready',
             issues: [],
-            nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+            nextSteps: ['可以继续运行：seeya run boss --here --dry-run'],
           },
           {
             channel: 'maimai',
@@ -182,7 +182,7 @@ describe('channel validation command planning', () => {
             channel: 'boss',
             status: 'ready',
             issues: [],
-            nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+            nextSteps: ['可以继续运行：seeya run boss --here --dry-run'],
           },
           {
             channel: 'maimai',
@@ -203,7 +203,7 @@ describe('channel validation command planning', () => {
               channel: 'boss',
               status: 'ready',
               issues: [],
-              nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+              nextSteps: ['可以继续运行：seeya run boss --here --dry-run'],
             },
             {
               channel: 'maimai',
@@ -275,7 +275,7 @@ describe('channel validation command planning', () => {
             channel: 'boss',
             status: 'ready',
             issues: [],
-            nextSteps: ['可以继续运行：hireseek run boss --here --dry-run'],
+            nextSteps: ['可以继续运行：seeya run boss --here --dry-run'],
           },
           {
             channel: 'maimai',

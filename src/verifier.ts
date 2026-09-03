@@ -1,7 +1,7 @@
 /**
  * 独立验证器 —— Loop Engineering 的"灵魂"：做的和验的分开
  *
- * HireSeek 的 loop 目标写死在守护栏里是一句话："今日触达 >= 30 就达标"。
+ * Seeya 的 loop 目标写死在守护栏里是一句话："今日触达 >= 30 就达标"。
  * 这是教科书级的 Goodhart 地雷：一旦"触达数"变成目标本身，一个一根筋优化它
  * 的 agent 完全可以为了凑满 30，去触达一批根本不匹配的人——数字是绿的，但你
  * 真正要的"对的人"一个没有。更糟的是，做触达的 agent 同时也是给自己记成功的
@@ -80,7 +80,7 @@ interface CandRow {
 
 // ── 取本次要审计的候选人 ───────────────────────────────────────────────
 // 优先按 runId 审【本轮】（契约要求："不能默认最近一条/泛泛的今天"）；
-// 不传 runId 时退回"今日 + jobId"（CLI hireseek verify 的日常用法）。
+// 不传 runId 时退回"今日 + jobId"（CLI seeya verify 的日常用法）。
 function pickCandidates(jobId: string, limit: number): CandRow[] {
   return db.prepare(`
     SELECT fingerprint, name, school, company, channel, score, contacted_at
@@ -115,7 +115,7 @@ function pickCandidatesByRun(runId: number, limit: number): CandRow[] {
 }
 
 const VERIFIER_SYSTEM = `
-你是 HireSeek 的**独立质检官**，不是寻源 agent。寻源 agent 已经联系了下面这些
+你是 Seeya 的**独立质检官**，不是寻源 agent。寻源 agent 已经联系了下面这些
 候选人，并给了自己打的分。你的职责是换一双对抗性的眼睛，**独立**判断每个人跟
 岗位的真实匹配度，专门抓两件事：
 
@@ -290,7 +290,7 @@ function buildSummary(a: {
 /** 人话报告（CLI / 通知 / 生命体征共用）。 */
 export function formatVerification(v: VerificationResult): string {
   if (v.verdict === 'skip') return v.summary;
-  const lines = ['🔍 HireSeek 触达质检', '', v.summary];
+  const lines = ['🔍 Seeya 触达质检', '', v.summary];
   const flagged = v.judgments.filter(j => j.fit < FIT_THRESHOLD || j.padding);
   if (flagged.length) {
     lines.push('', '需要你看一眼的：');

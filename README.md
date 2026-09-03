@@ -1,18 +1,18 @@
-# 🔱 HireSeek（深聘）
+# 🔱 Seeya
 
-**DeepSeek 驱动的自主招聘智能体** — 接管你的全部招聘任务与招聘技能。
+**自主招聘智能体** — 接管你的全部招聘任务与招聘技能。
 
-> 前身为 HireClaw 🦞。究极进化后改名 HireSeek：Hire 是使命，Seek 既是猎寻人才的本能，也致敬默认大脑 DeepSeek。
+> 前身 HireClaw → HireSeek（深聘）。产品名改为 **Seeya**。`hireseek` 命令、`HIRESEEK_*` 环境变量、`~/.hireseek` 数据目录仍然可用。
 
 ## 它能做什么
 
 - **全渠道自主寻源**：BOSS直聘、脉脉、LinkedIn，自动搜索、筛选、打招呼、跟进
-- **接管你的 Codex/Claude 技能库**：运行时优先读取 `HIRESEEK_SKILL_HOME`（默认 `~/.codex/skills` 和 `~/.claude/skills`），rbt、maimai-recruiter、talent-sourcing、candidate-intelligence、blacklake-targeted-talent-hunting、bosszhibin-auto-recruiter 等招聘技能全部可被 DeepSeek 调用
+- **接管你的 Codex/Claude 技能库**：运行时优先读取 `SEEYA_SKILL_HOME`（也认 `HIRESEEK_SKILL_HOME`，默认 `~/.codex/skills` 和 `~/.claude/skills`），rbt、maimai-recruiter、talent-sourcing、candidate-intelligence、blacklake-targeted-talent-hunting、bosszhibin-auto-recruiter 等招聘技能全部可被调用
 - **对话即工作**：chat 模式下自然语言下达任务，agent 自动路由到对应技能或渠道
 - **候选人评估 / 触达策略 / 跨会话记忆 / 招聘漏斗**：core SDK 内置
 - **定时调度**：工作日自动执行 BOSS / 脉脉 / 跟进任务
 
-## 三大进化点（v2 "HireSeek"）
+## 三大进化点（v2 "Seeya"）
 
 ### 1. 模型是插头，不是品牌
 
@@ -37,7 +37,7 @@ export ZHIPU_API_KEY="..."          # 或 MOONSHOT_API_KEY / DEEPSEEK_API_KEY
 模型 → browser(click, ref=42) → Playwright 执行 → 新快照
 ```
 
-只有 DOM 看不清，或你显式设置 `HIRESEEK_BROWSER_MODE=vision`，才改成截图点选。
+只有 DOM 看不清，或你显式设置 `SEEYA_BROWSER_MODE=vision`，才改成截图点选。
 
 ### 3. Claude Skills 桥接层
 
@@ -52,7 +52,7 @@ export ZHIPU_API_KEY="..."          # 或 MOONSHOT_API_KEY / DEEPSEEK_API_KEY
 
 ## 三大究极进化（v3 "常驻 · 在线 · 有记性"）
 
-v2 让 HireSeek 能干活，v3 让它**住下来、在线、记得住人**——不开终端也活着。
+v2 让 Seeya 能干活，v3 让它**住下来、在线、记得住人**——不开终端也活着。
 
 ### 1. 飞书双向 Bot（对话即指挥）
 
@@ -61,7 +61,7 @@ v2 让 HireSeek 能干活，v3 让它**住下来、在线、记得住人**——
 ```
 
 - 用**长连接（WebSocket）事件订阅**，无需公网回调、无需内网穿透，本机直连即可
-- 手机飞书上一句"今天 BOSS 进展怎么样""把做供应链的人列出来""派个后台任务调研张三"，HireSeek 就在守护进程里执行并回话
+- 手机飞书上一句"今天 BOSS 进展怎么样""把做供应链的人列出来""派个后台任务调研张三"，Seeya 就在守护进程里执行并回话
 - 每个会话独立上下文，支持用户白名单、群聊 @ 响应、`清空` 重置
 - 心跳/调度/后台任务的主动通知优先经此 Bot 推送（可在飞书里直接追问跟进）
 - 开启：自建应用订阅 `im.message.receive_v1`（长连接模式）+ 授 `im:message`/`im:message:send_as_bot`，设 `FEISHU_BOT_ENABLED=true`
@@ -69,13 +69,13 @@ v2 让 HireSeek 能干活，v3 让它**住下来、在线、记得住人**——
 ### 2. 常驻守护进程（launchd 托管）
 
 ```bash
-hireseek daemon install    # 装成开机自启服务，崩溃自拉起
-hireseek daemon status     # 看运行状态 + 最近日志
-hireseek daemon run        # 前台跑（调度 + 飞书 Bot 一个进程）
-hireseek daemon uninstall  # 卸载
+seeya daemon install    # 装成开机自启服务，崩溃自拉起
+seeya daemon status     # 看运行状态 + 最近日志
+seeya daemon run        # 前台跑（调度 + 飞书 Bot 一个进程）
+seeya daemon uninstall  # 卸载
 ```
 
-一个进程整合**定时调度 + 心跳主动循环 + 飞书 Bot**，用 macOS launchd 托管：随登录自启、崩溃自拉起、日志落 `~/.hireseek/daemon.log`。HireSeek 从"开终端才活着"变成"一直在"。
+一个进程整合**定时调度 + 心跳主动循环 + 飞书 Bot**，用 macOS launchd 托管：随登录自启、崩溃自拉起、日志落 `~/.seeya/daemon.log`（若只有旧目录则继续写 `~/.hireseek/daemon.log`）。Seeya 从"开终端才活着"变成"一直在"。
 
 ### 3. 人才记忆库（FTS5 全文检索）
 
@@ -111,13 +111,13 @@ npx tsx src/index.ts daemon status    # 看它是否在跑
 
 ## 做的和验的分开——双轴独立验证器（反 Goodhart）
 
-HireSeek 是一个招聘领域的 loop，它的目标曾经只有一句话：「今日触达 ≥ 30 就达标」。这是教科书级的 Goodhart 地雷——一旦"触达数"变成目标本身，一个一根筋优化它的 agent 可以为了凑满 30 去触达一批根本不匹配的人，数字是绿的，但你真正要的"对的人"一个没有。更糟的是，做触达的 agent 同时也是给自己记成功的那个（"学生自己批自己的考卷"），它一定对自己太宽容。
+Seeya 是一个招聘领域的 loop，它的目标曾经只有一句话：「今日触达 ≥ 30 就达标」。这是教科书级的 Goodhart 地雷——一旦"触达数"变成目标本身，一个一根筋优化它的 agent 可以为了凑满 30 去触达一批根本不匹配的人，数字是绿的，但你真正要的"对的人"一个没有。更糟的是，做触达的 agent 同时也是给自己记成功的那个（"学生自己批自己的考卷"），它一定对自己太宽容。
 
 所以加了一双独立的、对抗性的眼睛——而且分两条轴：
 
 ```bash
-hireseek verify            # 双轴质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)
-hireseek verify --push     # 顺手把结论推给你
+seeya verify            # 双轴质检：人选质量(反凑数) + 流程合规(用没用筛选项/乱开网页)
+seeya verify --push     # 顺手把结论推给你
 ```
 
 **① 结果轴——人选质量（`src/verifier.ts`）**：找的人对不对。
@@ -135,15 +135,15 @@ hireseek verify --push     # 顺手把结论推给你
 
 > 已知边界：执行轨迹目前记录动作类型 + ref/url，尚未回填 ref 的语义标签（如"工作经验筛选下拉"），合规验证器据动作序列与模式判断；结果轴抽样为随机抽样（默认 8 人），样本小时结论看方向。两者均为后续可加强项。
 
-这一层不改寻源 agent 任何判断，只在旁边挑刺。它是 Loop Engineering 的"灵魂"在 HireSeek 里的落地：Harness（守护栏，约束"不能怎么做"）+ 双轴独立验证器（既盯"找的人对不对"，也盯"干活的方法对不对"）。
+这一层不改寻源 agent 任何判断，只在旁边挑刺。它是 Loop Engineering 的"灵魂"在 Seeya 里的落地：Harness（守护栏，约束"不能怎么做"）+ 双轴独立验证器（既盯"找的人对不对"，也盯"干活的方法对不对"）。
 
 ## 把目标锚在"面试通过"——信号回流 + 校准闭环
 
-HireSeek 只管 sourcing 一环，够不到入职、更够不到价值，所以目标不能定在它控制不了的下游结果上。锚点定在**最靠下游、但仍能归因到 sourcing 的节点：面试通过**（`src/feedback.ts`）。
+Seeya 只管 sourcing 一环，够不到入职、更够不到价值，所以目标不能定在它控制不了的下游结果上。锚点定在**最靠下游、但仍能归因到 sourcing 的节点：面试通过**（`src/feedback.ts`）。
 
 ```bash
-hireseek feedback 张三 pass 一面表现好   # 回流面试结果（最重要的反馈信号）
-hireseek goal                            # 结果计分板：过面数/过面率 + 判断校准
+seeya feedback 张三 pass 一面表现好   # 回流面试结果（最重要的反馈信号）
+seeya goal                            # 结果计分板：过面数/过面率 + 判断校准
 ```
 
 - **结果目标是"找到能过面的人"**——这没法靠凑触达数刷出来，反 Goodhart
@@ -153,11 +153,11 @@ hireseek goal                            # 结果计分板：过面数/过面率
 
 ### 让结果自动回流——飞书招聘 / 多维表格直连（`src/channels/feishu-hire.ts`）
 
-手动一句句回流是兜底；如果你们的面试结果记在飞书里，HireSeek 可以**直接把它拉回来**，并顺带补上"面试官维度"。
+手动一句句回流是兜底；如果你们的面试结果记在飞书里，Seeya 可以**直接把它拉回来**，并顺带补上"面试官维度"。
 
 ```bash
-hireseek hire-sync            # dry-run 预览：会写哪些过面/挂面（不落库）
-hireseek hire-sync --apply    # 确认无误后落库回流 → 喂校准
+seeya hire-sync            # dry-run 预览：会写哪些过面/挂面（不落库）
+seeya hire-sync --apply    # 确认无误后落库回流 → 喂校准
 ```
 
 - **两个来源**（和飞书 Bot 同一个 SDK，零新依赖）：
@@ -182,8 +182,8 @@ hireseek hire-sync --apply    # 确认无误后落库回流 → 喂校准
 校准告诉你"判断准不准"；学习闭环更进一层：**把真实过面结果回喂，自动重写"合适"的定义本身**（`references/candidate-evaluation.md`）。
 
 ```bash
-hireseek learn dry     # 预览：用真实过面结果反推 rubric 哪里欠校准（不落盘）
-hireseek learn         # 落盘改写 + git 提交（可 hireseek evo back 回滚）
+seeya learn dry     # 预览：用真实过面结果反推 rubric 哪里欠校准（不落盘）
+seeya learn         # 落盘改写 + git 提交（可 seeya evo back 回滚）
 ```
 
 `src/evolution/recalibrate.ts` 拉取"既被验证器预测过、又有真实面试结果"的候选人，**重点盯误判**——判合适却挂面（假阳性：定义把不该要的当合适了）、判不合适却过面（假阴性：定义漏了真能过的人）——交给 v4-pro 反推：过面者共性是什么、挂面者共性是什么、现行 rubric 哪里权重失衡，产出修订版 rubric。
@@ -196,7 +196,7 @@ hireseek learn         # 落盘改写 + git 提交（可 hireseek evo back 回�
   - **误判量**：假阳+假阴 < 3 → 拒（验证器没判错就没可学的"错"，不无错强改）
   - **时间跨度**：样本跨度 < 3 天 → 拒（太集中可能只是某阵子/某面试官口味，不足以提炼普适规律）
 - **反"自证"**：刻意警惕治疗效应——判合适的人本就拿到更走心的触达、更可能过面，所以**总体过面率不作为改写依据**，只从几乎不受推进力度干扰的**误判**里学；重校官模型可经 `RECALIBRATOR_*` 配成**异构于验证器**，避免"同一个脑子分析自己的预测、再改自己依据的标准"
-- **每次改写独立 git commit、可回滚**（`hireseek evo back`）
+- **每次改写独立 git commit、可回滚**（`seeya evo back`）
 - **自主路径只 dry-run + 通知**：心跳发现"判断失效"（校准 lift≤0 且样本够）时，`evolve_dry` 会自动转去跑 `learn`（dry）并把提案推给你，落盘永远需要你确认；rubric 重写工具刻意**不进**后台 sub-agent 白名单
 
 至此整条路是闭的：寻源 → 验证器判合适 → 触达 → 真实过面结果回流 → 校准（判断准不准）→ **学习（"合适"的定义自己改）** → 下一轮判得更准。**人是终极验证器，但它在不断把你的判断学进自己的标准里。**
@@ -208,8 +208,8 @@ hireseek learn         # 落盘改写 + git 提交（可 hireseek evo back 回�
 **随时查岗**（拉取式）：
 
 ```bash
-hireseek alive            # 一句话：它在不在、今天做了什么、下一步
-hireseek alive --push     # 顺手推一条到你的飞书/系统通知
+seeya alive            # 一句话：它在不在、今天做了什么、下一步
+seeya alive --push     # 顺手推一条到你的飞书/系统通知
 ```
 
 ```
@@ -232,12 +232,29 @@ hireseek alive --push     # 顺手推一条到你的飞书/系统通知
 2. **飞书双向 Bot**（配飞书应用）：把它加进飞书通讯录，手机上发一句"今天进展怎么样"就能指挥，它跑完主动回你。设 `FEISHU_BOT_ENABLED=true`。
 3. **macOS 通知 / 飞书群机器人**：它主动报平安和提醒时弹给你（只需 `FEISHU_WEBHOOK_URL`，比双向 Bot 门槛低）。
 
-网页指挥台与飞书 Bot 共用同一套 agent 大脑（`src/agent-session.ts`），生命体征是单一事实来源（`src/vitals.ts`），终端 chat 也同源——多个入口、一个 HireSeek。
+网页指挥台与飞书 Bot 共用同一套 agent 大脑（`src/agent-session.ts`），生命体征是单一事实来源（`src/vitals.ts`），终端 chat 也同源——多个入口、一个 Seeya。
 
 ## 架构
 
+Seeya 的 agent 运行时按 **DeepSeek Harness（DSH）** 路线装配：一切皆插件，没有特权内核。
+
+```
+profile（chat / headless / subagent）
+  └── Cordis 风格 Context
+        ├── ctx.sessions      追加写入的 Session Log（模型看见的都能从日志重建）
+        ├── ctx.systemPrompt  Prompt Section 装配
+        ├── ctx.tools         工具注册表 + pre/execute/post 管线
+        ├── ctx.llm           模型适配器缝合点（`src/llm/provider.ts`：chat / driver / vision）
+        └── ctx.agentLoop     统一 turn/step 驱动
+```
+
+终端 chat、飞书 Bot、网页指挥台、后台 sub-agent **共用同一条 Agent Loop**。招聘能力以插件形式挂上这条缝，而不是写进一个巨型 Agent 类。详见 `docs/DSH-ARCHITECTURE.md`。
+
 ```
 hireseek/
+├── src/dsh/               # DSH 内核：Context / Session / Tools / Prompt / LLM / Loop
+├── src/plugins/           # Seeya 插件：权限闸门、输出卸载、trace、持久化、LLM 适配器、提示词
+├── src/runtime.ts         # profile 装配（chat / headless / subagent）
 ├── packages/
 │   ├── core/              # @hireseek/core — 招聘智能体引擎
 │   │   ├── evaluator/     # 候选人评估引擎
@@ -250,11 +267,11 @@ hireseek/
 │   ├── maimai-adapter/    # @hireseek/maimai-adapter — 脉脉适配器
 │   └── cli/               # @hireseek/cli — 命令行入口
 │
-├── src/                   # agent 运行时（chat / orchestrator / scheduler）
+├── src/                   # agent 宿主（chat TUI / orchestrator / scheduler）
 │   ├── runners/
 │   │   ├── dom-runner.ts  # ★ 默认浏览器手（click ref；Kimi/GLM 也走这里）
 │   │   ├── claude.ts      # Claude 原生 computer-use
-│   │   └── generic-vision.ts # 截图点选（HIRESEEK_BROWSER_MODE=vision）
+│   │   └── generic-vision.ts # 截图点选（SEEYA_BROWSER_MODE=vision）
 │   └── skills/
 │       └── claude-skills.ts  # ★ Claude Skills 桥接层
 └── workspace/             # 职位配置、渠道技能、记忆
@@ -271,16 +288,16 @@ hireseek/
 | `LLM_MODEL` | 随 provider | 对话模型 |
 | `DRIVER_PROVIDER` / `DRIVER_MODEL` | 同 LLM_* | 寻源开车专用；不填则跟对话 |
 | `VISION_PROVIDER` / `VISION_MODEL` | 自动 | 读图；DeepSeek 会升到 `deepseek-v4-flash-vision-exp` |
-| `HIRESEEK_BROWSER_MODE` | `auto` | auto / dom / vision。Kimi、GLM 的 auto = DOM |
-| `HIRESEEK_REASONING_EFFORT` | 寻源 `low` | Kimi/GLM：low / high / max |
+| `SEEYA_BROWSER_MODE` | `auto` | auto / dom / vision。Kimi、GLM 的 auto = DOM。也认 `HIRESEEK_BROWSER_MODE` |
+| `SEEYA_REASONING_EFFORT` | 寻源 `low` | Kimi/GLM：low / high / max。也认 `HIRESEEK_REASONING_EFFORT` |
 | `DEEPSEEK_REASONER_MODEL` | `deepseek-v4-pro` | 评估/策略等深推理场景 |
-| `HIRESEEK_DB_PATH` | `~/.hireseek/hireseek.db` | 数据库路径（自动兼容旧 ~/.hireclaw） |
+| `SEEYA_DB_PATH` | `~/.seeya/seeya.db` | 数据库路径（自动兼容 `~/.hireseek` / `~/.hireclaw`） |
 | `AGENT_KNOWLEDGE_HOME` | — | 独立 canonical 知识/契约 sandbox 路径；不填则用内置兜底契约 |
-| `HIRESEEK_SKILL_HOME` | `~/.codex/skills:~/.claude/skills` | 运行时技能目录，优先读取真实 Codex/Claude skill |
-| `HIRESEEK_EXTERNAL_SKILLS` | `true` | 设为 `false` 时只用仓库内 fallback skill |
-| `HIRESEEK_PRELOAD_LEGACY_SKILLS` | `false` | 已产品化渠道是否仍把完整历史 skill 注入 prompt；默认关闭，避免覆盖产品协议 |
-| `HIRESEEK_BROWSER_CONTROL` | `chrome` | 默认接管真实 Chrome；设为 `hireseek` 才使用自有浏览器 |
-| `HIRESEEK_BROWSER_PROFILE_DIR` | `~/.hireseek/browser-profile` | 自有浏览器模式下的资料夹 |
+| `SEEYA_SKILL_HOME` | `~/.codex/skills:~/.claude/skills` | 运行时技能目录，优先读取真实 Codex/Claude skill |
+| `SEEYA_EXTERNAL_SKILLS` | `true` | 设为 `false` 时只用仓库内 fallback skill |
+| `SEEYA_PRELOAD_LEGACY_SKILLS` | `false` | 已产品化渠道是否仍把完整历史 skill 注入 prompt；默认关闭 |
+| `SEEYA_BROWSER_CONTROL` | `chrome` | 默认接管真实 Chrome；设为 `seeya`（或 `hireseek`）才使用自有浏览器 |
+| `SEEYA_BROWSER_PROFILE_DIR` | `~/.seeya/browser-profile` | 自有浏览器模式下的资料夹 |
 | `FEISHU_WEBHOOK_URL` | — | 飞书执行报告推送 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | — | 飞书自建应用（多维表格读取 + 双向 Bot） |
 | `FEISHU_BITABLE_APP_TOKEN` / `FEISHU_BITABLE_TABLE_ID` | — | 招聘结果多维表格 |
@@ -300,10 +317,10 @@ DOM Runner 内置三条硬约束，即使模型忘了 prompt 里的协议也会�
 ## 进化闭环（自动复盘 + 技能自改写）
 
 ```bash
-hireseek evo        # 复盘并自动改写话术/筛选规则（git 留版本）
-hireseek evo dry    # 只出复盘报告，不落盘
-hireseek evo back   # 回滚最近一次进化
-hireseek evo log    # 进化历史 + 前后推进率对比
+seeya evo        # 复盘并自动改写话术/筛选规则（git 留版本）
+seeya evo dry    # 只出复盘报告，不落盘
+seeya evo back   # 回滚最近一次进化
+seeya evo log    # 进化历史 + 前后推进率对比
 ```
 
 数据流：飞书多维表格（真实招聘结果）+ 本地漏斗 → deepseek-v4-pro 深推理诊断 →
@@ -315,7 +332,7 @@ chat 里说"复盘一下"、"为什么回复率低"也会触发。
 
 ## 角色分层
 
-- **HireSeek 是总控 Agent**：承载上下文、理解招聘任务、与用户共创画像，决定调用什么能力
+- **Seeya 是总控 Agent**：承载上下文、理解招聘任务、与用户共创画像，决定调用什么能力
 - **Claude Skills 是能力库**：寻源策略、竞调、定向挖猎、渠道操作手册，全部即插即用
 - **Adapter / DOM Runner 是手脚**：在具体渠道执行搜索、筛选、触达与跟进
 

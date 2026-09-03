@@ -1,26 +1,17 @@
 import * as dotenv from 'dotenv';
-import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { DEFAULT_MODELS, normalizeProviderId } from './llm/provider';
+import {
+  normalizeBrowserControl,
+  productEnv,
+  resolveBrowserProfileDir,
+  resolveDbPath,
+  resolveHome,
+} from './product';
 
 dotenv.config();
 
-function resolveHome(p: string): string {
-  return p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p;
-}
-
 const provider = normalizeProviderId(process.env.LLM_PROVIDER || 'deepseek');
-
-/** 数据库路径：优先新路径，但若旧版 ~/.hireclaw 数据库存在且新路径未建，则继续沿用，保证数据不丢 */
-function resolveDbPath(): string {
-  const explicit = process.env.HIRESEEK_DB_PATH || process.env.HIRECLAW_DB_PATH;
-  if (explicit) return resolveHome(explicit);
-  const newPath = resolveHome('~/.hireseek/hireseek.db');
-  const legacyPath = resolveHome('~/.hireclaw/hireclaw.db');
-  if (!fs.existsSync(newPath) && fs.existsSync(legacyPath)) return legacyPath;
-  return newPath;
-}
 
 export const config = {
   llm: {
@@ -92,13 +83,13 @@ export const config = {
   },
   // 运行时技能目录。默认读 Codex/Claude 本机技能库；仓库内 workspace/skills 只做兜底。
   skills: {
-    homes: (process.env.HIRESEEK_SKILL_HOME || ['~/.codex/skills', '~/.claude/skills'].join(path.delimiter))
+    homes: (productEnv('SKILL_HOME') || ['~/.codex/skills', '~/.claude/skills'].join(path.delimiter))
       .split(path.delimiter)
       .map(s => s.trim())
       .filter(Boolean)
-      .map(resolveHome),
-    externalEnabled: process.env.HIRESEEK_EXTERNAL_SKILLS !== 'false',
-    preloadLegacyForProductizedChannels: process.env.HIRESEEK_PRELOAD_LEGACY_SKILLS === 'true',
+      .map(p => resolveHome(p)),
+    externalEnabled: productEnv('EXTERNAL_SKILLS') !== 'false',
+    preloadLegacyForProductizedChannels: productEnv('PRELOAD_LEGACY_SKILLS') === 'true',
   },
   feishu: {
     webhookUrl: process.env.FEISHU_WEBHOOK_URL || '',
@@ -109,7 +100,7 @@ export const config = {
       appToken: process.env.FEISHU_BITABLE_APP_TOKEN || '',
       tableId:  process.env.FEISHU_BITABLE_TABLE_ID || '',
     },
-    // 双向 Bot：长连接事件订阅（无需公网回调），对话即指挥 HireSeek
+    // 双向 Bot：长连接事件订阅（无需公网回调），对话即指挥 Seeya
     bot: {
       enabled: process.env.FEISHU_BOT_ENABLED === 'true',
       // 限定只响应这些用户（open_id，逗号分隔）；留空=不限制
@@ -120,12 +111,12 @@ export const config = {
     },
   },
   browser: {
-    control: process.env.HIRESEEK_BROWSER_CONTROL || 'chrome',
+    control: normalizeBrowserControl(productEnv('BROWSER_CONTROL') || 'chrome'),
     /** auto=按模型推荐；dom=强制文本 ref；vision=截图点选（仅 OpenAI 兼容视觉模型） */
-    mode: process.env.HIRESEEK_BROWSER_MODE || 'auto',
+    mode: productEnv('BROWSER_MODE') || 'auto',
     headless: process.env.BROWSER_HEADLESS === 'true',
     slowMo:   parseInt(process.env.BROWSER_SLOW_MO || '100', 10),
-    profileDir: resolveHome(process.env.HIRESEEK_BROWSER_PROFILE_DIR || '~/.hireseek/browser-profile'),
+    profileDir: resolveBrowserProfileDir(),
     viewport: { width: 900, height: 600 },
   },
   workspace: {

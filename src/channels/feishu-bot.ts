@@ -1,5 +1,5 @@
 /**
- * 飞书双向 Bot —— 对话即指挥 HireSeek
+ * 飞书双向 Bot —— 对话即指挥 Seeya
  *
  * 用长连接（WebSocket）事件订阅接收飞书消息，无需公网回调地址、无需内网穿透：
  *
@@ -7,7 +7,7 @@
  *   CHAT_TOOLS / executeTool 跑无头 agent 循环 → 回复经 IM 接口发回飞书
  *
  * 这样 HR 不必守在电脑前的终端——在手机飞书上一句"今天 BOSS 进展怎么样"、
- * "把做供应链的候选人列出来"、"派个后台任务调研一下熊文韬"，HireSeek 就在
+ * "把做供应链的候选人列出来"、"派个后台任务调研一下熊文韬"，Seeya 就在
  * 常驻守护进程里执行并回话。心跳/后台任务/调度的主动通知也优先经此 Bot 推送。
  *
  * 需要：FEISHU_APP_ID / FEISHU_APP_SECRET（自建应用，开启"长连接"事件订阅，
@@ -131,7 +131,7 @@ export async function startFeishuBot(): Promise<void> {
       // 用户白名单
       const allow = config.feishu.bot.allowUsers;
       if (allow.length > 0 && senderId && !allow.includes(senderId)) {
-        await sendText(chatId, '抱歉，你没有使用此 HireSeek Bot 的权限。');
+        await sendText(chatId, '抱歉，你没有使用此 Seeya Bot 的权限。');
         return;
       }
 
@@ -148,7 +148,7 @@ export async function startFeishuBot(): Promise<void> {
       }
       if (userText === '/help' || userText === '帮助') {
         await sendText(chatId,
-          'HireSeek 在线。直接说人话指挥我：\n' +
+          'Seeya 在线。直接说人话指挥我：\n' +
           '· "今天 BOSS / 脉脉进展怎么样"\n' +
           '· "把做供应链的候选人列出来"\n' +
           '· "派个后台任务调研一下张三"\n' +

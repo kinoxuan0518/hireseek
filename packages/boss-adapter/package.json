@@ -1,7 +1,7 @@
 {
   "name": "@hireseek/boss-adapter",
   "version": "0.1.0",
-  "description": "🦞 HireSeek BOSS直聘适配器 — 浏览器自动化招聘",
+  "description": "🦞 Seeya BOSS直聘适配器 — 浏览器自动化招聘",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

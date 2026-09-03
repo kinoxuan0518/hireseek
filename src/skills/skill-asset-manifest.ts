@@ -105,7 +105,7 @@ export function buildSkillAssetManifest(): SkillAssetManifestEntry[] {
 export function formatSkillAssetManifest(): string {
   const manifest = buildSkillAssetManifest();
   return [
-    'HireSeek Skill Asset Manifest',
+    'Seeya Skill Asset Manifest',
     '',
     ...manifest.map(entry => {
       const external = entry.externalAssets.length

@@ -24,8 +24,9 @@ import {
 } from './runners/dom-runner';
 import type { BrowserAction, RiskGuard } from './runners/dom-runner';
 import type { ChromeTab } from './chrome-applescript';
+import { productEnv } from './product';
 
-const CDP_URL = process.env.HIRESEEK_CDP_URL || 'http://127.0.0.1:9222';
+const CDP_URL = productEnv('CDP_URL') || 'http://127.0.0.1:9222';
 
 interface ChatBrowserState {
   cdpBrowser: Browser | null;
@@ -141,7 +142,7 @@ export async function connectBrowser(urlHint?: string): Promise<string> {
   const { getPage } = await import('./browser-runner');
   state.page = await getPage();
   state.mode = 'playwright';
-  return `未检测到正在运行的 Chrome，已启动 HireSeek 自有浏览器（无你的登录态）。` +
+  return `未检测到正在运行的 Chrome，已启动 Seeya 自有浏览器（无你的登录态）。` +
     `建议先打开你的 Chrome 并登录 BOSS/脉脉，再让我重新连接。`;
 }
 
@@ -269,7 +270,7 @@ export function browserStatus(): string {
   const labels: Record<string, string> = {
     cdp: '已接管你的 Chrome（CDP）',
     applescript: '已接管你的 Chrome（AppleScript 直连）',
-    playwright: 'HireSeek 自有浏览器',
+    playwright: 'Seeya 自有浏览器',
   };
   const modeLabel = labels[state.mode ?? ''] ?? '未连接';
   return `${modeLabel}${state.dailyLimitHit ? '（今日打招呼已锁定）' : ''}`;

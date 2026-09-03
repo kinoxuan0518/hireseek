@@ -2,6 +2,7 @@ import dayjs from 'dayjs';
 import type { Page } from 'playwright';
 import { getPage, createNewPage, createPageForAccount, saveAccountState } from './browser-runner';
 import { config } from './config';
+import { usesOwnBrowser } from './product';
 import type { BrowserTarget } from './browser-session';
 import { isDomBrowserSession } from './browser-session';
 import { connectRealChrome } from './real-chrome-session';
@@ -87,7 +88,7 @@ export function formatScreenContactGate(
       '## Screen 候选人白名单',
       '',
       '没有可用于正式触达的结构化 screen 候选人。',
-      `本轮禁止建立 prepare_contact；请先运行 \`hireseek run ${channel} --here --screen\` 完成 ${label} 候选人筛选，并用 record_screened_candidate 记录建议触达名单。`,
+      `本轮禁止建立 prepare_contact；请先运行 \`seeya run ${channel} --here --screen\` 完成 ${label} 候选人筛选，并用 record_screened_candidate 记录建议触达名单。`,
     ].join('\n');
   }
   return [
@@ -440,12 +441,12 @@ export function runSkillOptionsForChannel(
 }
 
 async function createBrowserTarget(channel: Channel, runId?: number | null, mode: ChannelRunMode = 'execute'): Promise<BrowserTarget> {
-  if (config.browser.control === 'hireseek') {
+  if (usesOwnBrowser(config.browser.control)) {
     return await getPage();
   }
 
   if (config.browser.control !== 'chrome') {
-    throw new Error(`不支持的 HIRESEEK_BROWSER_CONTROL=${config.browser.control}，可选 chrome / hireseek`);
+    throw new Error(`不支持的 HIRESEEK_BROWSER_CONTROL=${config.browser.control}，可选 chrome / seeya（hireseek 仍可用）`);
   }
 
   try {
@@ -523,8 +524,8 @@ async function ensurePlatformSession(target: BrowserTarget, channel: Channel): P
 
     if (isOnTargetPage && !looksUnavailable) return;
 
-    console.log(`\n[HireSeek] ⚠️  当前 Chrome 还没有可用的 ${CHANNEL_LABEL[channel]} 登录态（当前：${currentUrl}）`);
-    console.log('[HireSeek] 请在你已打开的 Chrome 里完成登录/切到正确页面，登录完成后回到终端按 Enter 继续...');
+    console.log(`\n[Seeya] ⚠️  当前 Chrome 还没有可用的 ${CHANNEL_LABEL[channel]} 登录态（当前：${currentUrl}）`);
+    console.log('[Seeya] 请在你已打开的 Chrome 里完成登录/切到正确页面，登录完成后回到终端按 Enter 继续...');
     await new Promise<void>(resolve => {
       process.stdin.once('data', () => resolve());
     });
@@ -751,7 +752,7 @@ export async function scanInbox(jobId: string = 'default'): Promise<void> {
 
   const currentUrl = page.url();
   if (!currentUrl.includes('zhipin.com/web')) {
-    console.log('\n[HireSeek] ⚠️  请先登录 BOSS直聘，登录完成后按 Enter 继续...');
+    console.log('\n[Seeya] ⚠️  请先登录 BOSS直聘，登录完成后按 Enter 继续...');
     await new Promise<void>(resolve => { process.stdin.once('data', () => resolve()); });
     await page.goto('https://www.zhipin.com/web/chat/index', { waitUntil: 'domcontentloaded', timeout: 30000 });
   }
@@ -852,7 +853,7 @@ export async function runJob(usePlan: boolean = false): Promise<void> {
     return;
   }
 
-  console.log(`\n🦞 HireSeek 并行模式`);
+  console.log(`\n🦞 Seeya 并行模式`);
   console.log(`职位：${job.title}  |  今日目标：${dailyGoal} 人`);
 
   // 构建任务列表（每个账号一个任务）

@@ -13,12 +13,10 @@ export interface JobConfig {
     deal_breaker?: string[];
   };
   salary?: { min: number; max: number; unit: string };
-  channels?: {
-    [key in Channel]?: {
-      enabled: boolean;
-      accounts: number;
-    };
-  };
+  /** map 是标准形；早期 setup 向导写出的是 `- boss` 列表，读取端两种都认 */
+  channels?:
+    | { [key in Channel]?: { enabled: boolean; accounts: number } }
+    | Channel[];
   daily_goal?: { contact: number; quality: number };
   urgency?: string;
   deadline?: string;
@@ -30,12 +28,23 @@ export function loadActiveJob(): JobConfig | null {
   return yaml.load(fs.readFileSync(filePath, 'utf-8')) as JobConfig;
 }
 
+const KNOWN_CHANNELS: Channel[] = ['boss', 'maimai', 'linkedin', 'followup'];
+
 /** 获取启用的渠道及其账号配置 */
 export function getEnabledChannels(job: JobConfig): Array<{ channel: Channel; accounts: number }> {
-  if (!job.channels) return [];
-  return (Object.keys(job.channels) as Channel[])
-    .filter(ch => job.channels![ch]?.enabled)
-    .map(ch => ({ channel: ch, accounts: job.channels![ch]!.accounts }))
+  const channels = job.channels;
+  if (!channels) return [];
+
+  if (Array.isArray(channels)) {
+    return channels
+      .map(entry => String(entry).trim().toLowerCase() as Channel)
+      .filter(channel => KNOWN_CHANNELS.includes(channel))
+      .map(channel => ({ channel, accounts: 1 }));
+  }
+
+  return (Object.keys(channels) as Channel[])
+    .filter(ch => channels[ch]?.enabled)
+    .map(ch => ({ channel: ch, accounts: channels[ch]!.accounts }))
     .filter(({ accounts }) => accounts > 0);
 }
 
@@ -76,16 +85,16 @@ function readSkillFile(filePath: string, sourceLabel: string): string | null {
   if (!fs.existsSync(filePath)) return null;
   const content = fs.readFileSync(filePath, 'utf-8');
   return [
-    `<!-- HireSeek skill source: ${sourceLabel} -->`,
+    `<!-- Seeya skill source: ${sourceLabel} -->`,
     [
       '# Skill 资产兼容层',
       '',
       '以下内容来自历史 skill，用作页面经验、异常案例、候选人判断样例和迁移素材。',
-      '它不是 HireSeek 产品运行时的最高优先级协议。',
+      '它不是 Seeya 产品运行时的最高优先级协议。',
       '',
       '优先级规则：',
       '1. 代码层工具安全、风控、run trace、message history、结构化输出契约优先。',
-      '2. HireSeek 产品中层协议（platform protocol / capability protocol）优先。',
+      '2. Seeya 产品中层协议（platform protocol / capability protocol）优先。',
       '3. 本 skill 资产只在不冲突时补充执行细节；若发生冲突，必须服从前两层。',
     ].join('\n'),
     content,

@@ -152,7 +152,7 @@ export async function sendReport(report: {
   };
 
   const lines = [
-    `🦞 HireSeek 执行完成`,
+    `🦞 Seeya 执行完成`,
     `渠道：${channelLabel[report.channel] ?? report.channel}`,
     `触达：${report.contacted} 人`,
     `跳过：${report.skipped} 人`,

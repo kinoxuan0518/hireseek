@@ -117,6 +117,17 @@ export function ensureAgentCoreSchema(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_agent_messages_session ON agent_messages(session_id);
 
+    CREATE TABLE IF NOT EXISTS agent_session_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id   TEXT NOT NULL,
+      seq          INTEGER NOT NULL,
+      type         TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at   TEXT NOT NULL,
+      UNIQUE(session_id, seq)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_session_events_session ON agent_session_events(session_id);
+
     CREATE TABLE IF NOT EXISTS agent_memory_raw (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       scope         TEXT NOT NULL DEFAULT 'global',

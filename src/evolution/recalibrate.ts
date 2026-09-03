@@ -59,7 +59,7 @@ function spanDays(rows: OutcomeRow[]): number {
 }
 
 const RECALIBRATE_SYSTEM = `
-你是 HireSeek 的"合适"定义校准官。下面给你：现行的候选人评估 rubric 全文，外加
+你是 Seeya 的"合适"定义校准官。下面给你：现行的候选人评估 rubric 全文，外加
 一批**既被验证器预测过、又有真实面试结果**的候选人——每个人都有：事实（公司/学校）、
 验证器当时判的匹配分、以及真实是过面还是挂面。
 

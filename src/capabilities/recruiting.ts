@@ -195,7 +195,7 @@ export function buildRecruitingCapabilityContext(opts: RecruitingCapabilityConte
   });
 
   return [
-    '# HireSeek 中层招聘能力',
+    '# Seeya 中层招聘能力',
     '这些能力是跨渠道共享的招聘知识与判断协议。外部 skill 可补充案例和页面细节，但不能覆盖这里的中层能力、平台协议、代码护栏或结构化输出契约。',
     OUTREACH_OUTPUT_PROTOCOL,
     ...sections,
@@ -207,7 +207,7 @@ export function formatRecruitingCapabilities(channel?: Channel): string {
   if (capabilities.length === 0) return '当前没有注册任何招聘中层能力。';
 
   return [
-    'HireSeek 中层招聘能力',
+    'Seeya 中层招聘能力',
     '',
     ...capabilities.map(c => [
       `- ${c.id}: ${c.name}`,
@@ -226,7 +226,7 @@ export function formatRecruitingCapabilityManifest(channel?: Channel): string {
   const manifest = buildRecruitingCapabilityManifest(channel);
   if (manifest.length === 0) return '当前没有可用的招聘能力 manifest。';
   return [
-    'HireSeek Recruiting Capability Manifest',
+    'Seeya Recruiting Capability Manifest',
     '',
     ...manifest.map(entry => {
       const appliesTo = entry.appliesTo === 'all' ? 'all' : entry.appliesTo.join(', ');

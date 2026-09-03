@@ -109,7 +109,7 @@ export async function gatherEvidence(): Promise<string> {
 // ── LLM 复盘 ─────────────────────────────────────────────────────────
 
 const RETROSPECT_SYSTEM = `
-你是 HireSeek 的进化引擎，负责基于真实招聘数据复盘并改写两份核心资产：
+你是 Seeya 的进化引擎，负责基于真实招聘数据复盘并改写两份核心资产：
 1. outreach-guide（打招呼/触达话术指南）
 2. candidate-evaluation（候选人筛选与评分规则）
 

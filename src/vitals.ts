@@ -1,5 +1,5 @@
 /**
- * 生命体征（vitals）—— 让你对 HireSeek 有"安全感"的单一事实来源
+ * 生命体征（vitals）—— 让你对 Seeya 有"安全感"的单一事实来源
  *
  * 安全感不是来自一个要你主动去看的网页，而是来自三个随时能回答、且它会主动
  * 报给你的问题：
@@ -8,11 +8,11 @@
  *   3. 它接下来要做什么？  —— 下一个定时任务、STATE 里写的下一步
  *
  * 这套数据有两类消费者：
- *   · 拉取式：`hireseek alive` 命令、网页指挥台 /api/status —— 你想看时随时看
+ *   · 拉取式：`seeya alive` 命令、网页指挥台 /api/status —— 你想看时随时看
  *   · 推送式：daemon 上线/下线、晨间签到、傍晚收工、心跳重动作 —— 它主动来找你
  *
  * 关键设计：守护进程每分钟往 alive.json 写一个时间戳（markAlive）。这样即便
- * `hireseek alive` 是另一个独立进程，也能读到"它 30 秒前还活着"——这正是
+ * `seeya alive` 是另一个独立进程，也能读到"它 30 秒前还活着"——这正是
  * "在线"二字的实感来源，而不是一句空泛的"已安装"。
  */
 
@@ -68,7 +68,7 @@ function readAliveRaw(): AliveFile | null {
 
 // ── 读取侧：汇总生命体征 ───────────────────────────────────────────────
 export interface Vitals {
-  online: boolean;            // 有 HireSeek 进程活着且最近报过平安（可达）
+  online: boolean;            // 有 Seeya 进程活着且最近报过平安（可达）
   guarding: boolean;          // 守护进程（调度+心跳）在跑，定时任务才会自动触发
   staleness: string | null;   // "刚刚" / "2 分钟前" / null(离线)
   startedAt: string | null;
@@ -185,17 +185,17 @@ export function collectVitals(): Vitals {
 
 // ── 人话化：把生命体征说成一句让人安心的话 ──────────────────────────────
 export function formatVitals(v: Vitals, trigger?: string): string {
-  const head = trigger ? `🔱 HireSeek ${trigger}` : '🔱 HireSeek 生命体征';
+  const head = trigger ? `🔱 Seeya ${trigger}` : '🔱 Seeya 生命体征';
   const lines: string[] = [head, ''];
 
   if (v.guarding) {
     lines.push(`✅ 在线守护中 · 已守护 ${v.uptime ?? '—'}（最后报平安：${v.staleness ?? '刚刚'}）`);
   } else if (v.online) {
-    lines.push('🟡 我在，但未常驻守护 · 现在能指挥我，但定时任务要 `hireseek daemon install` 才会自动跑');
+    lines.push('🟡 我在，但未常驻守护 · 现在能指挥我，但定时任务要 `seeya daemon install` 才会自动跑');
   } else if (v.staleness) {
     lines.push(`⚠️ 可能掉线 · 最后一次活动 ${v.staleness}，建议看一眼守护进程`);
   } else {
-    lines.push('⏸ 未在守护 · 当前没有常驻进程在跑（hireseek daemon install 可让它常驻）');
+    lines.push('⏸ 未在守护 · 当前没有常驻进程在跑（seeya daemon install 可让它常驻）');
   }
 
   lines.push(`📋 在岗：${v.job}`);
@@ -235,5 +235,5 @@ export function formatVitals(v: Vitals, trigger?: string): string {
 export async function reportVitals(trigger: string): Promise<void> {
   const { notify } = await import('./notifier');
   const v = collectVitals();
-  await notify(`HireSeek ${trigger}`, formatVitals(v, trigger));
+  await notify(`Seeya ${trigger}`, formatVitals(v, trigger));
 }

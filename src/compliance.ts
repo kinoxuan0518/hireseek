@@ -104,7 +104,7 @@ export interface StageCoverageAudit {
 }
 
 const COMPLIANCE_SYSTEM = `
-你是 HireSeek 的**流程合规审计官**。寻源 agent 已经跑完一轮，下面是它这一轮的
+你是 Seeya 的**流程合规审计官**。寻源 agent 已经跑完一轮，下面是它这一轮的
 完整浏览器执行轨迹。你不评判它找的人好不好（那是另一个验证器的事），你只审
 **它干活的方法合不合规**——对照下面的过程规则，逐条检查轨迹有没有违反。
 
@@ -396,7 +396,7 @@ function buildSummary(verdict: Verdict, violations: Violation[], steps: number):
 /** 人话报告（CLI / 通知共用）。 */
 export function formatCompliance(c: ComplianceResult): string {
   if (c.verdict === 'skip') return c.summary;
-  return `🧭 HireSeek 流程合规审计（run #${c.runId}）\n\n${c.summary}`;
+  return `🧭 Seeya 流程合规审计（run #${c.runId}）\n\n${c.summary}`;
 }
 
 /** 最近一次合规结论（供生命体征展示）。 */
