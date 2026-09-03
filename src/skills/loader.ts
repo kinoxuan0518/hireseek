@@ -13,12 +13,10 @@ export interface JobConfig {
     deal_breaker?: string[];
   };
   salary?: { min: number; max: number; unit: string };
-  channels?: {
-    [key in Channel]?: {
-      enabled: boolean;
-      accounts: number;
-    };
-  };
+  /** map 是标准形；早期 setup 向导写出的是 `- boss` 列表，读取端两种都认 */
+  channels?:
+    | { [key in Channel]?: { enabled: boolean; accounts: number } }
+    | Channel[];
   daily_goal?: { contact: number; quality: number };
   urgency?: string;
   deadline?: string;
@@ -30,12 +28,23 @@ export function loadActiveJob(): JobConfig | null {
   return yaml.load(fs.readFileSync(filePath, 'utf-8')) as JobConfig;
 }
 
+const KNOWN_CHANNELS: Channel[] = ['boss', 'maimai', 'linkedin', 'followup'];
+
 /** 获取启用的渠道及其账号配置 */
 export function getEnabledChannels(job: JobConfig): Array<{ channel: Channel; accounts: number }> {
-  if (!job.channels) return [];
-  return (Object.keys(job.channels) as Channel[])
-    .filter(ch => job.channels![ch]?.enabled)
-    .map(ch => ({ channel: ch, accounts: job.channels![ch]!.accounts }))
+  const channels = job.channels;
+  if (!channels) return [];
+
+  if (Array.isArray(channels)) {
+    return channels
+      .map(entry => String(entry).trim().toLowerCase() as Channel)
+      .filter(channel => KNOWN_CHANNELS.includes(channel))
+      .map(channel => ({ channel, accounts: 1 }));
+  }
+
+  return (Object.keys(channels) as Channel[])
+    .filter(ch => channels[ch]?.enabled)
+    .map(ch => ({ channel: ch, accounts: channels[ch]!.accounts }))
     .filter(({ accounts }) => accounts > 0);
 }
 

@@ -91,7 +91,7 @@ salary:
   unit: 月薪（税前）
 
 channels:
-${fields.channels.map(c => `  - ${c}`).join('\n')}
+${fields.channels.map(c => `  ${c}:\n    enabled: true\n    accounts: 1`).join('\n')}
 
 daily_goal:
   contact: ${fields.dailyContact}
