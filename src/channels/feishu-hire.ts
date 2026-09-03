@@ -23,6 +23,8 @@ export interface SyncOutcome {
   name: string;
   result: 'passed' | 'failed';
   interviewer?: string;
+  /** 面试官写的评语原文——"为什么判他过/挂"，重校时比过/挂这个二元位有用得多 */
+  feedback?: string;
   raw: string;            // 原始结论值/列值，dry-run 时给你核对映射
   source: 'hire' | 'bitable';
   written?: OutcomeResult;
@@ -39,8 +41,9 @@ export interface SyncReport {
 }
 
 // ── 结论映射（可配，dry-run 会暴露原始值）─────────────────────────────
-// 飞书招聘 interview_record.conclusion 常见约定：1=通过/推荐，2=不通过，3=待定。
-// 但不同租户/版本可能不同——用 env 覆盖，首次务必先 dry-run 看原始值再锁定。
+// 文档口径（hire/v1 interview_record.conclusion）：1=通过、2=不通过、3=未开始、
+// 4=未提交、5=未到场、6=待定。只有 1/2 是可用信号，其余一律跳过。
+// 仍留 env 覆盖：租户可能自定义评价表，首次务必先 dry-run 看原始值再锁定。
 function parseHireConclusion(raw: unknown): 'passed' | 'failed' | null {
   const s = String(raw ?? '').trim().toLowerCase();
   const passSet = (process.env.FEISHU_HIRE_PASS_VALUES || '1,通过,推荐,推荐通过,pass,recommended,hired').split(',').map(x => x.trim().toLowerCase());
@@ -48,6 +51,92 @@ function parseHireConclusion(raw: unknown): 'passed' | 'failed' | null {
   if (passSet.includes(s)) return 'passed';
   if (failSet.includes(s)) return 'failed';
   return null; // 待定/未知 → 不写
+}
+
+const MAX_FEEDBACK_CHARS = 4000;
+
+/** 飞书大量字段是 i18n 对象 {zh_cn, en_us}；直接 String() 会得到 [object Object] */
+function i18n(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value === 'object') {
+    const obj = value as { zh_cn?: unknown; en_us?: unknown };
+    const zh = typeof obj.zh_cn === 'string' ? obj.zh_cn.trim() : '';
+    const en = typeof obj.en_us === 'string' ? obj.en_us.trim() : '';
+    return zh || en;
+  }
+  return '';
+}
+
+export function interviewerName(record: unknown): string {
+  const rec = record as { interviewer?: { name?: unknown }; interviewer_name?: unknown; user_name?: unknown } | null;
+  return i18n(rec?.interviewer?.name) || i18n(rec?.interviewer_name) || i18n(rec?.user_name);
+}
+
+/**
+ * 按飞书招聘的实际返回结构取面评。
+ *
+ * v1（hire/v1/interview_records）：content 是总评，dimension_assessment_list[].content 是各维度评语，
+ * interview_score.zh_description 是结论档位的人话描述（"通过, 能力达到要求, 建议录用"）。
+ * v2（hire/v2/interview_records）：module_assessments → dimension_assessments，
+ * 描述题作答在 dimension_content，逐题作答在 question_assessments[].content。
+ *
+ * 维度名和作答要绑在一起输出——脱离题目的一句"还不错"对重校没有价值。
+ */
+export function extractInterviewFeedback(record: unknown, maxChars = MAX_FEEDBACK_CHARS): string {
+  if (!record || typeof record !== 'object') return '';
+  const rec = record as Record<string, any>;
+  const lines: string[] = [];
+  const push = (text: string) => {
+    const trimmed = text.trim();
+    if (trimmed && !lines.includes(trimmed)) lines.push(trimmed);
+  };
+
+  // 结论档位：比裸的 conclusion 枚举值多带了面试官口径
+  const levelDesc = i18n(rec.interview_score?.zh_description ?? rec.interview_score?.en_description);
+  if (levelDesc) push(`面试结论档位：${levelDesc}`);
+
+  const score = rec.record_score?.score;
+  const total = rec.record_score?.total_score;
+  if (typeof score === 'number') push(`面试得分：${score}${typeof total === 'number' ? `/${total}` : ''}`);
+
+  // v1 总评
+  if (typeof rec.content === 'string') push(`总评：${rec.content}`);
+
+  // v1 维度评价
+  for (const dim of rec.dimension_assessment_list ?? []) {
+    const name = i18n(dim?.name) || '维度';
+    const verdict = i18n(dim?.dimension_score?.name);
+    const content = typeof dim?.content === 'string' ? dim.content.trim() : '';
+    if (content || verdict) push(`${name}${verdict ? `（${verdict}）` : ''}：${content || verdict}`);
+  }
+
+  // v2 模块 → 维度 → 面试题
+  for (const mod of rec.module_assessments ?? []) {
+    for (const dim of mod?.dimension_assessments ?? []) {
+      const name = i18n(dim?.dimension_name) || '维度';
+      const parts: string[] = [];
+      if (typeof dim?.dimension_content === 'string' && dim.dimension_content.trim()) parts.push(dim.dimension_content.trim());
+      const option = i18n(dim?.dimension_option?.name);
+      if (option) parts.push(option);
+      for (const opt of dim?.dimension_options ?? []) {
+        const label = i18n(opt?.name);
+        if (label && !parts.includes(label)) parts.push(label);
+      }
+      if (typeof dim?.dimension_score === 'number') parts.push(`打分 ${dim.dimension_score}`);
+      const level = i18n(dim?.recommended_job_level?.lower_limit_job_level_name);
+      const levelHigh = i18n(dim?.recommended_job_level?.higher_limit_job_level_name);
+      if (level || levelHigh) parts.push(`职级建议 ${[level, levelHigh].filter(Boolean).join('~')}`);
+      if (parts.length) push(`${name}：${parts.join('；')}`);
+
+      for (const q of dim?.question_assessments ?? []) {
+        const title = i18n(q?.title);
+        const answer = typeof q?.content === 'string' ? q.content.trim() : '';
+        if (answer) push(`面试题「${title || '未命名'}」候选人作答：${answer}`);
+      }
+    }
+  }
+
+  return lines.join('\n').slice(0, maxChars).trim();
 }
 
 function parseBitableResult(raw: unknown): 'passed' | 'failed' | null {
@@ -119,6 +208,29 @@ export async function syncFromHire(opts: { dryRun?: boolean; sinceDays?: number 
     } catch { return ''; }
   };
 
+  // 面试列表带的评价往往不全；v2 详情含模块/维度/逐题作答，取不到再退 v1
+  const detailCache = new Map<string, unknown>();
+  const recordDetail = async (recordId?: string): Promise<unknown> => {
+    if (!recordId) return null;
+    if (detailCache.has(recordId)) return detailCache.get(recordId);
+    const path = { interview_record_id: recordId };
+    for (const fetch of [
+      () => (client.hire as any).v2?.interviewRecord?.get({ path }),
+      () => client.hire.interviewRecord.get({ path }),
+    ]) {
+      try {
+        const r: any = await fetch();
+        const detail = r?.data?.interview_record ?? null;
+        if (detail) {
+          detailCache.set(recordId, detail);
+          return detail;
+        }
+      } catch { /* 换下一个版本重试 */ }
+    }
+    detailCache.set(recordId, null);
+    return null;
+  };
+
   for (const iv of interviews) {
     const beginMs = Number(iv?.begin_time ?? iv?.start_time ?? 0);
     if (beginMs && beginMs < sinceMs) continue;
@@ -132,9 +244,22 @@ export async function syncFromHire(opts: { dryRun?: boolean; sinceDays?: number 
       base.scanned++;
       const raw = rec?.conclusion ?? rec?.conclusion_status ?? iv?.conclusion;
       const result = parseHireConclusion(raw);
-      const interviewer = rec?.interviewer?.name ?? rec?.interviewer_name ?? rec?.user_name ?? undefined;
       if (!result) { base.skipped.push(`${tName}：结论"${raw ?? '空'}"非通过/不通过（待定或未知）`); continue; }
-      base.resolved.push({ name: tName, result, interviewer, raw: String(raw), source: 'hire' });
+
+      // 列表里的评价常常只有总评；详情把维度和逐题作答一并带回来
+      const detail = await recordDetail(rec?.id ?? rec?.interview_record_id);
+      const feedback = [extractInterviewFeedback(detail), extractInterviewFeedback(rec)]
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length)[0] ?? '';
+
+      base.resolved.push({
+        name: tName,
+        result,
+        interviewer: interviewerName(detail) || interviewerName(rec) || undefined,
+        feedback: feedback || undefined,
+        raw: String(raw),
+        source: 'hire',
+      });
     }
   }
 
@@ -186,8 +311,14 @@ export async function syncFromBitable(opts: { dryRun?: boolean } = {}): Promise<
 function finalize(base: SyncReport): SyncReport {
   if (!base.dryRun) {
     for (const o of base.resolved) {
-      const note = [o.source === 'hire' ? '飞书招聘' : '飞书表格', o.interviewer ? `面试官${o.interviewer}` : ''].filter(Boolean).join('·');
-      o.written = recordInterviewOutcome({ name: o.name, result: o.result, note });
+      const note = o.source === 'hire' ? '飞书招聘' : '飞书表格';
+      o.written = recordInterviewOutcome({
+        name: o.name,
+        result: o.result,
+        note,
+        interviewer: o.interviewer,
+        feedback: o.feedback,
+      });
     }
   }
 
@@ -195,11 +326,16 @@ function finalize(base: SyncReport): SyncReport {
   const lines = [head, ''];
   if (base.error) lines.push(`⚠️ ${base.text || base.error}`);
   else {
-    lines.push(`扫描带结论记录 ${base.scanned} 条，可映射 ${base.resolved.length} 条：`);
+    const withFeedback = base.resolved.filter(o => o.feedback).length;
+    lines.push(`扫描带结论记录 ${base.scanned} 条，可映射 ${base.resolved.length} 条（其中 ${withFeedback} 条带面试官评语）：`);
     for (const o of base.resolved.slice(0, 20)) {
       lines.push(`· ${o.name} → ${o.result === 'passed' ? '过面✅' : '挂面❌'}${o.interviewer ? `（面试官 ${o.interviewer}）` : ''}　[原始:${o.raw}]`);
+      if (o.feedback) lines.push(`    评语：${o.feedback.replace(/\s+/g, ' ').slice(0, 120)}${o.feedback.length > 120 ? '…' : ''}`);
     }
     if (base.resolved.length > 20) lines.push(`…还有 ${base.resolved.length - 20} 条`);
+    if (base.source === 'hire' && base.resolved.length > 0 && withFeedback === 0) {
+      lines.push('', '⚠️ 一条评语都没取到：可能是没开 hire:interview:readonly 的评价读权限，或本租户把评语放在别的字段。评语是重校最有用的信号，值得排查。');
+    }
     if (base.skipped.length) {
       lines.push('', `跳过 ${base.skipped.length} 条：`);
       base.skipped.slice(0, 8).forEach(s => lines.push(`· ${s}`));

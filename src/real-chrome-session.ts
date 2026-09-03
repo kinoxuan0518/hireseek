@@ -51,12 +51,12 @@ function wrapPlaywrightPage(page: Page): DomBrowserSession {
         active: true,
       };
     },
-    async snapshot() {
-      return await takeDomSnapshot(page);
+    async snapshot(opts) {
+      return await takeDomSnapshot(page, opts);
     },
     async act(input: BrowserAction, guard: RiskGuard) {
       await executeDomAction(page, input, guard);
-      return await takeDomSnapshot(page);
+      return await takeDomSnapshot(page, { full: input.full });
     },
   };
 }

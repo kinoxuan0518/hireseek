@@ -64,6 +64,11 @@ const BOSS_DOM_RULES = [
 const BOSS_CANDIDATE_RULES = [
   '进入目标职位的推荐候选人页面后，优先处理主页面页签：推荐 -> 最新；精选只有用户明确要求时处理。',
   '候选人处理必须先看可见证据，再决定是否打招呼；不要在列表页无差别群发。',
+  '候选人详情是浮在列表之上的弹层：从列表点进第一位后，用弹层左右两侧边缘的箭头（‹ 上一位 / › 下一位）连续翻，不要用 back 关弹层，也不要每看一个人就退回列表。',
+  '详情弹层分两步读：先常规 snapshot 看头部基本信息、期望职位和右侧「经历概览」的职业轨迹，够判 skip 就直接翻下一位；值得继续看的人再用 snapshot(full=true) 读工作经历里的业绩与内容明细。',
+  '要判断一个人值得推进（建议触达），必须已经通读过整份简历；只凭列表卡片或弹层头部下这个结论会被代码层拒绝。',
+  '跳过一个人只写进 record_screened_candidate；禁止点击弹层右侧的「不合适」「收藏」「转发牛人」——那是写到平台上的标记，不是本地记录。「举报」任何模式都不要点。',
+  '「帮我联系」与「打招呼」同属真实触达入口，受同一套触达握手和风控约束。',
   '每次只点击一个打招呼/沟通按钮，打招呼类点击间隔遵守产品侧风控下限（≥5 秒），禁止批量循环点击。',
   '点击前提取候选人姓名、公司、职位、地点、学校、学历、技能标签和匹配证据；字段缺失写 null 并记录 parse_quality。',
   '点击后确认按钮状态变为继续沟通，并立即调用 record_contacted；不要把候选人攒到最终总结里才登记。',
@@ -110,9 +115,17 @@ const BOSS_PROTOCOL_STAGES: BossProtocolStage[] = [
   {
     id: 'candidate-screen',
     name: '候选人证据查看',
-    required: ['先看可见证据再决定是否触达', '无法页面筛选的事实进入脚本精筛'],
-    evidence: ['触达前存在候选人详情/卡片 snapshot', '候选人证据、风险标签、跳过原因进入结构化输出'],
-    onFailure: '不允许列表页无差别群发；信息不足时记录风险或跳过。',
+    required: [
+      '在详情页而不是列表页做判断，候选人之间用详情页下一位入口连续翻',
+      '详情页先常规 snapshot 淘汰明显不合适的；值得推进的必须 snapshot(full=true) 通读整份简历',
+      '无法页面筛选的事实进入脚本精筛',
+    ],
+    evidence: [
+      '建议触达的候选人存在详情页 snapshot 与整份简历摘要',
+      '候选人证据、风险标签、跳过原因进入结构化输出',
+      '结构化输出如实记录 reading_depth 与整份简历的合拍性判断',
+    ],
+    onFailure: '不允许列表页无差别群发；没通读整份简历就想建议触达会被代码层拒绝，信息不足时记录风险或跳过。',
   },
   {
     id: 'single-contact',
@@ -300,7 +313,9 @@ ${formatBossPrefilterPlan(opts.activeJob)}
 - 禁止用 browser.goto 直接跳深链或绕过站内流程；职位切换必须通过 BOSS 页面内可见入口完成。
 - 如果页面停在错误职位，例如产品经理职位，而目标岗位是工程岗位，应自行在站内切到目标岗位，再进入对应推荐候选人列表。
 - 不要把“当前职位不匹配”当成任务结束；只有找不到目标职位入口、登录/风控阻断、或用户账号权限不足时才停下来询问。
-- 触达前必须先看候选人详情或足够证据，不允许列表页无差别群发。
+- 触达前必须先点进候选人详情通读整份简历，不允许只凭列表卡片判断，更不允许列表页无差别群发。
+- 候选人之间用详情页的下一位入口（右箭头/下一个）连续翻，不要每看一个人就退回列表——退回会让 ref 全部失效且容易重复。
+- 长简历用 browser(action="snapshot", full=true) 取完整正文，避免被截断后凭半份简历下判断。
 
 任务完成后，请严格按以下格式输出总结：
 触达人数: <数字>
@@ -354,9 +369,19 @@ const BOSS_STAGE_PREREQUISITES: Record<string, string[]> = {
 };
 const PREPARE_SIDE_EFFECT_STAGES = new Set(['job-positioning', 'prefilter']);
 const BROWSER_SIDE_EFFECT_ACTIONS = new Set<BrowserAction['action']>(['click', 'type', 'press', 'goto', 'back']);
-const BOSS_CONTACT_LABEL = /打招呼|立即沟通|继续沟通|和\s*Ta\s*聊聊|聊一聊|发送|消息|聊天|沟通记录|新招呼|回复|送达|已读|未读|class="[^"]*(?:chat|message|editor|push-text|text-content|geek-item|gray)/i;
-const BOSS_COMMUNICATION_CONTROL_LABEL = /打招呼|立即沟通|继续沟通|和\s*Ta\s*聊聊|聊一聊|发送|消息|聊天|沟通记录|新招呼|回复|送达|已读|未读|class="[^"]*(?:chat|message|editor)/i;
-const BOSS_GREETING_LABEL = /打招呼|立即沟通|和\s*Ta\s*聊聊|聊一聊/i;
+const BOSS_CONTACT_LABEL = /打招呼|立即沟通|继续沟通|和\s*Ta\s*聊聊|聊一聊|帮我联系|代为联系|发送|消息|聊天|沟通记录|新招呼|回复|送达|已读|未读|class="[^"]*(?:chat|message|editor|push-text|text-content|geek-item|gray)/i;
+const BOSS_COMMUNICATION_CONTROL_LABEL = /打招呼|立即沟通|继续沟通|和\s*Ta\s*聊聊|聊一聊|帮我联系|代为联系|发送|消息|聊天|沟通记录|新招呼|回复|送达|已读|未读|class="[^"]*(?:chat|message|editor)/i;
+const BOSS_GREETING_LABEL = /打招呼|立即沟通|和\s*Ta\s*聊聊|聊一聊|帮我联系|代为联系/i;
+/**
+ * 详情弹层右侧那排按钮：收藏 / 不合适 / 举报 / 转发牛人。
+ *
+ * 它们都不是沟通控件，所以躲开了上面几条正则，但每一个都会在平台上留下真实痕迹。
+ * 「不合适」尤其危险——模型想表达"跳过"时很容易顺手点它，而那是把人真的标记掉，
+ * 不是本地记一笔。跳过应该只写进 record_screened_candidate。
+ */
+const BOSS_CANDIDATE_WRITE_LABEL = /不合适|不感兴趣|举报|投诉|转发牛人|转发|收藏|加入文件夹|标记/i;
+/** 任何模式都不该由 agent 自己点的：报到平台上、且基本不可撤销 */
+const BOSS_NEVER_CLICK_LABEL = /举报|投诉/i;
 const BOSS_ALREADY_CONTACTED_LABEL = /继续沟通|已沟通/i;
 const BOSS_PREPARE_JOB_CONTROL = /职位管理|推荐牛人|职位下拉|切换职位|招聘职位|我的职位|职位列表|选择职位|当前职位|目标职位|aria="[^"]*(?:职位|岗位)|title="[^"]*(?:职位|岗位)|role="combobox"|class="[^"]*dropmenu-label/i;
 const BOSS_PREPARE_FILTER_CONTROL = /筛选|工作经验|经验|学历|院校|学校|关键词|活跃|未看|近\s*14\s*天|1\s*[-~到]\s*3\s*年|3\s*[-~到]\s*5\s*年|本科|硕士|博士|985|211|大模型|Agent|应用|确定|确认|取消|清除|重置|展开|收起|更多选项/i;
@@ -409,7 +434,7 @@ function stageRecoveryLine(stageId: string): string {
     case 'dom-probe':
       return '先用 stage_id=dom-probe 做只读 snapshot/探测，以打招呼按钮为锚点确认候选人卡片结构和 parse_quality。';
     case 'candidate-screen':
-      return '先用 stage_id=candidate-screen 查看候选人卡片或详情，记录匹配证据、风险标签和跳过/建议触达判断。';
+      return '先用 stage_id=candidate-screen 点进候选人详情页，用右箭头/下一位入口连续翻；建议触达前需 snapshot(full=true) 通读整份简历，再记录匹配证据、风险标签和判断。';
     case 'single-contact':
       return '进入 single-contact 前必须已有 prepare_contact 检查点，点击后立刻 record_contacted。';
     default:
@@ -472,6 +497,25 @@ export const bossBrowserActionPolicy: BrowserActionPolicy = (
       reason: `未知 BOSS stage_id=${stageId}；只能使用 stage manifest 中声明的阶段。`,
       recovery: `改用已声明 stage_id：${BOSS_PROTOCOL_STAGES.map(stage => stage.id).join(', ')}。如果确实需要新阶段，先修改中层协议 manifest。`,
     };
+  }
+
+  // 候选人详情弹层右侧那排按钮会在平台上留下真实痕迹，而它们都不是"沟通控件"。
+  // 只有用户明确要求时才该点，agent 自己不要碰——跳过写进结构化记录即可。
+  if (action.action === 'click' && context.actionLabel) {
+    if (BOSS_NEVER_CLICK_LABEL.test(context.actionLabel)) {
+      return {
+        allowed: false,
+        reason: 'BOSS 协议禁止 agent 点击举报/投诉类控件：这是报到平台上的不可撤销动作。',
+        recovery: '不要点这个控件。要表达负面判断，用 record_screened_candidate 记 skip 并写清风险标签。',
+      };
+    }
+    if (context.executionMode !== 'execute' && BOSS_CANDIDATE_WRITE_LABEL.test(context.actionLabel)) {
+      return {
+        allowed: false,
+        reason: `${context.executionMode} 模式禁止点击「不合适 / 收藏 / 转发牛人」这类会在平台上标记候选人的按钮：它们不是本地记录，会真的写到 BOSS 上。`,
+        recovery: '跳过一个人只需要 record_screened_candidate 记 recommendation="skip" 和跳过原因；不要动详情弹层右侧那排按钮。翻下一位请用弹层左右两侧的箭头。',
+      };
+    }
   }
 
   const observed = new Set(context.observedStageIds ?? []);

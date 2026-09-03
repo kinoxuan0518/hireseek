@@ -7,9 +7,16 @@ export interface BrowserAction {
   url?: string;
   direction?: 'up' | 'down';
   amount?: number;
+  /** 通读整份简历时置 true：放宽正文截断上限，代价是这一份快照更贵。 */
+  full?: boolean;
   /** Optional protocol stage marker, e.g. boss stage manifest id. */
   stage_id?: string;
   stageId?: string;
+}
+
+export interface SnapshotOptions {
+  /** true = 取完整正文（深读简历用），false/缺省 = 常规摘要长度 */
+  full?: boolean;
 }
 
 export interface RiskGuard {
@@ -30,7 +37,7 @@ export interface DomBrowserSession {
   url(): Promise<string>;
   bodyText(): Promise<string>;
   liveState?(): Promise<BrowserLiveState>;
-  snapshot(): Promise<string>;
+  snapshot(opts?: SnapshotOptions): Promise<string>;
   act(input: BrowserAction, guard: RiskGuard): Promise<string>;
 }
 

@@ -17,11 +17,17 @@ import { cloneAssistantMessage, type CompatChatOptions } from '../llm/provider';
 import { emitLog, popIntervention } from '../events';
 import { parseSkillSummary, parseContactedCandidates } from './interface';
 import type { LLMRunner, RunSkillOptions } from './interface';
-import type { SkillResult } from '../types';
+import type { CoherenceVerdict, ReadingDepth, SkillResult } from '../types';
 import { repairToolMessageHistoryInPlace } from '../message-integrity';
-import type { BrowserAction, BrowserLiveState, BrowserTarget, RiskGuard } from '../browser-session';
+import type { BrowserAction, BrowserLiveState, BrowserTarget, RiskGuard, SnapshotOptions } from '../browser-session';
 import { isDomBrowserSession } from '../browser-session';
 import { recordRejectedToolCall, recordToolCall } from '../agent-core/trace';
+import {
+  DEFAULT_DEEP_READ_MODE,
+  deepReadRequiredFor,
+  describeDeepReadMode,
+  type DeepReadMode,
+} from '../deep-read';
 import { offloadToolOutput } from '../agent-core/tool-output-store';
 import { upsertAgentRunState, type AgentRunStatus } from '../agent-core/run-state-store';
 import {
@@ -39,6 +45,13 @@ export type { BrowserAction, RiskGuard } from '../browser-session';
 
 const MAX_TURNS = 150;
 const MAX_BODY_TEXT = 6000;
+/**
+ * 深读一份简历时的正文上限。
+ *
+ * 常规快照按 6000 字截断是为了省 token——但那个数字正好卡在"读不完一份完整简历"上。
+ * 模型显式要 full=true 时才放宽，所以列表页仍然便宜。
+ */
+const DEEP_READ_BODY_TEXT = 24000;
 const MAX_ELEMENTS = 120;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 type SkillExecutionMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
@@ -46,8 +59,13 @@ type SkillExecutionMode = 'execute' | 'dry_run' | 'prepare' | 'screen';
 // ── 风控规则（代码层硬约束，不依赖模型遵守 prompt）──────────────────────
 /** 招聘触达类按钮的最小点击间隔（毫秒） */
 export const GREETING_MIN_INTERVAL_MS = 5000;
-/** 招聘触达类按钮文案特征。平台细节仍由中层协议进一步约束。 */
-export const GREETING_PATTERN = /打招呼|立即沟通|继续沟通|和Ta聊聊|聊一聊|发送(?:消息|后留在此页|后继续沟通)?/;
+/**
+ * 招聘触达类按钮文案特征。平台细节仍由中层协议进一步约束。
+ *
+ * 「帮我联系」是 BOSS 详情弹层里和「打招呼」并排的另一个真实触达入口——
+ * 漏掉它等于让触达绕过节流和每日上限统计。
+ */
+export const GREETING_PATTERN = /打招呼|立即沟通|继续沟通|和Ta聊聊|聊一聊|帮我联系|代为联系|发送(?:消息|后留在此页|后继续沟通)?/;
 /** 每日上限弹窗特征 → 立即硬终止 */
 export const DAILY_LIMIT_PATTERN = /今日主动沟通数已达上限|需付费购买|今日沟通已达上限|超出今日限制/;
 /** 频率告警特征 → 软退避 10-30 秒 */
@@ -99,6 +117,12 @@ const BROWSER_TOOL: OpenAI.ChatCompletionTool = {
         amount: {
           type: 'number',
           description: 'scroll 时的像素距离（默认 600），或 wait 时的毫秒数（默认 1500）',
+        },
+        full: {
+          type: 'boolean',
+          description:
+            '通读整份简历时置 true：正文按更高上限返回，长简历不会被截断。' +
+            '只在候选人详情页用；列表页用 full 会白白浪费上下文。',
         },
         stage_id: {
           type: 'string',
@@ -182,10 +206,60 @@ const RECORD_SCREENED_CANDIDATE_TOOL: OpenAI.ChatCompletionTool = {
         fit_tags: { type: 'array', items: { type: 'string' } },
         fit_score: { type: 'number', description: '匹配分 0-100' },
         profile_url: { type: 'string' },
+        reading_depth: {
+          type: 'string',
+          enum: ['card', 'detail'],
+          description:
+            '这次判断读到了多深：card=只看了列表卡片摘要；detail=点进简历详情通读过。' +
+            '没真的点进去看就必须填 card，不要为了显得认真而填 detail。',
+        },
+        resume_digest: {
+          type: 'string',
+          description:
+            'reading_depth=detail 时填：整份简历的事实摘要——经历主线、每段真正做的事、时间线。' +
+            '只写简历里读到的，不要补充推测。',
+        },
+        coherence_verdict: {
+          type: 'string',
+          enum: ['aligned', 'mixed', 'misaligned'],
+          description:
+            '整份简历的合拍性（不是逐条打勾）：aligned=选择逻辑自洽且和岗位是同一种人；' +
+            'mixed=部分对得上但有说不通的地方；misaligned=整体不合拍。',
+        },
+        coherence_note: {
+          type: 'string',
+          description: '合拍或不合拍的理由，必须落到简历里的具体段落或某次选择，不要写空泛评价。',
+        },
       },
     },
   },
 };
+
+const COHERENCE_VERDICTS: CoherenceVerdict[] = ['aligned', 'mixed', 'misaligned'];
+
+/**
+ * 深读只认「真的带回了简历事实」的那种。
+ *
+ * 光声明 reading_depth=detail 但拿不出 resume_digest，一律降级按 card 记——
+ * 否则这个字段会在学习闭环里变成噪音：分不清哪条判断真的读过整份简历。
+ */
+export function parseScreenReadingDepth(parsed: Record<string, unknown>): {
+  readingDepth: ReadingDepth;
+  resumeDigest?: string;
+  coherenceVerdict?: CoherenceVerdict;
+  coherenceNote?: string;
+} {
+  const digest = String(parsed.resume_digest ?? '').trim();
+  const declared = String(parsed.reading_depth ?? '').trim().toLowerCase();
+  const verdictRaw = String(parsed.coherence_verdict ?? '').trim().toLowerCase();
+  const note = String(parsed.coherence_note ?? '').trim();
+  return {
+    readingDepth: declared === 'detail' && digest.length > 0 ? 'detail' : 'card',
+    resumeDigest: digest || undefined,
+    coherenceVerdict: COHERENCE_VERDICTS.find(v => v === verdictRaw),
+    coherenceNote: note || undefined,
+  };
+}
 
 const PREPARE_CONTACT_TOOL: OpenAI.ChatCompletionTool = {
   type: 'function',
@@ -296,13 +370,60 @@ const SCREEN_GUIDE = `
 - 禁止 type / press / goto，避免写入聊天框、发送消息或跳过站内流程。
 - 禁止点击打招呼/立即沟通/发送消息等沟通控件；代码层会拒绝。
 - 禁止调用 prepare_contact 建立真实触达检查点。
-- 从候选人详情回列表只能在 candidate-screen 阶段用 browser back，或使用页面内可见返回/列表入口；不要用 press Escape。
+- 候选人之间优先用详情页的下一位入口（右箭头/下一个）连续翻，不要每看一个人就退回列表。
+- 确实需要回列表时（翻到底、换页签、换职位），只能在 candidate-screen 阶段用 browser back 或页面内可见返回入口；不要用 press Escape。
 - 职位定位/筛选阶段禁止用 back，避免回到旧职位或旧筛选状态。
 - 返回列表或切换候选人列表页签前必须重新 snapshot，并确认目标 ref 的 scope/rect/context 是列表导航或页签，不是候选人卡片。
 - 每查看并判断一个候选人后必须调用 record_screened_candidate，记录 contact/maybe/skip、证据和风险。
+- record_screened_candidate 必须如实填 reading_depth：只看了列表卡片填 card，点进简历详情通读过才填 detail。
+- 填 detail 时必须同时给出 resume_digest（整份简历的事实摘要），只声明读过但拿不出摘要会被降级按 card 记。
+- 读过整份简历时再给 coherence_verdict / coherence_note：判断这个人的选择逻辑自不自洽、和岗位是不是同一种人，理由要落到具体段落。
 - 不要用 record_contacted 做 screen 记录；record_contacted 只属于正式触达。
 - 结束时输出：查看了哪些候选人、谁值得正式触达、谁应跳过、证据和风险点。
 `.trim();
+
+const DEEP_READ_GUIDE = `
+## 简历阅读（代码硬约束）
+
+判断一个人合不合适，看列表卡片上那几行摘要是不够的——卡片只能告诉你"明显不合适"，
+告诉不了你"值得推进"。所以判断发生在详情里，不在列表页。
+
+**候选人详情通常是浮在列表之上的弹层，不是新页面。** 这意味着：
+- 翻到下一位用**弹层左右两侧边缘的箭头**（‹ 上一位 / › 下一位），它们在弹层外侧、不在弹层内部。
+- 不要用 back 关弹层或翻页——back 会退出整个列表页，让所有 ref 失效、丢失位置、重复看同一个人。
+  只有翻到底、要换页签或换职位时，才用弹层的 × 关闭回到列表。
+- 快照正文里会同时出现弹层和它背后的列表内容，读的时候认准当前候选人姓名对应的那段。
+
+每个候选人分两步读，别一上来就拉完整简历：
+
+1. **先常规 snapshot**。弹层里这些位置已经足够淘汰明显不合适的人：
+   - 头部：姓名、年龄、工作年限、学历、在职状态与到岗时间
+   - 期望职位：城市、职位、行业、薪资区间
+   - 右侧「经历概览」：每段公司 + 职位 + 起止时间 + 时长，一眼看完职业轨迹和跳槽节奏
+   到这里就能判 skip 的，记完直接翻下一位，不要再拉完整简历。
+2. **值得继续看的人再 browser(action="snapshot", full=true)**：取完整正文，读工作经历里
+   每段的业绩和内容明细（这部分很长、通常要滚动才展示完）。这一步贵，只花在有希望的人身上。
+
+读完必须先调 record_screened_candidate 落下 resume_digest 再翻页：
+快照会随对话滚动被丢弃，只有结构化记录留得住。
+
+除了逐条对硬性要求，还要看**整份简历作为一个整体**说明了什么：
+经历概览里每次跳槽是在往更靠近岗位核心的方向走，还是横向漂移；每段待了多久；
+头部自述和下面工作经历的明细对不对得上；这个人和这个岗位是不是同一种人。
+把结论写进 coherence_verdict / coherence_note。
+
+**跳过一个人只写进 record_screened_candidate，不要去点弹层右侧的「不合适」「收藏」「转发牛人」**——
+那几个按钮会真的写到平台上，不是本地记录，代码层会拒绝。「举报」任何时候都不要点。
+另外「帮我联系」和「打招呼」一样是真实触达入口，screen 模式下同样禁止。
+
+别把"读得深"当成"该推进"。通读之后判断 skip 同样有价值，而且比卡片上拍脑袋的 skip 可信得多。
+`.trim();
+
+export function screenGuideFor(mode: DeepReadMode): string {
+  return [SCREEN_GUIDE, `- 本轮深读要求：${describeDeepReadMode(mode)}`, mode === 'off' ? '' : DEEP_READ_GUIDE]
+    .filter(Boolean)
+    .join('\n');
+}
 
 const DRY_RUN_ALLOWED_BROWSER_ACTIONS = new Set<BrowserAction['action']>(['snapshot', 'wait', 'scroll']);
 const SCREEN_BLOCKED_BROWSER_ACTIONS = new Set<BrowserAction['action']>(['type', 'press', 'goto']);
@@ -429,7 +550,7 @@ export function successfulStageIds(trace: SkillResult['trace'] = []): string[] {
  * 提取页面文本快照：标记可交互元素 + 收集正文。
  * 在浏览器上下文中执行，给元素写入 data-hs-ref 属性供后续定位。
  */
-export async function takeDomSnapshot(page: Page): Promise<string> {
+export async function takeDomSnapshot(page: Page, opts: SnapshotOptions = {}): Promise<string> {
   // tsx/esbuild 的 keepNames 会向 evaluate 回调注入 __name 辅助调用，浏览器端需兜底定义
   await page.evaluate('window.__name = window.__name || ((fn) => fn)');
   const data = await page.evaluate(
@@ -532,7 +653,7 @@ export async function takeDomSnapshot(page: Page): Promise<string> {
         scrollMax: Math.round(Math.max(0, document.documentElement.scrollHeight - window.innerHeight)),
       };
     },
-    { maxElements: MAX_ELEMENTS, maxBodyText: MAX_BODY_TEXT },
+    { maxElements: MAX_ELEMENTS, maxBodyText: opts.full ? DEEP_READ_BODY_TEXT : MAX_BODY_TEXT },
   );
 
   return [
@@ -666,11 +787,12 @@ export class DomRunner implements LLMRunner {
     options: RunSkillOptions = {},
   ): Promise<SkillResult> {
     const executionMode = options.executionMode ?? 'execute';
+    const deepReadMode = options.deepReadMode ?? DEFAULT_DEEP_READ_MODE;
     const system = [
       DOM_GUIDE,
       executionMode === 'dry_run' ? DRY_RUN_GUIDE : '',
       executionMode === 'prepare' ? PREPARE_GUIDE : '',
-      executionMode === 'screen' ? SCREEN_GUIDE : '',
+      executionMode === 'screen' ? screenGuideFor(deepReadMode) : '',
       systemPrompt,
     ]
       .filter(Boolean)
@@ -1035,6 +1157,18 @@ export class DomRunner implements LLMRunner {
             error = 'record_screened_candidate 的 recommendation 只能是 contact / maybe / skip。';
           }
 
+          const reading = parseScreenReadingDepth(parsed);
+          if (
+            ok
+            && deepReadRequiredFor(deepReadMode, recommendation as 'contact' | 'maybe' | 'skip')
+            && reading.readingDepth !== 'detail'
+          ) {
+            ok = false;
+            error = String(parsed.reading_depth ?? '').trim().toLowerCase() === 'detail'
+              ? `${String(parsed.name ?? '该候选人')}：声明读了简历详情却没给 resume_digest。请补上整份简历的事实摘要后重新记录。`
+              : `${String(parsed.name ?? '该候选人')}：本轮要求先通读简历再给出 ${recommendation}。请点进候选人详情页、用 browser(action="snapshot", full=true) 读完整份简历，再带上 reading_depth="detail" 与 resume_digest 重新调用。卡片信息不足以下这个判断。`;
+          }
+
           if (ok) {
             const riskFlags = Array.isArray(parsed.risk_flags) ? parsed.risk_flags.map(String).filter(Boolean) : undefined;
             const fitTags = Array.isArray(parsed.fit_tags) ? parsed.fit_tags.map(String).filter(Boolean) : undefined;
@@ -1050,6 +1184,7 @@ export class DomRunner implements LLMRunner {
               score: Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : undefined,
               recommendation: recommendation as 'contact' | 'maybe' | 'skip',
               profileUrl: parsed.profile_url ? String(parsed.profile_url) : undefined,
+              ...reading,
             });
           }
 
@@ -1567,7 +1702,7 @@ export class DomRunner implements LLMRunner {
             snapshot = await page.act(input, guard);
           } else {
             await executeDomAction(page, input, guard);
-            snapshot = await takeDomSnapshot(page);
+            snapshot = await takeDomSnapshot(page, { full: input.full });
           }
         } catch (err: unknown) {
           stepOk = false;

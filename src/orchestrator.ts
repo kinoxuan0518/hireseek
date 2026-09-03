@@ -3,6 +3,7 @@ import type { Page } from 'playwright';
 import { getPage, createNewPage, createPageForAccount, saveAccountState } from './browser-runner';
 import { config } from './config';
 import { usesOwnBrowser } from './product';
+import { resolveDeepReadMode } from './deep-read';
 import type { BrowserTarget } from './browser-session';
 import { isDomBrowserSession } from './browser-session';
 import { connectRealChrome } from './real-chrome-session';
@@ -189,15 +190,20 @@ export function persistRunResult(
     try {
       const screenStmt = db.prepare(`
         INSERT INTO screen_candidates
-          (run_id, candidate_fingerprint, job_id, channel, recommendation, score, evidence, risk_flags, fit_tags, profile_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (run_id, candidate_fingerprint, job_id, channel, recommendation, score, evidence, risk_flags, fit_tags,
+           profile_url, reading_depth, resume_digest, coherence_verdict, coherence_note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(run_id, candidate_fingerprint) DO UPDATE SET
           recommendation = excluded.recommendation,
           score = excluded.score,
           evidence = excluded.evidence,
           risk_flags = excluded.risk_flags,
           fit_tags = excluded.fit_tags,
-          profile_url = excluded.profile_url
+          profile_url = excluded.profile_url,
+          reading_depth = excluded.reading_depth,
+          resume_digest = excluded.resume_digest,
+          coherence_verdict = excluded.coherence_verdict,
+          coherence_note = excluded.coherence_note
       `);
       for (const c of result.screenedList) {
         if (!c.name) continue;
@@ -213,6 +219,10 @@ export function persistRunResult(
           c.riskFlags?.length ? JSON.stringify(c.riskFlags) : null,
           c.fitTags?.length ? JSON.stringify(c.fitTags) : null,
           c.profileUrl ?? null,
+          c.readingDepth ?? 'card',
+          c.resumeDigest ?? null,
+          c.coherenceVerdict ?? null,
+          c.coherenceNote ?? null,
         );
       }
     } catch (err) {
@@ -414,6 +424,7 @@ export function runSkillOptionsForChannel(
   screen = false,
   activeJobTitle?: string,
   allowedContactNamesBeforeContact?: string[],
+  job?: JobConfig | null,
 ): RunSkillOptions {
   const protocol = getPlatformProtocol(channel);
   const base: RunSkillOptions = {
@@ -423,6 +434,7 @@ export function runSkillOptionsForChannel(
     requiredStagesBeforeContact: protocol?.requiredStagesBeforeContact ?? [],
     targetJobTitle: activeJobTitle,
     allowedContactNamesBeforeContact,
+    deepReadMode: resolveDeepReadMode(job),
     completionPolicy: protocol?.completionPolicy,
   };
   if (protocol?.browserActionPolicy) {
@@ -640,7 +652,7 @@ export async function runChannel(
       systemPrompt,
       taskPrompt,
       opts.progress ?? ((msg) => process.stdout.write(`\r  ${msg}`.padEnd(80))),
-      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun, prepare, screen, activeJob?.title, allowedContactNames),
+      runSkillOptionsForChannel(channel, runId, !!opts.fromCurrent, dryRun, prepare, screen, activeJob?.title, allowedContactNames, activeJob),
     );
     const result = normalizeResultForRunMode(rawResult, runMode);
 
@@ -1016,7 +1028,7 @@ async function runChannelWithPage(channel: Channel, jobId: string, page: any, ac
             console.log(`[${label}] ${msg}`);
             emitLog(`[${label}] ${msg}`);
           },
-          runSkillOptionsForChannel(channel, runId, false),
+          runSkillOptionsForChannel(channel, runId, false, false, false, false, job?.title, undefined, job),
         );
       },
       {

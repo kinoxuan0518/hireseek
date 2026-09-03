@@ -87,6 +87,10 @@ db.exec(`
     risk_flags            TEXT,
     fit_tags              TEXT,
     profile_url           TEXT,
+    reading_depth         TEXT,
+    resume_digest         TEXT,
+    coherence_verdict     TEXT,
+    coherence_note        TEXT,
     created_at            TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     UNIQUE(run_id, candidate_fingerprint)
   );
@@ -192,6 +196,19 @@ try {
   addColumn('risk_flags', `ALTER TABLE run_candidates ADD COLUMN risk_flags TEXT`);
   addColumn('fit_tags', `ALTER TABLE run_candidates ADD COLUMN fit_tags TEXT`);
 } catch { /* 迁移失败不阻断启动 */ }
+
+// ── 迁移：screen 记录要装得下深读产出（整份简历事实 + 合拍性判断）──────────
+try {
+  const cols = db.prepare(`PRAGMA table_info(screen_candidates)`).all() as Array<{ name: string }>;
+  const addColumn = (name: string, ddl: string) => {
+    if (!cols.some(c => c.name === name)) db.exec(ddl);
+  };
+  addColumn('reading_depth', `ALTER TABLE screen_candidates ADD COLUMN reading_depth TEXT`);
+  addColumn('resume_digest', `ALTER TABLE screen_candidates ADD COLUMN resume_digest TEXT`);
+  addColumn('coherence_verdict', `ALTER TABLE screen_candidates ADD COLUMN coherence_verdict TEXT`);
+  addColumn('coherence_note', `ALTER TABLE screen_candidates ADD COLUMN coherence_note TEXT`);
+} catch { /* 迁移失败不阻断启动 */ }
+db.exec(`CREATE INDEX IF NOT EXISTS idx_screen_candidates_fp ON screen_candidates(candidate_fingerprint, job_id)`);
 
 try {
   const cols = db.prepare(`PRAGMA table_info(run_actions)`).all() as Array<{ name: string }>;
